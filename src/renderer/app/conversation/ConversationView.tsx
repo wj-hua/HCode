@@ -2,6 +2,7 @@ import { ArrowDownIcon, LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
 import { Composer } from "../composer/Composer";
+import { AGENTS } from "@hcode/shared/agents";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { Timeline } from "./Timeline";
 
@@ -59,7 +60,7 @@ export function ConversationView({ conversation }: { conversation: Conversation 
             </div>
           ) : conversation.rows.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-24 text-center">
-              <div className="text-ui-lg font-medium text-foreground">和 Claude Code 开始对话</div>
+              <div className="text-ui-lg font-medium text-foreground">和 {AGENTS[conversation.agent].name} 开始对话</div>
               <div className="text-ui-base text-foreground-subtle">工作目录：{conversation.projectPath}</div>
             </div>
           ) : (

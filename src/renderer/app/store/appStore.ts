@@ -1,7 +1,9 @@
 // HCode 渲染进程主状态：项目、会话列表、打开的对话、审批请求。
 import { create } from "zustand";
 import type {
+  AgentKind,
   AgentStatus,
+  ModelOption,
   ChatRunState,
   ConversationRow,
   PermissionDecision,
@@ -12,6 +14,7 @@ import type {
   Settings,
 } from "@hcode/shared/types";
 import { DEFAULT_SETTINGS } from "@hcode/shared/types";
+import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
 import { applyRowOps } from "../rows";
@@ -19,6 +22,7 @@ import { useUiStore } from "./uiStore";
 
 export interface Conversation {
   viewId: string;
+  agent: AgentKind;
   projectPath: string;
   /** Claude 会话 id：历史会话一开始就有，新会话在首轮 init 后获得。 */
   sessionId?: string;
@@ -40,7 +44,8 @@ export interface Conversation {
 interface AppState {
   ready: boolean;
   settings: Settings;
-  agentStatus: AgentStatus | null;
+  agentStatuses: AgentStatus[] | null;
+  models: Partial<Record<AgentKind, ModelOption[]>>;
   projects: Project[];
   sessions: Record<string, SessionSummary[]>;
   expanded: Record<string, boolean>;
@@ -58,7 +63,10 @@ interface AppState {
   toggleProject(projectPath: string, expanded?: boolean): void;
   setSearch(search: string): void;
   openSession(summary: SessionSummary): Promise<void>;
-  newChat(projectPath: string): void;
+  newChat(projectPath: string, agent?: AgentKind): void;
+  /** 草稿会话（还没发送过）切换使用的 CLI。 */
+  setDraftAgent(agent: AgentKind): void;
+  loadModels(agent: AgentKind): Promise<void>;
   send(text: string): Promise<void>;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
@@ -139,7 +147,8 @@ export const useAppStore = create<AppState>((set, get) => {
   return {
     ready: false,
     settings: DEFAULT_SETTINGS,
-    agentStatus: null,
+    agentStatuses: null,
+    models: {},
     projects: [],
     sessions: {},
     expanded: {},
@@ -161,7 +170,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const first = get().projects[0];
       if (first) get().toggleProject(first.path, true);
       set({ ready: true });
-      set({ agentStatus: await hcode.invoke("agent:status") });
+      set({ agentStatuses: await hcode.invoke("agent:status") });
     },
 
     async refreshProjects() {
@@ -199,35 +208,42 @@ export const useAppStore = create<AppState>((set, get) => {
       const viewId = summary.id;
       const conv: Conversation = {
         viewId,
+        agent: summary.agent,
         projectPath: summary.projectPath,
         sessionId: summary.id,
         title: summary.title,
         rows: [],
         loading: true,
         runState: "idle",
-        permissionMode: settings.defaultPermissionMode,
-        model: settings.defaultModel,
+        permissionMode: settings.defaultPermissionModes[summary.agent],
+        model: settings.defaultModels[summary.agent],
       };
       set((state) => ({
         conversations: { ...state.conversations, [viewId]: conv },
         activeViewId: viewId,
       }));
       try {
-        const result = await hcode.invoke("sessions:load", summary.id, summary.projectPath);
+        const result = await hcode.invoke("sessions:load", {
+          agent: summary.agent,
+          id: summary.id,
+          projectPath: summary.projectPath,
+        });
         patchConversation(viewId, { rows: result.rows, loading: false });
       } catch (error) {
         patchConversation(viewId, { loading: false, loadError: errorMessage(error) });
       }
     },
 
-    newChat(projectPath) {
+    newChat(projectPath, agentOverride) {
       const { settings, conversations } = get();
+      const agent = agentOverride ?? settings.defaultAgent;
       // 同一项目已有空白草稿时直接复用
       const draft = Object.values(conversations).find(
         (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId,
       );
       if (draft) {
         set({ activeViewId: draft.viewId });
+        if (agentOverride && draft.agent !== agentOverride) get().setDraftAgent(agentOverride);
         return;
       }
       const viewId = `draft-${Date.now()}-${++draftSeq}`;
@@ -236,16 +252,41 @@ export const useAppStore = create<AppState>((set, get) => {
           ...state.conversations,
           [viewId]: {
             viewId,
+            agent,
             projectPath,
             rows: [],
             loading: false,
             runState: "idle",
-            permissionMode: settings.defaultPermissionMode,
-            model: settings.defaultModel,
+            permissionMode: settings.defaultPermissionModes[agent],
+            model: settings.defaultModels[agent],
           },
         },
         activeViewId: viewId,
       }));
+    },
+
+    setDraftAgent(agent) {
+      const conv = activeConversation();
+      if (!conv || conv.sessionKey || conv.sessionId || conv.agent === agent) return;
+      const { settings } = get();
+      patchConversation(conv.viewId, {
+        agent,
+        permissionMode: settings.defaultPermissionModes[agent],
+        model: settings.defaultModels[agent],
+        activeModel: undefined,
+      });
+      void get().loadModels(agent);
+    },
+
+    async loadModels(agent) {
+      if (get().models[agent]) return;
+      set((state) => ({ models: { ...state.models, [agent]: AGENTS[agent].models } }));
+      try {
+        const list = await hcode.invoke("agent:models", agent);
+        set((state) => ({ models: { ...state.models, [agent]: list } }));
+      } catch {
+        // 保留内置选项
+      }
     },
 
     async send(text) {
@@ -256,6 +297,7 @@ export const useAppStore = create<AppState>((set, get) => {
       patchConversation(conv.viewId, { sessionKey, runState: "running", error: undefined });
       try {
         await hcode.invoke("chat:send", {
+          agent: conv.agent,
           sessionKey,
           ...(resumeSessionId ? { resumeSessionId } : {}),
           projectPath: conv.projectPath,
@@ -319,7 +361,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async renameSession(summary, title) {
-      await hcode.invoke("sessions:rename", summary.id, summary.projectPath, title);
+      await hcode.invoke("sessions:rename", { agent: summary.agent, id: summary.id, projectPath: summary.projectPath }, title);
       const conv = Object.values(get().conversations).find((c) => c.sessionId === summary.id);
       if (conv) patchConversation(conv.viewId, { title });
       await get().loadSessions(summary.projectPath);
@@ -329,7 +371,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = await hcode.invoke("settings:set", patch);
       set({ settings });
       if (patch.theme) useUiStore.getState().setTheme(patch.theme);
-      if (patch.claudePath !== undefined) set({ agentStatus: await hcode.invoke("agent:status") });
+      if (patch.agentPaths !== undefined) set({ agentStatuses: await hcode.invoke("agent:status") });
     },
 
     setSidebarCollapsed(collapsed) {

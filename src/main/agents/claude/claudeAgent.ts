@@ -1,34 +1,30 @@
 // Claude Code 接入：历史 + 实时会话 + 审批的统一入口。
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { AGENTS } from "../../../shared/agents.js";
 import type {
   AgentStatus,
   ChatSendParams,
-  ChatStateEvent,
+  ModelOption,
   PermissionDecision,
   PermissionMode,
-  PermissionRequestEvent,
-  PermissionResolvedEvent,
-  RowOp,
+  SessionLoadResult,
+  SessionSummary,
 } from "../../../shared/types.js";
+import { probeCli } from "../../util/locateCli.js";
+import type { AgentEvents, AgentProvider } from "../types.js";
 import { ClaudeHistory } from "./claudeHistory.js";
-import { probeClaude } from "./claudeLocate.js";
 import { ClaudeSession } from "./claudeSession.js";
 
-export interface ClaudeAgentEvents {
-  rows(sessionKey: string, ops: RowOp[]): void;
-  state(event: ChatStateEvent): void;
-  permission(event: PermissionRequestEvent): void;
-  permissionResolved(event: PermissionResolvedEvent): void;
-  indexChanged(projectPaths: string[]): void;
-}
-
-export class ClaudeAgent {
-  readonly history: ClaudeHistory;
+export class ClaudeAgent implements AgentProvider {
+  readonly kind = "claude" as const;
+  private readonly history: ClaudeHistory;
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly interactionOwner = new Map<string, string>();
   private status: AgentStatus | null = null;
 
   constructor(
-    private readonly events: ClaudeAgentEvents,
+    private readonly events: AgentEvents,
     private readonly getEnv: () => Record<string, string>,
     private readonly getPathOverride: () => string,
   ) {
@@ -37,9 +33,36 @@ export class ClaudeAgent {
 
   async getStatus(refresh = false): Promise<AgentStatus> {
     if (!this.status || refresh) {
-      this.status = await probeClaude(this.getEnv(), this.getPathOverride());
+      this.status = await probeCli("claude", "claude", this.getEnv(), this.getPathOverride(), [
+        join(homedir(), ".claude/local/claude"),
+      ]);
     }
     return this.status;
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    return AGENTS.claude.models;
+  }
+
+  listSessions(): Promise<SessionSummary[]> {
+    return this.history.all();
+  }
+
+  loadSession(id: string, projectPath: string): Promise<SessionLoadResult> {
+    return this.history.load(id, projectPath);
+  }
+
+  renameSession(id: string, projectPath: string, title: string): Promise<void> {
+    return this.history.rename(id, projectPath, title);
+  }
+
+  async resumeCommand(sessionId: string): Promise<string[]> {
+    const status = await this.getStatus();
+    return [status.path ?? "claude", "--resume", sessionId];
+  }
+
+  hasSession(sessionKey: string): boolean {
+    return this.sessions.has(sessionKey);
   }
 
   async send(params: ChatSendParams): Promise<{ sessionKey: string }> {
@@ -81,10 +104,8 @@ export class ClaudeAgent {
         session.seedHistory(records);
       }
       session.emitState();
-    } else {
-      if (session.permissionMode !== params.permissionMode) {
-        await session.setPermissionMode(params.permissionMode);
-      }
+    } else if (session.permissionMode !== params.permissionMode) {
+      await session.setPermissionMode(params.permissionMode);
     }
     session.send(params.text);
     return { sessionKey: session.key };
@@ -96,8 +117,8 @@ export class ClaudeAgent {
     return session;
   }
 
-  interrupt(sessionKey: string) {
-    return this.sessions.get(sessionKey)?.interrupt();
+  async interrupt(sessionKey: string) {
+    await this.sessions.get(sessionKey)?.interrupt();
   }
 
   setPermissionMode(sessionKey: string, mode: PermissionMode) {
@@ -115,10 +136,15 @@ export class ClaudeAgent {
     this.sessions.delete(sessionKey);
   }
 
-  respondPermission(interactionId: string, decision: PermissionDecision) {
+  respondPermission(interactionId: string, decision: PermissionDecision): boolean {
     const owner = this.interactionOwner.get(interactionId);
-    if (!owner) return;
+    if (!owner) return false;
     this.sessions.get(owner)?.respondPermission(interactionId, decision);
+    return true;
+  }
+
+  startWatching() {
+    this.history.startWatching();
   }
 
   dispose() {

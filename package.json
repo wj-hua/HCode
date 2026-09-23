@@ -1,9 +1,9 @@
 {
   "name": "hcode",
   "productName": "HCode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Desktop workbench for coding-agent CLIs (Claude Code first), UI based on ZCode.",
+  "description": "Desktop workbench for coding-agent CLIs (Claude Code, Codex), UI based on ZCode.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "out/main/index.js",

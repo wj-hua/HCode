@@ -72,12 +72,14 @@ export class ClaudeHistory {
   private loading: Promise<SessionSummary[]> | null = null;
   private watcher: FSWatcher | null = null;
   private debounce: ReturnType<typeof setTimeout> | null = null;
+  private generation = 0;
 
   constructor(private readonly onChanged: (projectPaths: string[]) => void) {}
 
   async all(): Promise<SessionSummary[]> {
     if (this.cache) return this.cache;
     if (!this.loading) {
+      const generation = this.generation;
       this.loading = Promise.all([listSessions(), readTerminalSessionIds()])
         .then(([list, terminalIds]) =>
           list
@@ -86,8 +88,9 @@ export class ClaudeHistory {
             .map((item) => (terminalIds.has(item.id) ? { ...item, activeInTerminal: true } : item)),
         )
         .then((list) => {
-          this.cache = list.sort((a, b) => b.updatedAt - a.updatedAt);
-          return this.cache;
+          const sorted = list.sort((a, b) => b.updatedAt - a.updatedAt);
+          if (generation === this.generation) this.cache = sorted;
+          return sorted;
         })
         .finally(() => {
           this.loading = null;
@@ -126,7 +129,9 @@ export class ClaudeHistory {
   }
 
   invalidate(projectPaths: string[] = []) {
+    this.generation++;
     this.cache = null;
+    this.loading = null;
     this.onChanged(projectPaths);
   }
 

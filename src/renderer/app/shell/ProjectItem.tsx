@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/dropdown-menu.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
+import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
+import { AgentBadge } from "../AgentBadge";
 import { hcode } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
@@ -74,7 +76,12 @@ export function ProjectItem({ project, query }: { project: Project; query: strin
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-44">
-              <DropdownMenuItem onSelect={() => newChat(project.path)}>新建会话</DropdownMenuItem>
+              {AGENT_KINDS.map((kind) => (
+                <DropdownMenuItem key={kind} onSelect={() => newChat(project.path, kind)} className="gap-2">
+                  <AgentBadge agent={kind} />
+                  新建 {AGENTS[kind].name} 会话
+                </DropdownMenuItem>
+              ))}
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => void hcode.invoke("app:showInFinder", project.path)}>
                 在 Finder 中显示

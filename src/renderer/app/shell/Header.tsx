@@ -3,6 +3,8 @@ import { FolderIcon, GitBranchIcon, PanelLeftIcon, SquareTerminalIcon } from "lu
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
+import { AGENTS } from "@hcode/shared/agents";
+import { AgentBadge } from "../AgentBadge";
 import { hcode } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore, type Conversation } from "../store/appStore";
@@ -40,6 +42,10 @@ export function Header({ conversation }: { conversation: Conversation | undefine
       ) : null}
       {conversation ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-ui-base">
+          <span className="flex shrink-0 items-center gap-1.5 rounded-md bg-surface px-1.5 py-0.5 text-ui-sm text-foreground-subtle">
+            <AgentBadge agent={conversation.agent} />
+            {AGENTS[conversation.agent].name}
+          </span>
           <span className="shrink-0 text-foreground-subtle" title={shortenHome(conversation.projectPath)}>
             {projectName}
           </span>
@@ -76,7 +82,11 @@ export function Header({ conversation }: { conversation: Conversation | undefine
               size="icon-md"
               className="text-foreground-subtle"
               onClick={() =>
-                void hcode.invoke("app:openInTerminal", conversation.projectPath, conversation.sessionId)
+                void hcode.invoke(
+                  "app:openInTerminal",
+                  conversation.projectPath,
+                  conversation.sessionId ? { agent: conversation.agent, id: conversation.sessionId } : undefined,
+                )
               }
             >
               <SquareTerminalIcon />

@@ -1,6 +1,8 @@
 // IPC 契约：preload 暴露的 window.hcode 与主进程 handler 共用同一份定义。
 import type {
+  AgentKind,
   AgentStatus,
+  ModelOption,
   ChatRowsEvent,
   ChatSendParams,
   ChatStateEvent,
@@ -10,20 +12,22 @@ import type {
   PermissionResolvedEvent,
   Project,
   SessionLoadResult,
+  SessionRef,
   SessionSummary,
   Settings,
 } from "./types.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
-  "agent:status": [[], AgentStatus];
+  "agent:status": [[], AgentStatus[]];
+  "agent:models": [[agent: AgentKind], ModelOption[]];
   "projects:list": [[], Project[]];
   "projects:add": [[], Project | null];
   "projects:setPinned": [[path: string, pinned: boolean], void];
   "projects:remove": [[path: string], void];
   "sessions:list": [[projectPath: string], SessionSummary[]];
-  "sessions:load": [[sessionId: string, projectPath: string], SessionLoadResult];
-  "sessions:rename": [[sessionId: string, projectPath: string, title: string], void];
+  "sessions:load": [[ref: SessionRef], SessionLoadResult];
+  "sessions:rename": [[ref: SessionRef, title: string], void];
   "chat:send": [[params: ChatSendParams], { sessionKey: string }];
   "chat:interrupt": [[sessionKey: string], void];
   "chat:setPermissionMode": [[sessionKey: string, mode: PermissionMode], void];
@@ -35,7 +39,7 @@ export interface InvokeMap {
   "app:openPath": [[path: string], void];
   "app:showInFinder": [[path: string], void];
   "app:openExternal": [[url: string], void];
-  "app:openInTerminal": [[cwd: string, sessionId?: string], void];
+  "app:openInTerminal": [[cwd: string, session?: { agent: AgentKind; id: string }], void];
   "app:copyText": [[text: string], void];
   "settings:get": [[], Settings];
   "settings:set": [[patch: Partial<Settings>], Settings];
@@ -62,6 +66,7 @@ export interface HCodeBridge {
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "agent:status",
+  "agent:models",
   "projects:list",
   "projects:add",
   "projects:setPinned",

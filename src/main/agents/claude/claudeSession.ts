@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   query,
   type CanUseTool,
+  type PermissionMode as ClaudePermissionMode,
   type PermissionResult,
   type PermissionUpdate,
   type Query,
@@ -146,7 +147,7 @@ export class ClaudeSession {
         ...(this.sessionId ? { resume: this.sessionId } : {}),
         pathToClaudeCodeExecutable: this.host.claudePath,
         env: this.host.env,
-        permissionMode,
+        permissionMode: permissionMode as ClaudePermissionMode,
         // 允许用户在会话中途切换到“完全放行”；是否真的放行仍由 permissionMode 决定
         allowDangerouslySkipPermissions: true,
         canUseTool: this.canUseTool,
@@ -313,7 +314,7 @@ export class ClaudeSession {
     this.permissionMode = mode;
     this.emitState();
     try {
-      await this.activeQuery?.setPermissionMode(mode);
+      await this.activeQuery?.setPermissionMode(mode as ClaudePermissionMode);
     } catch {
       // bypassPermissions 需要启动时声明；运行中切换失败则在下次启动时生效
     }
@@ -367,6 +368,7 @@ export class ClaudeSession {
   emitState() {
     this.host.emitState({
       sessionKey: this.key,
+      agent: "claude",
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       projectPath: this.projectPath,
       state: this.state,

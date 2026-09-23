@@ -1,9 +1,9 @@
 # HCode
 
-macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZCode)。v1 支持 **Claude Code CLI**：
+macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZCode)。支持 **Claude Code** 与 **Codex** 两个 CLI（同一套界面，会话按项目混排）：
 
-- 项目列表：自动汇总 `~/.claude/projects` 里所有会话的工作目录，也可手动添加文件夹、置顶、移除
-- 会话历史：按项目列出 Claude Code 历史会话（包括终端里创建的），用 ZCode 卡片查看完整对话
+- 项目列表：自动汇总 Claude Code 与 Codex 所有会话的工作目录，也可手动添加文件夹、置顶、移除
+- 会话历史：按项目列出两个 CLI 的历史会话（包括终端里创建的），用 ZCode 卡片查看完整对话
 - 新建会话 / 续聊历史会话，流式输出，随时停止（Esc）
 - 审批卡片：改文件、跑命令前询问（允许 / 本会话总是允许 / 拒绝并附原因），支持 AskUserQuestion 与计划模式审批
 - 权限模式（逐条审批 / 自动接受编辑 / 计划模式 / 完全放行）与模型切换
@@ -11,7 +11,7 @@ macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZC
 
 ## 使用
 
-需要 Node 24+、pnpm 10+，以及已登录的 `claude` 命令（默认从登录 shell 的 PATH 查找，可在设置里指定路径）。
+需要 Node 24+、pnpm 10+，以及已登录的 `claude` 和/或 `codex` 命令（默认从登录 shell 的 PATH 查找，可在设置里指定路径）。
 
 ```bash
 pnpm install
@@ -28,8 +28,10 @@ pnpm dist         # 打包 release/HCode-<版本>-arm64.dmg（本地未签名）
 
 ```
 src/main/        Electron 主进程
-  agents/claude/   Claude 接入：历史(SDK listSessions/getSessionMessages)、实时会话(SDK query)、审批桥接
-                   rowProjector.ts 把 Claude 记录 / 流事件统一投影为 ZCode v4 ConversationRow
+  agents/types.ts  AgentProvider 接口；registry.ts 按 CLI / 会话 / 审批路由
+  agents/claude/   Claude 接入：Agent SDK（listSessions / getSessionMessages / query）
+  agents/codex/    Codex 接入：codex app-server JSON-RPC（thread/list、turns/list、turn/start、审批请求）
+  agents/rowProjectorBase.ts  各 CLI 投影器公共部分：把记录 / 流事件投影为 ZCode v4 ConversationRow
 src/preload/     contextBridge 暴露 window.hcode（通道白名单见 src/shared/ipc.ts）
 src/shared/      主/渲染进程共用类型与 IPC 契约
 src/renderer/
@@ -40,8 +42,9 @@ vendor/          ZCode 的 @zcode/shared、@zcode/model-option-map 原样复制�
 docs/            方案文档
 ```
 
-以后接入 codex / pi / step / agy：在 `src/main/agents/` 下按 Claude 的模式实现历史读取与会话驱动，
-投影成同样的 `ConversationRow` 即可复用全部界面。
+以后接入 pi / step / agy：在 `src/main/agents/` 下实现一个 `AgentProvider`（历史读取 + 会话驱动 + 审批），
+投影成同样的 `ConversationRow`，并在 `src/shared/agents.ts` 登记权限模式，即可复用全部界面。
+方案文档：`docs/HCode-v1-方案.md`、`docs/HCode-v2-Codex.md`。
 
 ## 许可
 

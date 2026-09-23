@@ -11,6 +11,8 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
+import { AGENTS } from "@hcode/shared/agents";
+import { AgentBadge } from "../AgentBadge";
 import { useAppStore } from "../store/appStore";
 import { ProjectItem } from "./ProjectItem";
 
@@ -19,7 +21,7 @@ export function Sidebar() {
   const search = useAppStore((state) => state.search);
   const setSearch = useAppStore((state) => state.setSearch);
   const addProject = useAppStore((state) => state.addProject);
-  const agentStatus = useAppStore((state) => state.agentStatus);
+  const agentStatuses = useAppStore((state) => state.agentStatuses);
   const setSettingsOpen = useAppStore((state) => state.setSettingsOpen);
   const setSidebarCollapsed = useAppStore((state) => state.setSidebarCollapsed);
   const fullscreen = useAppStore((state) => state.fullscreen);
@@ -121,20 +123,23 @@ export function Sidebar() {
       </div>
 
       <div className="flex h-11 shrink-0 items-center gap-2 border-t border-border/60 px-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2 text-ui-sm text-foreground-subtle">
-          <span
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              agentStatus === null ? "bg-border" : agentStatus.found ? "bg-success" : "bg-destructive",
-            )}
-          />
-          <span className="truncate">
-            {agentStatus === null
-              ? "正在检测 Claude Code…"
-              : agentStatus.found
-                ? `Claude Code ${agentStatus.version ?? ""}`
-                : "未找到 Claude Code"}
-          </span>
+        <div className="flex min-w-0 flex-1 items-center gap-3 text-ui-sm text-foreground-subtle">
+          {agentStatuses === null ? (
+            <span className="truncate">正在检测 CLI…</span>
+          ) : (
+            agentStatuses.map((status) => (
+              <span
+                key={status.kind}
+                className="flex min-w-0 items-center gap-1.5"
+                title={status.found ? `${status.path}（${status.version ?? "未知版本"}）` : `未找到 ${AGENTS[status.kind].command}`}
+              >
+                <AgentBadge agent={status.kind} className={status.found ? "" : "opacity-40"} />
+                <span className={cn("truncate", !status.found && "text-foreground-subtlest line-through")}>
+                  {status.found ? (status.version ?? AGENTS[status.kind].name) : AGENTS[status.kind].name}
+                </span>
+              </span>
+            ))
+          )}
         </div>
         <ControlHintTooltip title="设置" shortcut="⌘," side="top">
           <Button

@@ -3,10 +3,18 @@ import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
 
 export type { ConversationRow };
 
-/** 以后接入 codex / pi / step / agy 时在这里扩展。 */
-export type AgentKind = "claude";
+/** 以后接入 pi / step / agy 时在这里扩展。 */
+export type AgentKind = "claude" | "codex";
 
-export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+/** 各 CLI 的权限模式取值不同，可选值见 shared/agents.ts 的 AGENTS[kind].permissionModes。 */
+export type PermissionMode = string;
+
+export interface ModelOption {
+  /** 传给 CLI 的模型标识；空串 = CLI 默认模型。 */
+  value: string;
+  label: string;
+  description?: string;
+}
 
 export interface AgentStatus {
   kind: AgentKind;
@@ -40,6 +48,12 @@ export interface SessionSummary {
   activeInTerminal?: boolean;
 }
 
+export interface SessionRef {
+  agent: AgentKind;
+  id: string;
+  projectPath: string;
+}
+
 export interface SessionLoadResult {
   summary: SessionSummary | null;
   rows: ConversationRow[];
@@ -62,6 +76,7 @@ export interface ChatRowsEvent {
 
 export interface ChatStateEvent {
   sessionKey: string;
+  agent: AgentKind;
   sessionId?: string;
   projectPath: string;
   state: ChatRunState;
@@ -96,6 +111,7 @@ export type PermissionDecision =
   | { decision: "deny"; message?: string; interrupt?: boolean };
 
 export interface ChatSendParams {
+  agent: AgentKind;
   /** 会话 key，由渲染进程生成；主进程找不到时用它新建会话，保证事件先于 invoke 返回也能对上。 */
   sessionKey: string;
   /** 要续聊的历史会话 id。 */
@@ -109,15 +125,19 @@ export interface ChatSendParams {
 export interface Settings {
   theme: "system" | "light" | "dark";
   locale: "zh-CN" | "en-US";
-  claudePath: string;
-  defaultPermissionMode: PermissionMode;
-  defaultModel: string;
+  /** 新建会话默认使用的 CLI。 */
+  defaultAgent: AgentKind;
+  /** 各 CLI 可执行文件路径；空串 = 自动查找。 */
+  agentPaths: Record<AgentKind, string>;
+  defaultPermissionModes: Record<AgentKind, PermissionMode>;
+  defaultModels: Record<AgentKind, string>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   locale: "zh-CN",
-  claudePath: "",
-  defaultPermissionMode: "default",
-  defaultModel: "",
+  defaultAgent: "claude",
+  agentPaths: { claude: "", codex: "" },
+  defaultPermissionModes: { claude: "default", codex: "on-request" },
+  defaultModels: { claude: "", codex: "" },
 };

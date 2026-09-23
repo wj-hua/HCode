@@ -10,9 +10,14 @@ import type {
   TurnHeaderRow,
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import type { RowOp } from "../../../shared/types.js";
+import {
+  isRecord,
+  parseTime,
+  RowProjectorBase,
+  truncate,
+  type JsonRecord,
+} from "../rowProjectorBase.js";
 
-type JsonRecord = Record<string, unknown>;
 
 /** getSessionMessages 与 SDKMessage 的公共子集；只按需读取字段。 */
 export interface ClaudeRecord {
@@ -29,20 +34,9 @@ export interface ClaudeRecord {
   [key: string]: unknown;
 }
 
-const MAX_TOOL_OUTPUT_CHARS = 60_000;
 const INTERRUPT_MARKERS = ["[Request interrupted by user", "doesn't want to proceed with this tool use"];
 
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
-function parseTime(value: unknown, fallback: number): number {
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-}
 
 function toolResultText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -56,11 +50,6 @@ function toolResultText(content: unknown): string {
   return parts.join("\n");
 }
 
-function truncate(text: string): string {
-  return text.length > MAX_TOOL_OUTPUT_CHARS
-    ? `${text.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n…（输出过长，已截断）`
-    : text;
-}
 
 /** 解析 Claude Code 的斜杠命令包装：`<command-name>/model</command-name>…<command-args>x</command-args>` */
 function parseSlashCommand(text: string): string | null {
@@ -89,196 +78,14 @@ interface StreamQueue {
   textCursor: number;
   thinkingCursor: number;
 }
-
-export class ClaudeRowProjector {
-  private readonly rows = new Map<number, ConversationRow>();
-  private readonly order: number[] = [];
-  private nextRowId = 1;
-  private seq = 0;
-  private ops: RowOp[] = [];
-  private turn: { turnId: string; headerRowId: number; startedAt: number; lastAt: number } | null =
-    null;
-  private readonly toolRows = new Map<string, number>();
+export class ClaudeRowProjector extends RowProjectorBase {
   private streamMessageId: string | null = null;
   private readonly streamBlocks = new Map<number, number>();
   private readonly streamQueues = new Map<string, StreamQueue>();
-  private interrupted = false;
-  private turnCounter = 0;
 
-  /** 当前全部行（按 rowId 顺序）。 */
-  snapshot(): ConversationRow[] {
-    return this.order.map((id) => this.rows.get(id)!).filter(Boolean);
-  }
-
-  /** 取出自上次调用以来的增量操作。 */
-  drain(): RowOp[] {
-    const ops = this.ops;
-    this.ops = [];
-    return ops;
-  }
-
-  get hasOpenTurn(): boolean {
-    return this.turn !== null;
-  }
-
-  // ───────────────────────── 行的基础操作 ─────────────────────────
-
-  private base(at: number) {
-    return {
-      rowId: this.nextRowId++,
-      turnId: this.turn?.turnId ?? "orphan",
-      createdAt: at,
-      createdAtSeq: this.seq++,
-    };
-  }
-
-  private put(row: ConversationRow) {
-    if (!this.rows.has(row.rowId)) this.order.push(row.rowId);
-    this.rows.set(row.rowId, row);
-    this.ops.push({ op: "upsert", row });
-  }
-
-  private patch<T extends ConversationRow>(rowId: number, update: (row: T) => T) {
-    const row = this.rows.get(rowId) as T | undefined;
-    if (!row) return;
-    this.put(update(row));
-  }
-
-  private append(rowId: number, field: "text" | "inputText", text: string) {
-    if (!text) return;
-    const row = this.rows.get(rowId) as (ConversationRow & Record<string, unknown>) | undefined;
-    if (!row) return;
-    const current = typeof row[field] === "string" ? (row[field] as string) : "";
-    this.rows.set(rowId, { ...row, [field]: current + text } as ConversationRow);
-    this.ops.push({ op: "append", rowId, field, text });
-  }
-
-  // ───────────────────────── 轮次 ─────────────────────────
-
-  /** 开启一轮：写 turnHeader + userInput。实时发送与历史里的真实用户消息都走这里。 */
-  beginUserTurn(text: string, at: number, turnId?: string) {
-    this.closeTurn(at);
-    this.interrupted = false;
-    const id = turnId ?? `turn-${++this.turnCounter}-${at}`;
-    const headerRowId = this.nextRowId;
-    this.turn = { turnId: id, headerRowId, startedAt: at, lastAt: at };
-    const header: TurnHeaderRow = {
-      ...this.base(at),
-      kind: "turnHeader",
-      origin: "userInput",
-      executionKind: "agent",
-      state: "running",
-      startedAt: at,
-    };
-    this.put(header);
-    const input: UserInputRow = {
-      ...this.base(at),
-      kind: "userInput",
-      origin: "realUser",
-      text,
-    };
-    this.put(input);
-  }
-
-  private ensureTurn(at: number) {
-    if (!this.turn) this.beginSyntheticTurn(at);
-    else this.turn.lastAt = Math.max(this.turn.lastAt, at);
-  }
-
-  private beginSyntheticTurn(at: number) {
-    const id = `turn-${++this.turnCounter}-${at}`;
-    this.turn = { turnId: id, headerRowId: this.nextRowId, startedAt: at, lastAt: at };
-    const header: TurnHeaderRow = {
-      ...this.base(at),
-      kind: "turnHeader",
-      origin: "userInput",
-      executionKind: "agent",
-      state: "running",
-      startedAt: at,
-    };
-    this.put(header);
-  }
-
-  /** 结束当前轮：收尾所有仍在流式/运行中的行。 */
-  closeTurn(at: number, outcome?: TurnHeaderRow["state"], activeMs?: number) {
-    const turn = this.turn;
-    if (!turn) return;
-    const interrupted = this.interrupted;
-    const state: TurnHeaderRow["state"] =
-      outcome ?? (interrupted ? "completedInterrupted" : "completedSuccess");
-    for (const rowId of this.order) {
-      const row = this.rows.get(rowId);
-      if (!row || row.turnId !== turn.turnId) continue;
-      if ((row.kind === "assistantText" || row.kind === "reasoning") && row.state === "streaming") {
-        this.put({ ...row, state: interrupted ? "interrupted" : "complete" } as ConversationRow);
-      } else if (
-        row.kind === "toolCall" &&
-        (row.status === "running" ||
-          row.status === "inputStreaming" ||
-          row.status === "pendingApproval")
-      ) {
-        this.put({ ...row, status: "cancelled", endedAt: at });
-      }
-    }
-    const endedAt = Math.max(at, turn.lastAt);
-    this.patch<TurnHeaderRow>(turn.headerRowId, (header) => ({
-      ...header,
-      state,
-      endedAt,
-      activeMs: activeMs ?? Math.max(0, endedAt - turn.startedAt),
-    }));
-    this.turn = null;
+  protected override onTurnClosed() {
     this.streamBlocks.clear();
     this.streamMessageId = null;
-  }
-
-  markInterrupted() {
-    this.interrupted = true;
-  }
-
-  /** 实时会话出错时，在当前轮写一条失败提示并结束该轮。 */
-  failTurn(message: string, at: number) {
-    this.ensureTurn(at);
-    const row: AssistantTextRow = {
-      ...this.base(at),
-      kind: "assistantText",
-      text: message,
-      state: "failed",
-    };
-    this.put(row);
-    this.closeTurn(at, "failed");
-  }
-
-  // ───────────────────────── 审批 ─────────────────────────
-
-  setToolPendingApproval(
-    toolUseId: string,
-    toolName: string,
-    input: Record<string, unknown>,
-    interactionId: string,
-    at: number,
-  ) {
-    let rowId = this.toolRows.get(toolUseId);
-    if (rowId === undefined) {
-      this.ensureTurn(at);
-      rowId = this.createToolRow(toolUseId, toolName, input, at, "pendingApproval");
-    }
-    this.patch<ToolCallRow>(rowId, (row) => ({
-      ...row,
-      status: "pendingApproval",
-      input: row.input ?? input,
-      approvalInteractionId: interactionId,
-    }));
-  }
-
-  resolveToolApproval(toolUseId: string, allowed: boolean) {
-    const rowId = this.toolRows.get(toolUseId);
-    if (rowId === undefined) return;
-    this.patch<ToolCallRow>(rowId, (row) => {
-      const { approvalInteractionId: _approval, ...rest } = row;
-      if (row.status !== "pendingApproval") return rest;
-      return allowed ? { ...rest, status: "running" } : { ...rest, status: "cancelled" };
-    });
   }
 
   // ───────────────────────── 记录消费 ─────────────────────────
@@ -420,28 +227,6 @@ export class ClaudeRowProjector {
           break;
       }
     }
-  }
-
-  private createToolRow(
-    id: string,
-    name: string,
-    input: Record<string, unknown> | undefined,
-    at: number,
-    status: ToolCallRow["status"],
-  ): number {
-    const row: ToolCallRow = {
-      ...this.base(at),
-      kind: "toolCall",
-      toolCallId: id,
-      toolName: name,
-      status,
-      inputText: input ? JSON.stringify(input) : "",
-      ...(input ? { input } : {}),
-      startedAt: at,
-    };
-    this.toolRows.set(id, row.rowId);
-    this.put(row);
-    return row.rowId;
   }
 
   private queueFor(messageId: string): StreamQueue {

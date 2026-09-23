@@ -413,6 +413,8 @@ permission.requested / permission.resolved
 
 ## 12. 后续版本路线（其余 4 个 CLI，调研结论备查）
 
+> **更新（v2，2026-09-24）**：Codex 已接入，实际方案与下表不同——历史与会话都改走官方 `codex app-server` 协议（`thread/list`、`thread/turns/list`、`turn/start`、审批请求），不直接读取 sqlite / rollout 文件。详见 `docs/HCode-v2-Codex.md`。
+
 所有 CLI 都按 `AgentProvider` 接口接入，并投影成同样的 `ConversationRow`。
 
 | CLI | 项目/会话列表 | 对话内容 | 实时驱动 | 审批 |

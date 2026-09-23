@@ -5,11 +5,18 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron"
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
+import { CodexAgent } from "./agents/codex/codexAgent.js";
+import { AgentRegistry } from "./agents/registry.js";
+import type { AgentEvents } from "./agents/types.js";
 import { buildProjects } from "./projects.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { createMainWindow } from "./window.js";
 
 app.setName("HCode");
+// 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
+if (process.env.HCODE_DEV_SERVER_URL) {
+  app.setPath("userData", join(app.getPath("appData"), "HCode-dev"));
+}
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
@@ -50,24 +57,30 @@ async function bootstrap() {
   shellEnv = (await captureLoginShellEnvSnapshot()) ?? {};
   const store = new AppStore(app.getPath("userData"));
 
-  const claude = new ClaudeAgent(
-    {
-      rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
-      state: (event) => send("chat:state", event),
-      permission: (event) => {
-        send("permission:requested", event);
-        if (mainWindow && !mainWindow.isFocused()) app.dock?.bounce("informational");
-      },
-      permissionResolved: (event) => send("permission:resolved", event),
-      indexChanged: (projectPaths) => send("sessions:indexChanged", { projectPaths }),
+  const events: AgentEvents = {
+    rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
+    state: (event) => send("chat:state", event),
+    permission: (event) => {
+      send("permission:requested", event);
+      if (mainWindow && !mainWindow.isFocused()) app.dock?.bounce("informational");
     },
-    buildAgentEnv,
-    () => store.settings.claudePath,
-  );
+    permissionResolved: (event) => send("permission:resolved", event),
+    indexChanged: (projectPaths) => send("sessions:indexChanged", { projectPaths }),
+  };
+  const agents = new AgentRegistry({
+    claude: new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude),
+    codex: new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex),
+  });
+  const requireSession = (sessionKey: string) => {
+    const provider = agents.bySessionKey(sessionKey);
+    if (!provider) throw new Error("会话不存在或已关闭");
+    return provider;
+  };
 
-  handle("agent:status", () => claude.getStatus(true));
+  handle("agent:status", () => agents.statuses(true));
+  handle("agent:models", (agent) => agents.get(agent).listModels());
 
-  handle("projects:list", async () => buildProjects(await claude.history.all(), store));
+  handle("projects:list", async () => buildProjects(await agents.allSessions(), store));
   handle("projects:add", async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ["openDirectory", "createDirectory"],
@@ -80,7 +93,7 @@ async function bootstrap() {
       manual: prefs.manual.includes(path) ? prefs.manual : [...prefs.manual, path],
       removed: prefs.removed.filter((item) => item !== path),
     }));
-    const projects = buildProjects(await claude.history.all(), store);
+    const projects = buildProjects(await agents.allSessions(), store);
     return projects.find((project) => project.path === path) ?? null;
   });
   handle("projects:setPinned", (path, pinned) => {
@@ -97,22 +110,20 @@ async function bootstrap() {
     }));
   });
 
-  handle("sessions:list", (projectPath) => claude.history.list(projectPath));
-  handle("sessions:load", (sessionId, projectPath) => claude.history.load(sessionId, projectPath));
-  handle("sessions:rename", (sessionId, projectPath, title) =>
-    claude.history.rename(sessionId, projectPath, title),
+  handle("sessions:list", async (projectPath) =>
+    (await agents.allSessions()).filter((session) => session.projectPath === projectPath),
   );
+  handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
+  handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
 
-  handle("chat:send", (params) => claude.send(params));
+  handle("chat:send", (params) => agents.send(params));
   handle("chat:interrupt", async (sessionKey) => {
-    await claude.interrupt(sessionKey);
+    await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
   });
-  handle("chat:setPermissionMode", (sessionKey, mode) => claude.setPermissionMode(sessionKey, mode));
-  handle("chat:setModel", (sessionKey, model) => claude.setModel(sessionKey, model));
-  handle("chat:close", (sessionKey) => claude.closeSession(sessionKey));
-  handle("permission:respond", (interactionId, decision) =>
-    claude.respondPermission(interactionId, decision),
-  );
+  handle("chat:setPermissionMode", (sessionKey, mode) => requireSession(sessionKey).setPermissionMode(sessionKey, mode));
+  handle("chat:setModel", (sessionKey, model) => requireSession(sessionKey).setModel(sessionKey, model));
+  handle("chat:close", (sessionKey) => agents.bySessionKey(sessionKey)?.closeSession(sessionKey));
+  handle("permission:respond", (interactionId, decision) => agents.respondPermission(interactionId, decision));
 
   handle("fs:readText", async (path, maxBytes = 2 * 1024 * 1024) => {
     try {
@@ -139,11 +150,9 @@ async function bootstrap() {
   handle("app:openExternal", async (url) => {
     if (/^(https?|mailto):/i.test(url)) await shell.openExternal(url);
   });
-  handle("app:openInTerminal", async (cwd, sessionId) => {
-    const status = await claude.getStatus();
-    const command = sessionId
-      ? `cd ${shellQuote(cwd)} && ${shellQuote(status.path ?? "claude")} --resume ${shellQuote(sessionId)}`
-      : `cd ${shellQuote(cwd)}`;
+  handle("app:openInTerminal", async (cwd, session) => {
+    const resume = session ? await agents.get(session.agent).resumeCommand(session.id) : [];
+    const command = [`cd ${shellQuote(cwd)}`, ...(resume.length ? [resume.map(shellQuote).join(" ")] : [])].join(" && ");
     await new Promise<void>((resolve) => {
       execFile(
         "osascript",
@@ -162,13 +171,13 @@ async function bootstrap() {
   handle("settings:get", () => store.settings);
   handle("settings:set", (patch) => store.updateSettings(patch));
 
-  claude.history.startWatching();
+  agents.startWatching();
   mainWindow = createMainWindow(store);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(store);
   });
-  app.on("before-quit", () => claude.dispose());
+  app.on("before-quit", () => agents.dispose());
 }
 
 app.on("second-instance", () => {
@@ -184,7 +193,3 @@ app.on("window-all-closed", () => {
 
 void app.whenReady().then(bootstrap);
 
-// 开发时 userData 与正式版分开
-if (process.env.HCODE_DEV_SERVER_URL) {
-  app.setPath("userData", join(app.getPath("appData"), "HCode-dev"));
-}

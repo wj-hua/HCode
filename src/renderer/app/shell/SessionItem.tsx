@@ -9,6 +9,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu.js";
 import { cn } from "@/components/lib/utils.js";
+import { AgentBadge } from "../AgentBadge";
 import { hcode } from "../bridge";
 import { formatRelativeTime } from "../format";
 import { useAppStore } from "../store/appStore";
@@ -53,7 +54,9 @@ export function SessionItem({ session }: { session: SessionSummary }) {
                 <span title="正在终端中运行">
                   <SquareTerminalIcon className="size-3.5 text-foreground-subtlest" />
                 </span>
-              ) : null}
+              ) : (
+                <AgentBadge agent={session.agent} className="opacity-80" />
+              )}
             </span>
             {renaming ? (
               <RenameInput
@@ -80,7 +83,7 @@ export function SessionItem({ session }: { session: SessionSummary }) {
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
-            onSelect={() => void hcode.invoke("app:openInTerminal", session.projectPath, session.id)}
+            onSelect={() => void hcode.invoke("app:openInTerminal", session.projectPath, { agent: session.agent, id: session.id })}
           >
             在终端中继续
           </ContextMenuItem>

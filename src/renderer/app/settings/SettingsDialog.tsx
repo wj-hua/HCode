@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import type { Settings } from "@hcode/shared/types";
+import type { AgentKind, Settings } from "@hcode/shared/types";
+import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
+import { AgentBadge } from "../AgentBadge";
 import { Button } from "@/components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.js";
 import { cn } from "@/components/lib/utils.js";
-import { MODEL_OPTIONS, PERMISSION_MODES } from "../composer/Composer";
 import { useAppStore } from "../store/appStore";
 
 function Segmented<T extends string>({
@@ -48,26 +49,100 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   );
 }
 
+function AgentSection({ kind }: { kind: AgentKind }) {
+  const settings = useAppStore((state) => state.settings);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const status = useAppStore((state) => state.agentStatuses?.find((item) => item.kind === kind));
+  const models = useAppStore((state) => state.models[kind]) ?? AGENTS[kind].models;
+  const loadModels = useAppStore((state) => state.loadModels);
+  const open = useAppStore((state) => state.settingsOpen);
+  const [path, setPath] = useState(settings.agentPaths[kind]);
+  const agent = AGENTS[kind];
+
+  useEffect(() => {
+    if (open) {
+      setPath(settings.agentPaths[kind]);
+      void loadModels(kind);
+    }
+  }, [open, kind, settings.agentPaths, loadModels]);
+
+  return (
+    <div className="flex flex-col py-2">
+      <div className="flex items-center gap-2 pt-2 text-ui-base font-medium text-foreground">
+        <AgentBadge agent={kind} />
+        {agent.name}
+      </div>
+      <Row label="默认权限模式">
+        <select
+          value={settings.defaultPermissionModes[kind]}
+          onChange={(event) =>
+            void updateSettings({
+              defaultPermissionModes: { ...settings.defaultPermissionModes, [kind]: event.target.value },
+            })
+          }
+          className="h-8 rounded-lg border border-input-border bg-input px-2 text-ui-base text-foreground"
+        >
+          {agent.permissionModes.map((item) => (
+            <option key={item.mode} value={item.mode}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row label="默认模型">
+        <select
+          value={settings.defaultModels[kind]}
+          onChange={(event) =>
+            void updateSettings({ defaultModels: { ...settings.defaultModels, [kind]: event.target.value } })
+          }
+          className="h-8 max-w-56 rounded-lg border border-input-border bg-input px-2 text-ui-base text-foreground"
+        >
+          {models.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <div className="flex flex-col gap-2 py-2">
+        <span className="text-ui-sm text-foreground-subtle">
+          {agent.command} 路径（留空自动查找）。当前：
+          {status?.found ? `${status.path}（${status.version ?? "未知版本"}）` : "未找到"}
+        </span>
+        <div className="flex gap-2">
+          <input
+            value={path}
+            onChange={(event) => setPath(event.target.value)}
+            placeholder={`例如 /Users/you/.local/bin/${agent.command}`}
+            className="h-8 min-w-0 flex-1 rounded-lg border border-input-border bg-input px-2.5 font-mono text-ui-sm text-foreground outline-none focus:border-input-border-focused"
+          />
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => void updateSettings({ agentPaths: { ...settings.agentPaths, [kind]: path.trim() } })}
+          >
+            保存并检测
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const open = useAppStore((state) => state.settingsOpen);
   const setOpen = useAppStore((state) => state.setSettingsOpen);
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
-  const agentStatus = useAppStore((state) => state.agentStatus);
-  const [claudePath, setClaudePath] = useState(settings.claudePath);
-
-  useEffect(() => {
-    if (open) setClaudePath(settings.claudePath);
-  }, [open, settings.claudePath]);
 
   const update = (patch: Partial<Settings>) => void updateSettings(patch);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
-          <DialogDescription>HCode 的外观与 Claude Code 默认行为</DialogDescription>
+          <DialogDescription>HCode 的外观与各 CLI 的默认行为</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col divide-y divide-border/60">
           <Row label="主题">
@@ -91,54 +166,16 @@ export function SettingsDialog() {
               onChange={(locale) => update({ locale })}
             />
           </Row>
-          <Row label="默认权限模式" hint="新会话使用的权限模式">
-            <select
-              value={settings.defaultPermissionMode}
-              onChange={(event) =>
-                update({ defaultPermissionMode: event.target.value as Settings["defaultPermissionMode"] })
-              }
-              className="h-8 rounded-lg border border-input-border bg-input px-2 text-ui-base text-foreground"
-            >
-              {PERMISSION_MODES.map((item) => (
-                <option key={item.mode} value={item.mode}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+          <Row label="新会话默认 CLI">
+            <Segmented
+              value={settings.defaultAgent}
+              options={AGENT_KINDS.map((kind) => ({ value: kind, label: AGENTS[kind].name }))}
+              onChange={(defaultAgent) => update({ defaultAgent })}
+            />
           </Row>
-          <Row label="默认模型">
-            <select
-              value={settings.defaultModel}
-              onChange={(event) => update({ defaultModel: event.target.value })}
-              className="h-8 rounded-lg border border-input-border bg-input px-2 text-ui-base text-foreground"
-            >
-              {MODEL_OPTIONS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </Row>
-          <div className="flex flex-col gap-2 py-3">
-            <div className="flex flex-col">
-              <span className="text-ui-base text-foreground">Claude Code 路径</span>
-              <span className="text-ui-sm text-foreground-subtle">
-                留空则自动查找。当前：
-                {agentStatus?.found ? `${agentStatus.path}（${agentStatus.version ?? "未知版本"}）` : "未找到"}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                value={claudePath}
-                onChange={(event) => setClaudePath(event.target.value)}
-                placeholder="例如 /Users/you/.local/bin/claude"
-                className="h-8 min-w-0 flex-1 rounded-lg border border-input-border bg-input px-2.5 font-mono text-ui-sm text-foreground outline-none focus:border-input-border-focused"
-              />
-              <Button variant="outline" size="lg" onClick={() => update({ claudePath: claudePath.trim() })}>
-                保存并检测
-              </Button>
-            </div>
-          </div>
+          {AGENT_KINDS.map((kind) => (
+            <AgentSection key={kind} kind={kind} />
+          ))}
         </div>
       </DialogContent>
     </Dialog>

@@ -31,6 +31,28 @@ function writeJson(path: string, value: unknown) {
   renameSync(tmp, path);
 }
 
+/** 合并默认值，并把 v1（只有 claude）的扁平设置迁移到按 CLI 分组的新结构。 */
+function migrateSettings(raw: Record<string, unknown>): Settings {
+  const pick = <T extends object>(value: unknown, fallback: T): T =>
+    value && typeof value === "object" ? { ...fallback, ...(value as Partial<T>) } : { ...fallback };
+  const settings: Settings = {
+    ...DEFAULT_SETTINGS,
+    ...(raw as Partial<Settings>),
+    agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
+    defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),
+    defaultModels: pick(raw.defaultModels, DEFAULT_SETTINGS.defaultModels),
+  };
+  if (typeof raw.claudePath === "string" && raw.claudePath) settings.agentPaths.claude = raw.claudePath;
+  if (typeof raw.defaultPermissionMode === "string") {
+    settings.defaultPermissionModes.claude = raw.defaultPermissionMode;
+  }
+  if (typeof raw.defaultModel === "string") settings.defaultModels.claude = raw.defaultModel;
+  for (const key of ["claudePath", "defaultPermissionMode", "defaultModel"]) {
+    delete (settings as unknown as Record<string, unknown>)[key];
+  }
+  return settings;
+}
+
 export class AppStore {
   private readonly settingsPath: string;
   private readonly projectsPath: string;
@@ -43,7 +65,7 @@ export class AppStore {
     this.settingsPath = join(dataDir, "settings.json");
     this.projectsPath = join(dataDir, "projects.json");
     this.windowPath = join(dataDir, "window.json");
-    this.settings = readJson(this.settingsPath, DEFAULT_SETTINGS);
+    this.settings = migrateSettings(readJson<Record<string, unknown>>(this.settingsPath, {}));
     this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [], removed: [] });
   }
 

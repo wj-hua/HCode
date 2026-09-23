@@ -6,12 +6,14 @@ import {
   ClipboardListIcon,
   CpuIcon,
   FilePenLineIcon,
+  EyeIcon,
   ShieldCheckIcon,
   ShieldOffIcon,
   SquareIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { PermissionMode } from "@hcode/shared/types";
+import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
+import { AgentBadge } from "../AgentBadge";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -25,44 +27,17 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
 import { useAppStore, type Conversation } from "../store/appStore";
 
-export const PERMISSION_MODES: {
-  mode: PermissionMode;
-  label: string;
-  description: string;
-  icon: ReactNode;
-}[] = [
-  {
-    mode: "default",
-    label: "逐条审批",
-    description: "修改文件、执行命令前都会询问你",
-    icon: <ShieldCheckIcon className="size-4" />,
-  },
-  {
-    mode: "acceptEdits",
-    label: "自动接受编辑",
-    description: "文件修改自动通过，命令仍需审批",
-    icon: <FilePenLineIcon className="size-4" />,
-  },
-  {
-    mode: "plan",
-    label: "计划模式",
-    description: "只读分析并给出计划，批准后才执行",
-    icon: <ClipboardListIcon className="size-4" />,
-  },
-  {
-    mode: "bypassPermissions",
-    label: "完全放行",
-    description: "不再询问任何操作（谨慎使用）",
-    icon: <ShieldOffIcon className="size-4" />,
-  },
-];
+const MODE_ICONS: Record<PermissionModeOption["icon"], ReactNode> = {
+  shield: <ShieldCheckIcon className="size-4" />,
+  edit: <FilePenLineIcon className="size-4" />,
+  plan: <ClipboardListIcon className="size-4" />,
+  readonly: <EyeIcon className="size-4" />,
+  danger: <ShieldOffIcon className="size-4" />,
+};
 
-export const MODEL_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "默认模型" },
-  { value: "opus", label: "Opus" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "haiku", label: "Haiku" },
-];
+export function modeIcon(option: PermissionModeOption): ReactNode {
+  return MODE_ICONS[option.icon];
+}
 
 // 切换会话时保留各自未发送的草稿
 const drafts = new Map<string, string>();
@@ -78,6 +53,11 @@ export function Composer({
   const interrupt = useAppStore((state) => state.interrupt);
   const setPermissionMode = useAppStore((state) => state.setPermissionMode);
   const setModel = useAppStore((state) => state.setModel);
+  const setDraftAgent = useAppStore((state) => state.setDraftAgent);
+  const loadModels = useAppStore((state) => state.loadModels);
+  const agentStatuses = useAppStore((state) => state.agentStatuses);
+  const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
+  const isDraft = !conversation.sessionKey && !conversation.sessionId;
   const [text, setText] = useState(() => drafts.get(conversation.viewId) ?? "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
@@ -99,6 +79,10 @@ export function Composer({
     textareaRef.current?.focus();
   }, [conversation.viewId]);
 
+  useEffect(() => {
+    void loadModels(conversation.agent);
+  }, [conversation.agent, loadModels]);
+
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -114,9 +98,10 @@ export function Composer({
     onSubmitted();
   };
 
-  const modeInfo = PERMISSION_MODES.find((item) => item.mode === conversation.permissionMode) ?? PERMISSION_MODES[0]!;
-  const modelLabel =
-    MODEL_OPTIONS.find((item) => item.value === conversation.model)?.label ?? conversation.model;
+  const agent = AGENTS[conversation.agent];
+  const modeInfo =
+    agent.permissionModes.find((item) => item.mode === conversation.permissionMode) ?? agent.permissionModes[0]!;
+  const modelLabel = models.find((item) => item.value === conversation.model)?.label ?? conversation.model;
 
   return (
     <>
@@ -146,10 +131,43 @@ export function Composer({
             void interrupt();
           }
         }}
-        placeholder={running ? "Claude 正在工作…（Esc 停止）" : "给 Claude 发消息，Enter 发送，Shift+Enter 换行"}
+        placeholder={running ? `${agent.name} 正在工作…（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
         className="max-h-60 min-h-11 w-full resize-none bg-transparent px-1 text-ui-base text-foreground outline-none placeholder:text-foreground-subtlest"
       />
       <div className="flex items-center gap-1.5">
+        {isDraft ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-foreground">
+                <AgentBadge agent={conversation.agent} />
+                {agent.name}
+                <ChevronDownIcon className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuLabel>使用的 CLI</DropdownMenuLabel>
+              {AGENT_KINDS.map((kind) => {
+                const status = agentStatuses?.find((item) => item.kind === kind);
+                return (
+                  <DropdownMenuItem
+                    key={kind}
+                    disabled={status !== undefined && !status.found}
+                    onSelect={() => setDraftAgent(kind)}
+                    className="gap-2"
+                  >
+                    <AgentBadge agent={kind} />
+                    <span className="flex-1">{AGENTS[kind].name}</span>
+                    {status && !status.found ? (
+                      <span className="text-ui-sm text-foreground-subtlest">未安装</span>
+                    ) : kind === conversation.agent ? (
+                      <CheckIcon className="size-4" />
+                    ) : null}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -158,23 +176,23 @@ export function Composer({
               size="sm"
               className={cn(
                 "gap-1.5 text-foreground-subtle",
-                conversation.permissionMode === "bypassPermissions" && "text-warning",
+                modeInfo.dangerous && "text-warning",
               )}
             >
-              {modeInfo.icon}
+              {modeIcon(modeInfo)}
               {modeInfo.label}
               <ChevronDownIcon className="size-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
             <DropdownMenuLabel>权限模式</DropdownMenuLabel>
-            {PERMISSION_MODES.map((item) => (
+            {agent.permissionModes.map((item) => (
               <DropdownMenuItem
                 key={item.mode}
                 onSelect={() => void setPermissionMode(item.mode)}
                 className="items-start gap-2"
               >
-                <span className="mt-0.5">{item.icon}</span>
+                <span className="mt-0.5">{modeIcon(item)}</span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span>{item.label}</span>
                   <span className="text-ui-sm text-foreground-subtle">{item.description}</span>
@@ -192,12 +210,17 @@ export function Composer({
               <ChevronDownIcon className="size-3" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
+          <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
             <DropdownMenuLabel>模型</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {MODEL_OPTIONS.map((item) => (
-              <DropdownMenuItem key={item.value} onSelect={() => void setModel(item.value)}>
-                <span className="flex-1">{item.label}</span>
+            {models.map((item) => (
+              <DropdownMenuItem key={item.value} onSelect={() => void setModel(item.value)} className="items-start">
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span>{item.label}</span>
+                  {item.description ? (
+                    <span className="truncate text-ui-sm text-foreground-subtle">{item.description}</span>
+                  ) : null}
+                </span>
                 {item.value === conversation.model ? <CheckIcon className="size-4" /> : null}
               </DropdownMenuItem>
             ))}
