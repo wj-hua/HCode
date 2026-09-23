@@ -53,8 +53,15 @@ step 的 `/permissions` 会改写全局 `~/.stepcode/config.toml`，所以不用
 
 ## 发布
 - 版本号 0.3.0，安装包 `release/HCode-0.3.0-arm64.dmg`（本地未签名）；打包版在最小环境变量下启动实测可同时识别 claude、codex 与 step，并能拉取 step 模型列表。
+- 0.3.1：加入三个 CLI 的图片输入，安装包 `release/HCode-0.3.1-arm64.dmg`；打包版实测可添加图片并显示缩略图。
+
+## 图片输入（三个 CLI 共用）
+- 输入框支持粘贴、拖入、点按钮选择图片（PNG / JPEG / GIF / WebP，单张不超过 5MB，即 Claude API 的上限），发送前可预览、移除。
+- 发送：Claude → Anthropic `image` 内容块（base64）；Codex → `turn/start` 的 `{ type: "image", url: <data URL> }`；StepCode → `prompt` 的 `images`。
+- 显示：用户气泡上方显示缩略图，点击用 ZCode 的图片预览放大；行的 `attachments[].ref` 直接放 data URL。
+- 历史：三个 CLI 历史里的图片都还原为缩略图；Codex 的 `localImage` 从本地路径读出（文件不在时显示路径占位）。
+- 实测：三个 CLI 都能识别测试图片的颜色，重新打开历史后缩略图正常。所选模型本身不支持图片时由 CLI 报错。
 
 ## 未做 / 已知限制
 - step 的计划模式（`/plan`）在 RPC 下会自动退出、不等待批准，暂不接入。
 - 子 agent（subagent）只显示为通用工具卡片。
-- 图片输入仍不支持。

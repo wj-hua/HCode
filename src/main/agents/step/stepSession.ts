@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import type {
   ChatRunState,
   ChatStateEvent,
+  ImageInput,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -96,15 +97,20 @@ export class StepSession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string) {
+  async send(text: string, images: readonly ImageInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
-    this.projector.beginLocalTurn(text, Date.now());
+    this.projector.beginLocalTurn(text, Date.now(), images);
     this.flushNow();
     this.setState("running");
     try {
       const rpc = await this.ensureProcess();
-      await rpc.request("prompt", { message: text });
+      await rpc.request("prompt", {
+        message: text,
+        ...(images.length
+          ? { images: images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType })) }
+          : {}),
+      });
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
     }

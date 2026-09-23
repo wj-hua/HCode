@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   RowOp,
   ChatStateEvent,
+  ImageInput,
   PermissionRequestEvent,
   PermissionResolvedEvent,
 } from "../../../shared/types.js";
@@ -103,10 +104,10 @@ export class CodexSession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string) {
+  async send(text: string, images: readonly ImageInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
-    this.projector.beginLocalTurn(text, Date.now());
+    this.projector.beginLocalTurn(text, Date.now(), images);
     this.flushNow();
     this.setState("running");
     try {
@@ -114,7 +115,10 @@ export class CodexSession {
       const policy = codexPolicy(this.permissionMode);
       const result = await this.host.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.threadId,
-        input: [{ type: "text", text, text_elements: [] }],
+        input: [
+          ...(text.trim() || images.length === 0 ? [{ type: "text", text, text_elements: [] }] : []),
+          ...images.map((image) => ({ type: "image", url: `data:${image.mimeType};base64,${image.data}` })),
+        ],
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: sandboxPolicyObject(policy.sandbox),
         ...(this.model ? { model: this.model } : {}),

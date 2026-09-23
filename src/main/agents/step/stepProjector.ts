@@ -11,7 +11,16 @@ import type {
   TimelineMarkerRow,
   ToolCallRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import { isRecord, RowProjectorBase, truncate, type JsonRecord } from "../rowProjectorBase.js";
+import {
+  imageAttachment,
+  imageInputAttachments,
+  isRecord,
+  RowProjectorBase,
+  truncate,
+  type JsonRecord,
+  type UserAttachment,
+} from "../rowProjectorBase.js";
+import type { ImageInput } from "../../../shared/types.js";
 
 export type StepMessage = JsonRecord & { role: string };
 
@@ -36,6 +45,21 @@ function contentText(content: unknown): string {
     else if (block.type === "image") parts.push("[图片]");
   }
   return parts.join("\n");
+}
+
+/** 用户消息：文字 + 图片附件（pi 的 ImageContent 是 { type: "image", data, mimeType }）。 */
+function userContent(content: unknown): { text: string; attachments: UserAttachment[] } {
+  if (typeof content === "string") return { text: content, attachments: [] };
+  const texts: string[] = [];
+  const attachments: UserAttachment[] = [];
+  for (const block of Array.isArray(content) ? content : []) {
+    if (!isRecord(block)) continue;
+    if (block.type === "text" && typeof block.text === "string") texts.push(block.text);
+    else if (block.type === "image" && typeof block.data === "string") {
+      attachments.push(imageAttachment(String(block.mimeType ?? "image/png"), block.data));
+    }
+  }
+  return { text: texts.join("\n"), attachments };
 }
 
 function str(value: unknown): string | undefined {
@@ -104,8 +128,8 @@ export class StepRowProjector extends RowProjectorBase {
   /** 实时发送时已在本地写过用户气泡，跳过 step 回显的第一条 user 消息。 */
   private skipNextUserEcho = false;
 
-  beginLocalTurn(text: string, at: number) {
-    this.beginUserTurn(text, at);
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[]) {
+    this.beginUserTurn(text, at, undefined, imageInputAttachments(images));
     this.skipNextUserEcho = true;
   }
 
@@ -129,11 +153,11 @@ export class StepRowProjector extends RowProjectorBase {
           this.skipNextUserEcho = false;
           return;
         }
-        const text = contentText(message.content);
-        if (!text.trim()) return;
+        const { text, attachments } = userContent(message.content);
+        if (!text.trim() && attachments.length === 0) return;
         // step 没有“轮次结束”记录：上一轮在它最后一条消息的时间结束，而不是下一条用户消息的时间
         if (this.turn) this.closeTurn(this.turn.lastAt);
-        this.beginUserTurn(text, at);
+        this.beginUserTurn(text, at, undefined, attachments);
         return;
       }
       case "assistant":

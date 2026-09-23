@@ -13,12 +13,14 @@ import {
 import type {
   ChatRunState,
   ChatStateEvent,
+  ImageInput,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
   PermissionResolvedEvent,
   RowOp,
 } from "../../../shared/types.js";
+import { imageInputAttachments } from "../rowProjectorBase.js";
 import { ClaudeRowProjector, type ClaudeRecord } from "./rowProjector.js";
 
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
@@ -121,16 +123,26 @@ export class ClaudeSession {
     return this.state === "running" || this.state === "awaitingApproval";
   }
 
-  send(text: string) {
+  send(text: string, images: readonly ImageInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.clearIdleTimer();
     this.error = undefined;
-    this.projector.beginUserTurn(text, Date.now());
+    this.projector.beginUserTurn(text, Date.now(), undefined, imageInputAttachments(images));
     this.flushNow();
     if (!this.activeQuery) this.start();
+    // 有图片时用 Anthropic 的内容块数组；空文本块会被 API 拒绝，所以只在有文字时带上
+    const content = images.length
+      ? [
+          ...images.map((image) => ({
+            type: "image",
+            source: { type: "base64", media_type: image.mimeType, data: image.data },
+          })),
+          ...(text.trim() ? [{ type: "text", text }] : []),
+        ]
+      : text;
     this.input!.push({
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
     } as SDKUserMessage);
     this.setState("running");

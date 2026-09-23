@@ -11,11 +11,13 @@ import type {
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
+  imageAttachment,
   isRecord,
   parseTime,
   RowProjectorBase,
   truncate,
   type JsonRecord,
+  type UserAttachment,
 } from "../rowProjectorBase.js";
 
 
@@ -50,6 +52,18 @@ function toolResultText(content: unknown): string {
   return parts.join("\n");
 }
 
+
+/** Anthropic 的 image 块（base64 或 url）→ 用户气泡里的图片附件。 */
+function claudeImage(block: JsonRecord): UserAttachment | null {
+  const source = isRecord(block.source) ? block.source : null;
+  if (source?.type === "base64" && typeof source.data === "string") {
+    return imageAttachment(String(source.media_type ?? "image/png"), source.data);
+  }
+  if (source?.type === "url" && typeof source.url === "string") {
+    return { ref: source.url, fileName: "图片", mime: "image/*", bytes: 0 };
+  }
+  return null;
+}
 
 /** 解析 Claude Code 的斜杠命令包装：`<command-name>/model</command-name>…<command-args>x</command-args>` */
 function parseSlashCommand(text: string): string | null {
@@ -128,6 +142,7 @@ export class ClaudeRowProjector extends RowProjectorBase {
 
     let hasToolResult = false;
     const texts: string[] = [];
+    const images: UserAttachment[] = [];
     for (const block of content) {
       if (!isRecord(block)) continue;
       if (block.type === "tool_result") {
@@ -136,16 +151,17 @@ export class ClaudeRowProjector extends RowProjectorBase {
       } else if (block.type === "text" && typeof block.text === "string") {
         texts.push(block.text);
       } else if (block.type === "image") {
-        texts.push("[图片]");
+        const image = claudeImage(block);
+        if (image) images.push(image);
       }
     }
     // 与 tool_result 同条出现的文字是运行时注入（提醒等），不当作用户输入。
-    if (!hasToolResult && texts.length > 0) {
-      this.consumeUserText(texts.join("\n"), at, record);
+    if (!hasToolResult && (texts.length > 0 || images.length > 0)) {
+      this.consumeUserText(texts.join("\n"), at, record, images);
     }
   }
 
-  private consumeUserText(text: string, at: number, record: ClaudeRecord) {
+  private consumeUserText(text: string, at: number, record: ClaudeRecord, images: UserAttachment[] = []) {
     if (INTERRUPT_MARKERS.some((marker) => text.startsWith(marker))) {
       this.interrupted = true;
       return;
@@ -156,8 +172,8 @@ export class ClaudeRowProjector extends RowProjectorBase {
       this.beginUserTurn(command, at, record.uuid);
       return;
     }
-    if (!text.trim()) return;
-    this.beginUserTurn(text, at, record.uuid);
+    if (!text.trim() && images.length === 0) return;
+    this.beginUserTurn(text, at, record.uuid, images);
   }
 
   private consumeToolResult(block: JsonRecord, at: number) {

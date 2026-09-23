@@ -7,9 +7,10 @@ import type {
   TurnHeaderRow,
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import type { RowOp } from "../../shared/types.js";
+import type { ImageInput, RowOp } from "../../shared/types.js";
 
 export type JsonRecord = Record<string, unknown>;
+export type UserAttachment = NonNullable<UserInputRow["attachments"]>[number];
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;
 
@@ -29,6 +30,15 @@ export function truncate(text: string): string {
   return text.length > MAX_TOOL_OUTPUT_CHARS
     ? `${text.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n…（输出过长，已截断）`
     : text;
+}
+
+/** 图片附件：ref 直接放 data URL，渲染进程拿来就能显示。 */
+export function imageAttachment(mimeType: string, data: string, fileName = "图片"): UserAttachment {
+  return { ref: `data:${mimeType};base64,${data}`, fileName, mime: mimeType, bytes: Math.floor((data.length * 3) / 4) };
+}
+
+export function imageInputAttachments(images: readonly ImageInput[] | undefined): UserAttachment[] {
+  return (images ?? []).map((image) => imageAttachment(image.mimeType, image.data, image.name));
 }
 
 export class RowProjectorBase {
@@ -94,7 +104,7 @@ export class RowProjectorBase {
   // ───────────────────────── 轮次 ─────────────────────────
 
   /** 开启一轮：写 turnHeader + userInput。实时发送与历史里的真实用户消息都走这里。 */
-  beginUserTurn(text: string, at: number, turnId?: string) {
+  beginUserTurn(text: string, at: number, turnId?: string, attachments: readonly UserAttachment[] = []) {
     this.closeTurn(at);
     this.interrupted = false;
     const id = turnId ?? `turn-${++this.turnCounter}-${at}`;
@@ -114,6 +124,7 @@ export class RowProjectorBase {
       kind: "userInput",
       origin: "realUser",
       text,
+      ...(attachments.length > 0 ? { attachments: [...attachments] } : {}),
     };
     this.put(input);
   }

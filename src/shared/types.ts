@@ -110,6 +110,14 @@ export type PermissionDecision =
   | { decision: "allowSession" }
   | { decision: "deny"; message?: string; interrupt?: boolean };
 
+/** 随消息发送的图片。 */
+export interface ImageInput {
+  /** base64，不带 data: 前缀 */
+  data: string;
+  mimeType: string;
+  name?: string;
+}
+
 export interface ChatSendParams {
   agent: AgentKind;
   /** 会话 key，由渲染进程生成；主进程找不到时用它新建会话，保证事件先于 invoke 返回也能对上。 */
@@ -118,6 +126,7 @@ export interface ChatSendParams {
   resumeSessionId?: string;
   projectPath: string;
   text: string;
+  images?: ImageInput[];
   permissionMode: PermissionMode;
   model?: string;
 }

@@ -240,7 +240,7 @@ export class CodexAgent implements AgentProvider {
     } else if (session.permissionMode !== params.permissionMode) {
       await session.setPermissionMode(params.permissionMode);
     }
-    void session.send(params.text);
+    void session.send(params.text, params.images);
     return { sessionKey: session.key };
   }
 

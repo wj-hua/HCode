@@ -6,6 +6,7 @@ import type {
   ModelOption,
   ChatRunState,
   ConversationRow,
+  ImageInput,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -67,7 +68,7 @@ interface AppState {
   /** 草稿会话（还没发送过）切换使用的 CLI。 */
   setDraftAgent(agent: AgentKind): void;
   loadModels(agent: AgentKind): Promise<void>;
-  send(text: string): Promise<void>;
+  send(text: string, images?: ImageInput[]): Promise<void>;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
@@ -289,9 +290,9 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    async send(text) {
+    async send(text, images = []) {
       const conv = activeConversation();
-      if (!conv || !text.trim()) return;
+      if (!conv || (!text.trim() && images.length === 0)) return;
       const sessionKey = conv.sessionKey ?? crypto.randomUUID();
       const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
       patchConversation(conv.viewId, { sessionKey, runState: "running", error: undefined });
@@ -302,6 +303,7 @@ export const useAppStore = create<AppState>((set, get) => {
           ...(resumeSessionId ? { resumeSessionId } : {}),
           projectPath: conv.projectPath,
           text,
+          ...(images.length ? { images } : {}),
           permissionMode: conv.permissionMode,
           ...(conv.model ? { model: conv.model } : {}),
         });

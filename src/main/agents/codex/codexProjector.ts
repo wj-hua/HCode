@@ -10,7 +10,18 @@ import type {
   ToolCallRow,
   TurnHeaderRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import { isRecord, RowProjectorBase, truncate, type JsonRecord } from "../rowProjectorBase.js";
+import { readFileSync, statSync } from "node:fs";
+import { extname } from "node:path";
+import {
+  imageAttachment,
+  imageInputAttachments,
+  isRecord,
+  RowProjectorBase,
+  truncate,
+  type JsonRecord,
+  type UserAttachment,
+} from "../rowProjectorBase.js";
+import type { ImageInput } from "../../../shared/types.js";
 
 export type CodexItem = JsonRecord & { type: string; id: string };
 
@@ -90,18 +101,44 @@ export function parseUnifiedDiff(diff: string, kind: string): { hunks: Hunk[]; a
   return { hunks, additions, deletions };
 }
 
-function userInputText(content: unknown): string {
-  if (!Array.isArray(content)) return "";
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+const MAX_LOCAL_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** localImage 只记录了本地路径：读出来转成 data URL；文件已不在或过大时退回文字占位。 */
+function localImageAttachment(path: string): UserAttachment | null {
+  try {
+    if (statSync(path).size > MAX_LOCAL_IMAGE_BYTES) return null;
+    const mime = IMAGE_MIME[extname(path).toLowerCase()] ?? "image/png";
+    return imageAttachment(mime, readFileSync(path).toString("base64"), path.split("/").at(-1));
+  } catch {
+    return null;
+  }
+}
+
+function userInputParts(content: unknown): { text: string; attachments: UserAttachment[] } {
+  if (!Array.isArray(content)) return { text: "", attachments: [] };
   const parts: string[] = [];
+  const attachments: UserAttachment[] = [];
   for (const part of content) {
     if (!isRecord(part)) continue;
     if (part.type === "text" && typeof part.text === "string") parts.push(part.text);
-    else if (part.type === "image" || part.type === "localImage") parts.push("[图片]");
-    else if (part.type === "mention" || part.type === "skill") {
+    else if (part.type === "image" && typeof part.url === "string") {
+      attachments.push({ ref: part.url, fileName: "图片", mime: /^data:([^;,]+)/.exec(part.url)?.[1] ?? "image/*", bytes: 0 });
+    } else if (part.type === "localImage" && typeof part.path === "string") {
+      const image = localImageAttachment(part.path);
+      if (image) attachments.push(image);
+      else parts.push(`[图片 ${part.path}]`);
+    } else if (part.type === "mention" || part.type === "skill") {
       if (typeof part.name === "string") parts.push(`@${part.name}`);
     }
   }
-  return parts.join("\n");
+  return { text: parts.join("\n"), attachments };
 }
 
 function mcpResultText(result: unknown, error: unknown): string {
@@ -235,8 +272,8 @@ export class CodexRowProjector extends RowProjectorBase {
   private skipNextUserEcho = false;
   private planRowId: number | null = null;
 
-  beginLocalTurn(text: string, at: number) {
-    this.beginUserTurn(text, at);
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[]) {
+    this.beginUserTurn(text, at, undefined, imageInputAttachments(images));
     this.skipNextUserEcho = true;
   }
 
@@ -253,8 +290,8 @@ export class CodexRowProjector extends RowProjectorBase {
     if (!hasUser) this.ensureTurnAt(startedAt || completedAt);
     for (const item of turn.items) {
       if (item.type === "userMessage") {
-        const text = userInputText(item.content);
-        if (text.trim()) this.beginUserTurn(text, startedAt || completedAt, turn.id);
+        const { text, attachments } = userInputParts(item.content);
+        if (text.trim() || attachments.length) this.beginUserTurn(text, startedAt || completedAt, turn.id, attachments);
         continue;
       }
       this.itemCompleted(item, completedAt || startedAt);
@@ -289,8 +326,8 @@ export class CodexRowProjector extends RowProjectorBase {
         this.skipNextUserEcho = false;
         return;
       }
-      const text = userInputText(item.content);
-      if (text.trim()) this.beginUserTurn(text, at);
+      const { text, attachments } = userInputParts(item.content);
+      if (text.trim() || attachments.length) this.beginUserTurn(text, at, undefined, attachments);
       return;
     }
     this.ensureTurn(at);

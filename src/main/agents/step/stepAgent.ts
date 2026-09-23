@@ -199,7 +199,8 @@ export class StepAgent implements AgentProvider {
       if (cached && cached.mtimeMs === info.mtimeMs) return cached.summary;
       const parsed = await readSessionFile(file);
       // 只有元数据、还没有任何消息的会话不列出
-      const summary = parsed && firstUserText(parsed.entries) ? toSummary(parsed, info.mtimeMs) : null;
+      const hasUser = parsed?.entries.some((entry) => entry.type === "message" && entry.message?.role === "user");
+      const summary = parsed && hasUser ? toSummary(parsed, info.mtimeMs) : null;
       this.fileCache.set(file, { mtimeMs: info.mtimeMs, summary });
       if (summary) this.paths.set(summary.id, file);
       return summary;
@@ -292,7 +293,7 @@ export class StepAgent implements AgentProvider {
     } else if (session.permissionMode !== params.permissionMode) {
       await session.setPermissionMode(params.permissionMode);
     }
-    void session.send(params.text);
+    void session.send(params.text, params.images);
     return { sessionKey: session.key };
   }
 
