@@ -133,7 +133,7 @@ function QuestionCard({ request }: { request: PermissionRequestEvent }) {
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
       <div className="flex items-center gap-2 text-ui-base font-medium text-foreground">
         <MessageCircleQuestionIcon className="size-4 text-brand" />
-        Claude 需要你做个选择
+        需要你做个选择
       </div>
       {questions.map((question) => (
         <div key={question.question} className="flex flex-col gap-2">

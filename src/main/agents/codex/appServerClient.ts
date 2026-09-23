@@ -79,7 +79,7 @@ export class AppServerClient extends EventEmitter {
       this.emit("exit", error.message);
     });
     await this.request("initialize", {
-      clientInfo: { name: "hcode", title: "HCode", version: "0.2.0" },
+      clientInfo: { name: "hcode", title: "HCode", version: "0.3.0" },
       capabilities: null,
     });
     this.notify("initialized");

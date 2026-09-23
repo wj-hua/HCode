@@ -6,6 +6,7 @@ import { cn } from "@/components/lib/utils.js";
 const STYLE: Record<AgentKind, { letter: string; className: string }> = {
   claude: { letter: "C", className: "bg-[#d97757] text-white" },
   codex: { letter: "X", className: "bg-foreground text-background" },
+  step: { letter: "S", className: "bg-[#2563eb] text-white" },
 };
 
 export function AgentBadge({ agent, className }: { agent: AgentKind; className?: string }) {

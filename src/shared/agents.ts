@@ -15,7 +15,7 @@ export interface AgentDescriptor {
   name: string;
   command: string;
   permissionModes: PermissionModeOption[];
-  /** 内置模型选项；codex 还会在运行时从 app-server 拉取完整列表。 */
+  /** 内置模型选项；codex / step 还会在运行时拉取完整列表。 */
   models: ModelOption[];
 }
 
@@ -66,6 +66,24 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     ],
     models: [{ value: "", label: "默认模型" }],
   },
+  step: {
+    kind: "step",
+    name: "StepCode",
+    command: "step",
+    // 对应 step 的权限预设（--approval-mode confirm / strict / auto）
+    permissionModes: [
+      { mode: "ask", label: "逐条审批", description: "只读工具直接运行，改文件、执行命令前询问你", icon: "shield" },
+      { mode: "read-only", label: "只读", description: "只允许读取和搜索类工具", icon: "readonly" },
+      {
+        mode: "bypass",
+        label: "自动执行",
+        description: "普通操作不再询问，危险命令仍会询问（谨慎使用）",
+        icon: "danger",
+        dangerous: true,
+      },
+    ],
+    models: [{ value: "", label: "默认模型" }],
+  },
 };
 
-export const AGENT_KINDS: AgentKind[] = ["claude", "codex"];
+export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step"];
