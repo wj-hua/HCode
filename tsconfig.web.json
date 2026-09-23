@@ -1,0 +1,35 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "es2024",
+      "dom",
+      "dom.iterable"
+    ],
+    "jsx": "react-jsx",
+    "types": [
+      "vite/client",
+      "node"
+    ],
+    "paths": {
+      "@/*": [
+        "./src/renderer/zcode/*"
+      ],
+      "@app/*": [
+        "./src/renderer/app/*"
+      ],
+      "@hcode/shared/*": [
+        "./src/shared/*"
+      ]
+    },
+    "strict": true,
+    "noImplicitAny": false
+  },
+  "include": [
+    "src/renderer/app/**/*.ts",
+    "src/renderer/app/**/*.tsx",
+    "src/renderer/*.ts",
+    "src/renderer/*.tsx",
+    "src/shared/**/*.ts"
+  ]
+}

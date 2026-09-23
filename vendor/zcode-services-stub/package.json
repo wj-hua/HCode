@@ -1,0 +1,12 @@
+{
+  "name": "@zcode/services",
+  "private": true,
+  "type": "module",
+  "description": "Type-only stand-in for ZCode's services package. Vendored ZCode UI files only import types from it.",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}

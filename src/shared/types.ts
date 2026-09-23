@@ -1,0 +1,123 @@
+// 主进程与渲染进程共用的数据类型（只放纯类型，不放实现）。
+import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
+
+export type { ConversationRow };
+
+/** 以后接入 codex / pi / step / agy 时在这里扩展。 */
+export type AgentKind = "claude";
+
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+
+export interface AgentStatus {
+  kind: AgentKind;
+  found: boolean;
+  path?: string;
+  version?: string;
+  error?: string;
+}
+
+export interface Project {
+  /** 项目绝对路径（即 CLI 的 cwd），作为唯一键。 */
+  path: string;
+  name: string;
+  lastActiveAt: number;
+  sessionCount: number;
+  pinned: boolean;
+  /** 用户手动添加、但还没有任何会话的项目。 */
+  manual: boolean;
+  exists: boolean;
+}
+
+export interface SessionSummary {
+  id: string;
+  agent: AgentKind;
+  projectPath: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  gitBranch?: string;
+  /** 这个会话正开在某个终端里的 claude 进程中（继续发送可能与之冲突）。 */
+  activeInTerminal?: boolean;
+}
+
+export interface SessionLoadResult {
+  summary: SessionSummary | null;
+  rows: ConversationRow[];
+}
+
+/**
+ * 增量行操作，按 ZCode v4 的语义：结构变化整行替换（upsert），文本增长用追加（append）。
+ */
+export type RowOp =
+  | { op: "upsert"; row: ConversationRow }
+  | { op: "append"; rowId: number; field: "text" | "inputText"; text: string }
+  | { op: "reset"; rows: ConversationRow[] };
+
+export type ChatRunState = "idle" | "running" | "awaitingApproval" | "error";
+
+export interface ChatRowsEvent {
+  sessionKey: string;
+  ops: RowOp[];
+}
+
+export interface ChatStateEvent {
+  sessionKey: string;
+  sessionId?: string;
+  projectPath: string;
+  state: ChatRunState;
+  error?: string;
+  permissionMode: PermissionMode;
+  model?: string;
+}
+
+export interface PermissionRequestEvent {
+  sessionKey: string;
+  interactionId: string;
+  toolUseId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  title?: string;
+  description?: string;
+  decisionReason?: string;
+  blockedPath?: string;
+  /** Claude 给出的“本会话总是允许”规则；为空时不提供该选项。 */
+  canAllowForSession: boolean;
+  defaultToNo?: boolean;
+}
+
+export interface PermissionResolvedEvent {
+  sessionKey: string;
+  interactionId: string;
+}
+
+export type PermissionDecision =
+  | { decision: "allow"; updatedInput?: Record<string, unknown> }
+  | { decision: "allowSession" }
+  | { decision: "deny"; message?: string; interrupt?: boolean };
+
+export interface ChatSendParams {
+  /** 会话 key，由渲染进程生成；主进程找不到时用它新建会话，保证事件先于 invoke 返回也能对上。 */
+  sessionKey: string;
+  /** 要续聊的历史会话 id。 */
+  resumeSessionId?: string;
+  projectPath: string;
+  text: string;
+  permissionMode: PermissionMode;
+  model?: string;
+}
+
+export interface Settings {
+  theme: "system" | "light" | "dark";
+  locale: "zh-CN" | "en-US";
+  claudePath: string;
+  defaultPermissionMode: PermissionMode;
+  defaultModel: string;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  theme: "system",
+  locale: "zh-CN",
+  claudePath: "",
+  defaultPermissionMode: "default",
+  defaultModel: "",
+};

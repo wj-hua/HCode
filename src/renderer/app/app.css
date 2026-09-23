@@ -1,0 +1,10 @@
+/* HCode 样式入口：ZCode 设计 token + 组件样式，再加上 app 目录的类名扫描 */
+@import "../zcode/styles.css";
+@source "./";
+
+.app-drag {
+  app-region: drag;
+}
+.app-no-drag {
+  app-region: no-drag;
+}
