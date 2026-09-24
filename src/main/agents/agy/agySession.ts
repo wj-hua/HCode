@@ -10,11 +10,13 @@ import { join } from "node:path";
 import type {
   ChatRunState,
   ChatStateEvent,
+  FileInput,
   ImageInput,
   PermissionMode,
   RowOp,
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
+import { withFileReferences } from "../fileAttachments.js";
 import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
 
 /** agy CLI 的数据目录（会话、transcript、上传的图片都在这里）。 */
@@ -162,17 +164,18 @@ export class AgySession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string, images: readonly ImageInput[] = []) {
+  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
-    this.projector.beginLocalTurn(text, Date.now(), images);
+    this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
     this.setState("running");
     try {
       const agy = await this.ensureProcess();
       const paths = await this.saveImages(images);
       if (!this.isBusy) return; // 启动期间已被停止
-      agy.sendUser(paths.length > 0 ? `${text}${uploadedImagesNote(paths)}` : text);
+      const prompt = withFileReferences(text, files);
+      agy.sendUser(paths.length > 0 ? `${prompt}${uploadedImagesNote(paths)}` : prompt);
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
     }

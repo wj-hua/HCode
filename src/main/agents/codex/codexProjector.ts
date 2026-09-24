@@ -12,7 +12,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   imageAttachment,
-  imageInputAttachments,
+  inputAttachments,
   isRecord,
   localImageAttachment,
   RowProjectorBase,
@@ -20,7 +20,7 @@ import {
   type JsonRecord,
   type UserAttachment,
 } from "../rowProjectorBase.js";
-import type { ImageInput } from "../../../shared/types.js";
+import type { FileInput, ImageInput } from "../../../shared/types.js";
 
 export type CodexItem = JsonRecord & { type: string; id: string };
 
@@ -251,8 +251,8 @@ export class CodexRowProjector extends RowProjectorBase {
   private skipNextUserEcho = false;
   private planRowId: number | null = null;
 
-  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[]) {
-    this.beginUserTurn(text, at, undefined, imageInputAttachments(images));
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[]) {
+    this.beginUserTurn(text, at, undefined, inputAttachments(images, files));
     this.skipNextUserEcho = true;
   }
 

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AppStore } from "./appStore.js";
@@ -119,7 +120,16 @@ async function bootstrap() {
   handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
 
-  handle("chat:send", (params) => agents.send(params));
+  handle("chat:send", async (params) => {
+    const files = await Promise.all((params.files ?? []).map(async (file) => {
+      if (!isAbsolute(file.path)) throw new Error(`附件路径无效：${file.name}`);
+      const path = await realpath(file.path);
+      const info = await stat(path);
+      if (!info.isFile()) throw new Error(`附件不是文件：${file.name}`);
+      return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
+    }));
+    return agents.send({ ...params, files });
+  });
   handle("chat:interrupt", async (sessionKey) => {
     await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
   });
@@ -174,6 +184,18 @@ async function bootstrap() {
   });
   handle("app:copyText", (text) => clipboard.writeText(text));
 
+  handle("fs:stageAttachment", async ({ name, data }) => {
+    // 剪贴板文件没有磁盘路径时，保存到持久目录供 CLI 和历史会话继续读取。
+    if (data.length > 28 * 1024 * 1024) throw new Error("剪贴板附件超过 20MB");
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.length > 20 * 1024 * 1024) throw new Error("剪贴板附件超过 20MB");
+    const dir = join(app.getPath("userData"), "attachments");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `${randomUUID()}-${basename(name.replaceAll("\\", "/")) || "attachment"}`);
+    await writeFile(path, bytes, { flag: "wx" });
+    return path;
+  });
+
   handle("settings:get", () => store.settings);
   handle("settings:set", (patch) => store.updateSettings(patch));
 
@@ -198,4 +220,3 @@ app.on("window-all-closed", () => {
 });
 
 void app.whenReady().then(bootstrap);
-

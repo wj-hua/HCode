@@ -6,6 +6,7 @@ import type {
   ModelOption,
   ChatRunState,
   ConversationRow,
+  FileInput,
   ImageInput,
   PermissionDecision,
   PermissionMode,
@@ -70,7 +71,7 @@ interface AppState {
   /** 草稿会话切换工作目录。 */
   setDraftProject(projectPath: string): void;
   loadModels(agent: AgentKind): Promise<void>;
-  send(text: string, images?: ImageInput[]): Promise<void>;
+  send(text: string, images?: ImageInput[], files?: FileInput[]): Promise<boolean>;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
@@ -299,9 +300,9 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    async send(text, images = []) {
+    async send(text, images = [], files = []) {
       const conv = activeConversation();
-      if (!conv || (!text.trim() && images.length === 0)) return;
+      if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return false;
       const sessionKey = conv.sessionKey ?? crypto.randomUUID();
       const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
       patchConversation(conv.viewId, { sessionKey, runState: "running", error: undefined });
@@ -313,9 +314,11 @@ export const useAppStore = create<AppState>((set, get) => {
           projectPath: conv.projectPath,
           text,
           ...(images.length ? { images } : {}),
+          ...(files.length ? { files } : {}),
           permissionMode: conv.permissionMode,
           ...(conv.model ? { model: conv.model } : {}),
         });
+        return true;
       } catch (error) {
         const message = errorMessage(error);
         patchConversation(conv.viewId, {
@@ -325,6 +328,7 @@ export const useAppStore = create<AppState>((set, get) => {
           ...(conv.sessionKey ? {} : { sessionKey: undefined }),
         });
         toast(message, { variant: "warning" });
+        return false;
       }
     },
 

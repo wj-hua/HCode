@@ -9,7 +9,8 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import { readFileSync, statSync } from "node:fs";
 import { extname } from "node:path";
-import type { ImageInput, RowOp } from "../../shared/types.js";
+import type { FileInput, ImageInput, RowOp } from "../../shared/types.js";
+import { extractFileReferences } from "./fileAttachments.js";
 
 export type JsonRecord = Record<string, unknown>;
 export type UserAttachment = NonNullable<UserInputRow["attachments"]>[number];
@@ -41,6 +42,13 @@ export function imageAttachment(mimeType: string, data: string, fileName = "图�
 
 export function imageInputAttachments(images: readonly ImageInput[] | undefined): UserAttachment[] {
   return (images ?? []).map((image) => imageAttachment(image.mimeType, image.data, image.name));
+}
+
+export function inputAttachments(images: readonly ImageInput[] | undefined, files: readonly FileInput[] | undefined): UserAttachment[] {
+  return [
+    ...imageInputAttachments(images),
+    ...(files ?? []).map((file) => ({ ref: file.path, fileName: file.name, mime: file.mimeType, bytes: file.size })),
+  ];
 }
 
 const IMAGE_MIME: Record<string, string> = {
@@ -127,6 +135,7 @@ export class RowProjectorBase {
 
   /** 开启一轮：写 turnHeader + userInput。实时发送与历史里的真实用户消息都走这里。 */
   beginUserTurn(text: string, at: number, turnId?: string, attachments: readonly UserAttachment[] = []) {
+    const restored = extractFileReferences(text);
     this.closeTurn(at);
     this.interrupted = false;
     const id = turnId ?? `turn-${++this.turnCounter}-${at}`;
@@ -145,8 +154,10 @@ export class RowProjectorBase {
       ...this.base(at),
       kind: "userInput",
       origin: "realUser",
-      text,
-      ...(attachments.length > 0 ? { attachments: [...attachments] } : {}),
+      text: restored.text,
+      ...(attachments.length > 0 || restored.files.length > 0
+        ? { attachments: [...attachments, ...inputAttachments(undefined, restored.files)] }
+        : {}),
     };
     this.put(input);
   }

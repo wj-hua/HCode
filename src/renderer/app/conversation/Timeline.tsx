@@ -20,6 +20,7 @@ import { toolCallRowToLegacyNode } from "@/v4/toolCallRowAdapter.js";
 import { hcode } from "../bridge";
 import { formatDuration } from "../format";
 import { ImageAttachments } from "../ImageAttachments";
+import { FileAttachments } from "../FileAttachments";
 import { useUiStore } from "../store/uiStore";
 import { PermissionCard } from "./PermissionCard";
 
@@ -178,10 +179,12 @@ const RowView = memo(function RowView({
 });
 
 function UserBubble({ row }: { row: UserInputRow }) {
-  const images = (row.attachments ?? []).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
+  const images = (row.attachments ?? []).filter((attachment) => attachment.ref.startsWith("data:image/")).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
+  const files = (row.attachments ?? []).filter((attachment) => !attachment.ref.startsWith("data:image/")).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
   return (
     <div className="flex flex-col items-end gap-2">
       <ImageAttachments images={images} className="justify-end" />
+      <FileAttachments files={files} className="justify-end" />
       {row.text.trim() ? (
         <div className="flex max-w-xl flex-col gap-2 rounded-xl rounded-tr-xs border border-border bg-surface px-4 py-3 text-ui-base text-foreground">
           <ConversationUserInputBody contentText={row.text} rowId={row.rowId}>

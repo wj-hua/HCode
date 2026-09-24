@@ -13,7 +13,7 @@ import type {
   ToolCallRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
-  imageInputAttachments,
+  inputAttachments,
   isRecord,
   localImageAttachment,
   parseTime,
@@ -22,7 +22,7 @@ import {
   type JsonRecord,
   type UserAttachment,
 } from "../rowProjectorBase.js";
-import type { ImageInput } from "../../../shared/types.js";
+import type { FileInput, ImageInput } from "../../../shared/types.js";
 
 /** transcript_full.jsonl 的一行。 */
 export interface AgyStep extends JsonRecord {
@@ -162,8 +162,8 @@ export class AgyRowProjector extends RowProjectorBase {
   private readonly streamText = new Map<number, number>();
   private readonly streamThinking = new Map<number, number>();
 
-  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[]) {
-    this.beginUserTurn(text, at, undefined, imageInputAttachments(images));
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[]) {
+    this.beginUserTurn(text, at, undefined, inputAttachments(images, files));
   }
 
   protected override onTurnClosed() {

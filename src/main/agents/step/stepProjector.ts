@@ -13,14 +13,14 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   imageAttachment,
-  imageInputAttachments,
+  inputAttachments,
   isRecord,
   RowProjectorBase,
   truncate,
   type JsonRecord,
   type UserAttachment,
 } from "../rowProjectorBase.js";
-import type { ImageInput } from "../../../shared/types.js";
+import type { FileInput, ImageInput } from "../../../shared/types.js";
 
 export type StepMessage = JsonRecord & { role: string };
 
@@ -128,8 +128,8 @@ export class StepRowProjector extends RowProjectorBase {
   /** 实时发送时已在本地写过用户气泡，跳过 step 回显的第一条 user 消息。 */
   private skipNextUserEcho = false;
 
-  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[]) {
-    this.beginUserTurn(text, at, undefined, imageInputAttachments(images));
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[]) {
+    this.beginUserTurn(text, at, undefined, inputAttachments(images, files));
     this.skipNextUserEcho = true;
   }
 

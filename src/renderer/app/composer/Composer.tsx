@@ -7,17 +7,19 @@ import {
   CpuIcon,
   FilePenLineIcon,
   EyeIcon,
-  ImagePlusIcon,
+  PaperclipIcon,
   ShieldCheckIcon,
   ShieldOffIcon,
   SquareIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
-import type { ImageInput } from "@hcode/shared/types";
+import type { FileInput, ImageInput } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { ImageAttachments } from "../ImageAttachments";
+import { FileAttachments } from "../FileAttachments";
+import { hcode } from "../bridge";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -47,6 +49,7 @@ export function modeIcon(option: PermissionModeOption): ReactNode {
 // 切换会话时保留各自未发送的草稿
 const drafts = new Map<string, string>();
 const imageDrafts = new Map<string, ImageInput[]>();
+const fileDrafts = new Map<string, FileInput[]>();
 
 // 三个 CLI 的模型都支持的图片格式；5MB 是 Claude API 的单图上限
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -60,6 +63,18 @@ function readImage(file: File): Promise<ImageInput> {
       resolve({ data: url.slice(url.indexOf(",") + 1), mimeType: file.type, name: file.name || "图片" });
     };
     reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("读取附件失败"));
     reader.readAsDataURL(file);
   });
 }
@@ -82,6 +97,9 @@ export function Composer({
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
   const [text, setText] = useState(() => drafts.get(conversation.viewId) ?? "");
   const [images, setImages] = useState<ImageInput[]>(() => imageDrafts.get(conversation.viewId) ?? []);
+  const [files, setFiles] = useState<FileInput[]>(() => fileDrafts.get(conversation.viewId) ?? []);
+  const [adding, setAdding] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
@@ -103,22 +121,41 @@ export function Composer({
     imageDrafts.set(conversation.viewId, images);
   }, [conversation.viewId, images]);
 
-  /** 粘贴、拖入、选择文件共用：过滤格式与大小，读成 base64 追加到待发送列表。 */
-  const addImages = async (files: readonly File[]) => {
-    const accepted = files.filter((file) => {
-      if (!IMAGE_TYPES.includes(file.type)) {
-        toast(`不支持的图片格式：${file.name || file.type}（支持 PNG、JPEG、GIF、WebP）`, { variant: "warning" });
-        return false;
+  useEffect(() => {
+    fileDrafts.set(conversation.viewId, files);
+  }, [conversation.viewId, files]);
+
+  /** 本地文件只传路径；剪贴板文件没有路径时暂存到 HCode 数据目录。 */
+  const addFiles = async (selected: readonly File[]) => {
+    if (selected.length === 0) return;
+    setAdding((count) => count + 1);
+    try {
+      const results = await Promise.allSettled(selected.map(async (file) => {
+        if (IMAGE_TYPES.includes(file.type)) {
+          if (file.size > MAX_IMAGE_BYTES) throw new Error(`图片超过 5MB：${file.name}`);
+          return { image: await readImage(file) };
+        }
+        const localPath = hcode.getPathForFile(file);
+        if (!localPath && file.size > 20 * 1024 * 1024) throw new Error(`剪贴板附件超过 20MB：${file.name}`);
+        const path = localPath ?? await hcode.invoke("fs:stageAttachment", { name: file.name, data: await readBase64(file) });
+        return { file: { path, name: file.name || "附件", mimeType: file.type || "application/octet-stream", size: file.size } satisfies FileInput };
+      }));
+      const nextImages: ImageInput[] = [];
+      const nextFiles: FileInput[] = [];
+      for (const result of results) {
+        if (result.status === "rejected") {
+          toast(result.reason instanceof Error ? result.reason.message : String(result.reason), { variant: "warning" });
+        } else if ("image" in result.value && result.value.image) {
+          nextImages.push(result.value.image);
+        } else if ("file" in result.value && result.value.file) {
+          nextFiles.push(result.value.file);
+        }
       }
-      if (file.size > MAX_IMAGE_BYTES) {
-        toast(`图片超过 5MB：${file.name}`, { variant: "warning" });
-        return false;
-      }
-      return true;
-    });
-    if (accepted.length === 0) return;
-    const read = await Promise.all(accepted.map(readImage));
-    setImages((current) => [...current, ...read]);
+      if (nextImages.length) setImages((current) => [...current, ...nextImages]);
+      if (nextFiles.length) setFiles((current) => [...current, ...nextFiles]);
+    } finally {
+      setAdding((count) => count - 1);
+    }
   };
 
   useEffect(() => {
@@ -136,16 +173,18 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [text]);
 
-  const canSend = Boolean(text.trim() || images.length > 0);
+  const canSend = Boolean(text.trim() || images.length > 0 || files.length > 0);
 
   const submit = () => {
-    if (!canSend || running || conversation.loading) return;
-    void send(text, images);
-    setText("");
-    setImages([]);
-    drafts.delete(conversation.viewId);
-    imageDrafts.delete(conversation.viewId);
-    onSubmitted();
+    if (!canSend || running || conversation.loading || adding || submitting) return;
+    setSubmitting(true);
+    void send(text, images, files).then((sent) => {
+      if (!sent) return;
+      setText((current) => current === text ? "" : current);
+      setImages((current) => current === images ? [] : current);
+      setFiles((current) => current === files ? [] : current);
+      onSubmitted();
+    }).finally(() => setSubmitting(false));
   };
 
   const agent = AGENTS[conversation.agent];
@@ -172,7 +211,7 @@ export function Composer({
         const files = [...event.dataTransfer.files];
         if (files.length === 0) return;
         event.preventDefault();
-        void addImages(files);
+        void addFiles(files);
       }}
       className="relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-input-border bg-input p-3 transition-colors hover:border-input-border-hover focus-within:!border-input-border-focused focus-within:bg-input-focused"
     >
@@ -181,16 +220,17 @@ export function Composer({
         onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))}
         className="px-1"
       />
+      <FileAttachments files={files} onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))} className="px-1" />
       <textarea
         ref={textareaRef}
         value={text}
         rows={2}
         onChange={(event) => setText(event.target.value)}
         onPaste={(event) => {
-          const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+          const files = [...event.clipboardData.files];
           if (files.length === 0) return;
           event.preventDefault();
-          void addImages(files);
+          void addFiles(files);
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -300,15 +340,14 @@ export function Composer({
         <input
           ref={fileInputRef}
           type="file"
-          accept={IMAGE_TYPES.join(",")}
           multiple
           hidden
           onChange={(event) => {
-            void addImages([...(event.target.files ?? [])]);
+            void addFiles([...(event.target.files ?? [])]);
             event.target.value = "";
           }}
         />
-        <ControlHintTooltip title="添加图片（也可以粘贴或拖入）">
+        <ControlHintTooltip title="添加附件（图片、视频、文档、APK 等；也可以粘贴或拖入）">
           <Button
             type="button"
             variant="ghost"
@@ -316,7 +355,7 @@ export function Composer({
             onClick={() => fileInputRef.current?.click()}
             className="text-foreground-subtle"
           >
-            <ImagePlusIcon className="size-4" />
+            <PaperclipIcon className="size-4" />
           </Button>
         </ControlHintTooltip>
         {running ? (
@@ -335,7 +374,7 @@ export function Composer({
             <Button
               type="submit"
               size="icon-md"
-              disabled={!canSend || conversation.loading}
+              disabled={!canSend || conversation.loading || adding > 0 || submitting}
               className="rounded-lg bg-brand text-foreground-inverse hover:bg-brand/80"
             >
               <ArrowUpIcon className="size-4" />

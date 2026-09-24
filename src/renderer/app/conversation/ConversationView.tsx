@@ -88,6 +88,7 @@ export function ConversationView({ conversation }: { conversation: Conversation 
       ) : null}
       <div className="mx-auto w-full max-w-3xl shrink-0 px-6 pb-4">
         <Composer
+          key={conversation.viewId}
           conversation={conversation}
           onSubmitted={() => {
             stickRef.current = true;

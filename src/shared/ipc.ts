@@ -39,6 +39,7 @@ export interface InvokeMap {
   "git:switchBranch": [[cwd: string, branch: string], void];
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
+  "fs:stageAttachment": [[file: { name: string; data: string }], string];
   "app:openPath": [[path: string], void];
   "app:showInFinder": [[path: string], void];
   "app:openExternal": [[url: string], void];
@@ -65,6 +66,7 @@ export interface HCodeBridge {
   invoke<C extends InvokeChannel>(channel: C, ...args: InvokeMap[C][0]): Promise<InvokeMap[C][1]>;
   on<C extends EventChannel>(channel: C, listener: (payload: EventMap[C]) => void): () => void;
   platform: NodeJS.Platform;
+  getPathForFile(file: File): string | null;
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
@@ -87,6 +89,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "git:switchBranch",
   "fs:readText",
   "fs:stat",
+  "fs:stageAttachment",
   "app:openPath",
   "app:showInFinder",
   "app:openExternal",

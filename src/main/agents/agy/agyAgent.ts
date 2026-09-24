@@ -340,7 +340,7 @@ export class AgyAgent implements AgentProvider {
     } else if (session.permissionMode !== params.permissionMode) {
       await session.setPermissionMode(params.permissionMode);
     }
-    void session.send(params.text, params.images);
+    void session.send(params.text, params.images, params.files);
     return { sessionKey: session.key };
   }
 

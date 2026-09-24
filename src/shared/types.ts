@@ -123,6 +123,14 @@ export interface ImageInput {
   name?: string;
 }
 
+/** 本机文件附件。CLI 通过绝对路径读取，避免把视频等大文件塞进 IPC 消息。 */
+export interface FileInput {
+  path: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface ChatSendParams {
   agent: AgentKind;
   /** 会话 key，由渲染进程生成；主进程找不到时用它新建会话，保证事件先于 invoke 返回也能对上。 */
@@ -132,6 +140,7 @@ export interface ChatSendParams {
   projectPath: string;
   text: string;
   images?: ImageInput[];
+  files?: FileInput[];
   permissionMode: PermissionMode;
   model?: string;
 }

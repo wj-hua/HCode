@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 import {
   EVENT_CHANNELS,
   INVOKE_CHANNELS,
@@ -28,6 +28,13 @@ const bridge: HCodeBridge = {
     };
   },
   platform: process.platform,
+  getPathForFile(file: File) {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
 } as HCodeBridge;
 
 contextBridge.exposeInMainWorld("hcode", bridge);

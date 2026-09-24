@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import type {
   ChatRunState,
   ChatStateEvent,
+  FileInput,
   ImageInput,
   PermissionDecision,
   PermissionMode,
@@ -14,6 +15,7 @@ import type {
   RowOp,
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
+import { withFileReferences } from "../fileAttachments.js";
 import { StepRpcProcess, type StepLaunch } from "./stepRpc.js";
 import { activeBranch, StepRowProjector, type StepEntry, type StepMessage } from "./stepProjector.js";
 
@@ -97,16 +99,16 @@ export class StepSession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string, images: readonly ImageInput[] = []) {
+  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
-    this.projector.beginLocalTurn(text, Date.now(), images);
+    this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
     this.setState("running");
     try {
       const rpc = await this.ensureProcess();
       await rpc.request("prompt", {
-        message: text,
+        message: withFileReferences(text, files),
         ...(images.length
           ? { images: images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType })) }
           : {}),

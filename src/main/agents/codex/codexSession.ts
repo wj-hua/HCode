@@ -6,11 +6,13 @@ import type {
   PermissionMode,
   RowOp,
   ChatStateEvent,
+  FileInput,
   ImageInput,
   PermissionRequestEvent,
   PermissionResolvedEvent,
 } from "../../../shared/types.js";
 import { isRecord } from "../rowProjectorBase.js";
+import { withFileReferences } from "../fileAttachments.js";
 import type { AppServerClient, ServerRequest } from "./appServerClient.js";
 import { CodexRowProjector, type CodexItem, type CodexTurn } from "./codexProjector.js";
 
@@ -104,19 +106,20 @@ export class CodexSession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string, images: readonly ImageInput[] = []) {
+  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
-    this.projector.beginLocalTurn(text, Date.now(), images);
+    this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
     this.setState("running");
     try {
       await this.attach();
       const policy = codexPolicy(this.permissionMode);
+      const prompt = withFileReferences(text, files);
       const result = await this.host.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.threadId,
         input: [
-          ...(text.trim() || images.length === 0 ? [{ type: "text", text, text_elements: [] }] : []),
+          ...(prompt.trim() || images.length === 0 ? [{ type: "text", text: prompt, text_elements: [] }] : []),
           ...images.map((image) => ({ type: "image", url: `data:${image.mimeType};base64,${image.data}` })),
         ],
         approvalPolicy: policy.approvalPolicy,

@@ -107,7 +107,7 @@ export class ClaudeAgent implements AgentProvider {
     } else if (session.permissionMode !== params.permissionMode) {
       await session.setPermissionMode(params.permissionMode);
     }
-    session.send(params.text, params.images);
+    session.send(params.text, params.images, params.files);
     return { sessionKey: session.key };
   }
 
