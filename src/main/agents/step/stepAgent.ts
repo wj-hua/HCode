@@ -29,6 +29,26 @@ function approvalMode(mode: PermissionMode): string {
   return "confirm";
 }
 
+interface PiModel {
+  provider: string;
+  id: string;
+  name?: string;
+  reasoning?: boolean;
+  thinkingLevelMap?: Record<string, string | null>;
+}
+
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** 与 pi 的 getSupportedThinkingLevels 一致：xhigh / max 需模型显式声明，映射为 null 的档位不可用。 */
+function thinkingLevels(model: PiModel): string[] | undefined {
+  if (!model.reasoning) return undefined;
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    return level === "xhigh" || level === "max" ? mapped !== undefined : true;
+  });
+}
+
 export const STEP_VARIANT: PiVariant = {
   kind: "step",
   name: "StepCode",
@@ -161,12 +181,17 @@ export class StepAgent implements AgentProvider {
   async listModels(): Promise<ModelOption[]> {
     if (this.models) return this.models;
     try {
-      const result = await this.withTempProcess(homedir(), ["--no-session"], (rpc) =>
-        rpc.request<{ models: { provider: string; id: string; name?: string }[] }>("get_available_models"),
-      );
+      const { models, state } = await this.withTempProcess(homedir(), ["--no-session"], async (rpc) => ({
+        models: (await rpc.request<{ models: PiModel[] }>("get_available_models")).models,
+        state: await rpc.request<{ model?: PiModel }>("get_state"),
+      }));
       this.models = [
-        AGENTS[this.kind].models[0]!,
-        ...result.models.map((model) => ({ value: `${model.provider}/${model.id}`, label: model.name || model.id })),
+        { ...AGENTS[this.kind].models[0]!, ...(state.model ? { efforts: thinkingLevels(state.model) } : {}) },
+        ...models.map((model) => ({
+          value: `${model.provider}/${model.id}`,
+          label: model.name || model.id,
+          efforts: thinkingLevels(model),
+        })),
       ];
     } catch {
       return AGENTS[this.kind].models;
@@ -319,6 +344,7 @@ export class StepAgent implements AgentProvider {
     } else if (session.permissionMode !== params.permissionMode) {
       await session.setPermissionMode(params.permissionMode);
     }
+    session.effort = params.effort || undefined;
     void session.send(params.text, params.images, params.files);
     return { sessionKey: session.key };
   }

@@ -1,18 +1,17 @@
 // 输入框：外观照 ZCode ChatPromptEditor（rounded-2xl bg-input + 底部工具栏）。
 import {
   ArrowUpIcon,
-  CheckIcon,
   ChevronDownIcon,
   ClipboardListIcon,
-  CpuIcon,
   FilePenLineIcon,
   EyeIcon,
-  PaperclipIcon,
+  PlusIcon,
   ShieldCheckIcon,
   ShieldOffIcon,
   SquareIcon,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { ZCodeConfigOption } from "@zcode/shared";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
 import type { FileInput, ImageInput } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
@@ -24,29 +23,38 @@ import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
+import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
 import { appendPromptHistoryEntry, navigatePromptHistory } from "@/lib/promptHistory.js";
 import { persistPromptHistoryEntries, readPromptHistoryEntries } from "@/lib/promptHistoryStorage.js";
-import { useAppStore, type Conversation } from "../store/appStore";
+import { modelEfforts, useAppStore, type Conversation } from "../store/appStore";
 
-const MODE_ICONS: Record<PermissionModeOption["icon"], ReactNode> = {
-  shield: <ShieldCheckIcon className="size-4" />,
-  edit: <FilePenLineIcon className="size-4" />,
-  plan: <ClipboardListIcon className="size-4" />,
-  readonly: <EyeIcon className="size-4" />,
-  danger: <ShieldOffIcon className="size-4" />,
-};
+const MODE_ICONS = {
+  shield: ShieldCheckIcon,
+  edit: FilePenLineIcon,
+  plan: ClipboardListIcon,
+  readonly: EyeIcon,
+  danger: ShieldOffIcon,
+} satisfies Record<PermissionModeOption["icon"], unknown>;
 
-export function modeIcon(option: PermissionModeOption): ReactNode {
-  return MODE_ICONS[option.icon];
+export function modeIcon(option: PermissionModeOption, className = "size-4"): ReactNode {
+  const Icon = MODE_ICONS[option.icon];
+  return <Icon className={className} />;
 }
+
+/** 下拉菜单关闭后把焦点还给输入框（照 ZCode 的 focusSelectorOnClose）。 */
+const COMPOSER_INPUT_SELECTOR = "[data-composer-input]";
+/** Radix 的选项值不能为空串，「默认模型」用占位值代替。 */
+const DEFAULT_MODEL_VALUE = "__default__";
 
 // 切换会话时保留各自未发送的草稿
 const drafts = new Map<string, string>();
@@ -81,6 +89,13 @@ function readBase64(file: File): Promise<string> {
   });
 }
 
+const isModelLocked = () => false;
+
+function restoreInputFocus(event: Event) {
+  event.preventDefault();
+  document.querySelector<HTMLElement>(COMPOSER_INPUT_SELECTOR)?.focus();
+}
+
 export function Composer({
   conversation,
   onSubmitted,
@@ -92,6 +107,7 @@ export function Composer({
   const interrupt = useAppStore((state) => state.interrupt);
   const setPermissionMode = useAppStore((state) => state.setPermissionMode);
   const setModel = useAppStore((state) => state.setModel);
+  const setEffort = useAppStore((state) => state.setEffort);
   const setDraftAgent = useAppStore((state) => state.setDraftAgent);
   const loadModels = useAppStore((state) => state.loadModels);
   const agentStatuses = useAppStore((state) => state.agentStatuses);
@@ -103,6 +119,8 @@ export function Composer({
   const [adding, setAdding] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const thoughtTriggerRef = useRef<HTMLSpanElement>(null);
+  const { intl } = useZCodeIntl();
   const fileInputRef = useRef<HTMLInputElement>(null);
   // ↑/↓ 历史输入：照 ZCode PromptHistoryPlugin，按项目存 localStorage；index 为 null 表示不在历史浏览态
   const [promptHistory, setPromptHistory] = useState<readonly string[]>(() =>
@@ -183,7 +201,7 @@ export function Composer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     if (caretToEndRef.current) {
       caretToEndRef.current = false;
       el.setSelectionRange(el.value.length, el.value.length);
@@ -213,6 +231,36 @@ export function Composer({
   const modeInfo =
     agent.permissionModes.find((item) => item.mode === conversation.permissionMode) ?? agent.permissionModes[0]!;
   const modelLabel = models.find((item) => item.value === conversation.model)?.label ?? conversation.model;
+  const modelGroups = useMemo<ModelSelectGroup[]>(
+    () => [
+      {
+        key: conversation.agent,
+        label: AGENTS[conversation.agent].name,
+        items: models.map((item) => ({
+          key: item.value || DEFAULT_MODEL_VALUE,
+          value: item.value || DEFAULT_MODEL_VALUE,
+          name: item.label,
+        })),
+      },
+    ],
+    [conversation.agent, models],
+  );
+  // 思考强度照 ZCode：候选档位来自当前模型，未选或当前模型不支持时显示占位
+  const efforts = modelEfforts(models, conversation.model);
+  const thoughtOption = useMemo<ZCodeConfigOption | null>(
+    () =>
+      efforts.length > 0
+        ? {
+            id: "thought_level",
+            name: "思考强度",
+            category: "thought_level",
+            type: "select",
+            currentValue: efforts.includes(conversation.effort) ? conversation.effort : "",
+            options: efforts.map((value) => ({ value, name: value })),
+          }
+        : null,
+    [efforts.join(), conversation.effort],
+  );
 
   return (
     <>
@@ -240,13 +288,13 @@ export function Composer({
       <ImageAttachments
         images={images.map((image) => ({ src: `data:${image.mimeType};base64,${image.data}`, name: image.name ?? "图片" }))}
         onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))}
-        className="px-1"
       />
-      <FileAttachments files={files} onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))} className="px-1" />
+      <FileAttachments files={files} onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))} />
       <textarea
         ref={textareaRef}
         value={text}
-        rows={2}
+        rows={1}
+        data-composer-input
         onChange={(event) => {
           const index = historyIndexRef.current;
           // 手动改过回填的历史后退出浏览态，上下键恢复为移动光标
@@ -287,145 +335,157 @@ export function Composer({
           }
         }}
         placeholder={running ? `${agent.name} 正在工作…（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
-        className="max-h-60 min-h-11 w-full resize-none bg-transparent px-1 text-ui-base text-foreground outline-none placeholder:text-foreground-subtlest"
+        className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
-      <div className="flex items-center gap-1.5">
-        {isDraft ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-foreground">
-                <AgentBadge agent={conversation.agent} />
-                {agent.name}
-                <ChevronDownIcon className="size-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuLabel>使用的 CLI</DropdownMenuLabel>
-              {AGENT_KINDS.map((kind) => {
-                const status = agentStatuses?.find((item) => item.kind === kind);
-                return (
-                  <DropdownMenuItem
-                    key={kind}
-                    disabled={status !== undefined && !status.found}
-                    onSelect={() => setDraftAgent(kind)}
-                    className="gap-2"
-                  >
-                    <AgentBadge agent={kind} />
-                    <span className="flex-1">{AGENTS[kind].name}</span>
-                    {status && !status.found ? (
-                      <span className="text-ui-sm text-foreground-subtlest">未安装</span>
-                    ) : kind === conversation.agent ? (
-                      <CheckIcon className="size-4" />
-                    ) : null}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "gap-1.5 text-foreground-subtle",
-                modeInfo.dangerous && "text-warning",
-              )}
-            >
-              {modeIcon(modeInfo)}
-              {modeInfo.label}
-              <ChevronDownIcon className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuLabel>权限模式</DropdownMenuLabel>
-            {agent.permissionModes.map((item) => (
-              <DropdownMenuItem
-                key={item.mode}
-                onSelect={() => void setPermissionMode(item.mode)}
-                className="items-start gap-2"
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(event) => {
+          void addFiles([...(event.target.files ?? [])]);
+          event.target.value = "";
+        }}
+      />
+      {/* 工具条照 ZCode ChatPromptEditor：左侧 + / CLI / 权限模式，右侧模型 / 思考强度 / 发送 */}
+      <div className="group/toolbar flex items-end gap-3">
+        <div className="flex min-w-0 flex-1 items-center">
+          <div className="flex shrink-0 items-center gap-1">
+            <ControlHintTooltip title="添加附件（图片、视频、文档等；也可以粘贴或拖入）">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-md"
+                className="gap-1 rounded-lg text-ui-base"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="添加附件"
               >
-                <span className="mt-0.5">{modeIcon(item)}</span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span>{item.label}</span>
-                  <span className="text-ui-sm text-foreground-subtle">{item.description}</span>
-                </span>
-                {item.mode === conversation.permissionMode ? <CheckIcon className="mt-0.5 size-4" /> : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-foreground-subtle">
-              <CpuIcon className="size-4" />
-              {conversation.model ? modelLabel : conversation.activeModel ?? modelLabel}
-              <ChevronDownIcon className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
-            <DropdownMenuLabel>模型</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {models.map((item) => (
-              <DropdownMenuItem key={item.value} onSelect={() => void setModel(item.value)} className="items-start">
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span>{item.label}</span>
-                  {item.description ? (
-                    <span className="truncate text-ui-sm text-foreground-subtle">{item.description}</span>
-                  ) : null}
-                </span>
-                {item.value === conversation.model ? <CheckIcon className="size-4" /> : null}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <div className="flex-1" />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(event) => {
-            void addFiles([...(event.target.files ?? [])]);
-            event.target.value = "";
-          }}
-        />
-        <ControlHintTooltip title="添加附件（图片、视频、文档、APK 等；也可以粘贴或拖入）">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-md"
-            onClick={() => fileInputRef.current?.click()}
-            className="text-foreground-subtle"
-          >
-            <PaperclipIcon className="size-4" />
-          </Button>
-        </ControlHintTooltip>
-        {running ? (
-          <ControlHintTooltip title="停止" shortcut="Esc">
-            <Button
-              type="button"
-              size="icon-md"
-              onClick={() => void interrupt()}
-              className="rounded-lg bg-foreground text-background hover:bg-foreground/80"
-            >
-              <SquareIcon className="size-3.5 fill-current" />
-            </Button>
-          </ControlHintTooltip>
-        ) : (
-          <ControlHintTooltip title="发送" shortcut="Enter">
-            <Button
-              type="submit"
-              size="icon-md"
-              disabled={!canSend || conversation.loading || adding > 0 || submitting}
-              className="rounded-lg bg-brand text-foreground-inverse hover:bg-brand/80"
-            >
-              <ArrowUpIcon className="size-4" />
-            </Button>
-          </ControlHintTooltip>
-        )}
+                <PlusIcon className="size-4" />
+              </Button>
+            </ControlHintTooltip>
+            {isDraft ? (
+              <DropdownMenu>
+                <ControlHintTooltip title="使用的 CLI">
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 rounded-lg px-2 text-ui-base">
+                      <AgentBadge agent={conversation.agent} />
+                      {agent.name}
+                      <ChevronDownIcon className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </ControlHintTooltip>
+                <DropdownMenuContent side="top" align="start" sideOffset={4} className="w-56" onCloseAutoFocus={restoreInputFocus}>
+                  <DropdownMenuLabel>使用的 CLI</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup value={conversation.agent}>
+                    {AGENT_KINDS.map((kind) => {
+                      const status = agentStatuses?.find((item) => item.kind === kind);
+                      const missing = status !== undefined && !status.found;
+                      return (
+                        <DropdownMenuRadioItem
+                          key={kind}
+                          value={kind}
+                          disabled={missing}
+                          onSelect={() => setDraftAgent(kind)}
+                          className="min-h-8 gap-2"
+                        >
+                          <AgentBadge agent={kind} />
+                          <span className="flex-1">{AGENTS[kind].name}</span>
+                          {missing ? <span className="text-ui-sm text-foreground-subtlest">未安装</span> : null}
+                        </DropdownMenuRadioItem>
+                      );
+                    })}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            <DropdownMenu>
+              <ControlHintTooltip title="权限模式">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-7 gap-1 rounded-lg px-2 text-ui-base",
+                      modeInfo.dangerous && "text-warning hover:text-warning",
+                    )}
+                  >
+                    {modeIcon(modeInfo)}
+                    {modeInfo.label}
+                    <ChevronDownIcon className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </ControlHintTooltip>
+              <DropdownMenuContent side="top" align="start" sideOffset={4} className="w-64" onCloseAutoFocus={restoreInputFocus}>
+                <DropdownMenuRadioGroup
+                  value={conversation.permissionMode}
+                  onValueChange={(mode) => void setPermissionMode(mode)}
+                >
+                  {agent.permissionModes.map((item) => (
+                    <DropdownMenuRadioItem key={item.mode} value={item.mode} className="min-h-13 items-start gap-3 py-2">
+                      <span className="mt-0.5">{modeIcon(item, "size-4.5 shrink-0")}</span>
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span>{item.label}</span>
+                        <span className="text-ui-sm text-foreground-subtle">{item.description}</span>
+                      </span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden empty:hidden">
+              <ModelConfigSelect
+                modelGroups={modelGroups}
+                showProviderLevel={false}
+                normalizedValue={conversation.model || DEFAULT_MODEL_VALUE}
+                triggerLabel={conversation.model ? modelLabel : conversation.activeModel ?? modelLabel}
+                showManageModelsAction={false}
+                lockReasonMessage=""
+                isItemLocked={isModelLocked}
+                onValueChange={(value) => void setModel(value === DEFAULT_MODEL_VALUE ? "" : value)}
+                tooltipTitle={intl.formatMessage({ id: "chat.toolbar.model.label" })}
+                labelVisibilityClassName="inline-flex"
+                triggerLabelClassName="block min-w-0 max-w-48 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate"
+                focusSelectorOnClose={COMPOSER_INPUT_SELECTOR}
+              />
+              {thoughtOption ? (
+                <ThoughtLevelCycleControl
+                  composerCollapsePriority={3}
+                  labelVisibilityClassName="inline-flex"
+                  indicatorClassName="block"
+                  option={thoughtOption}
+                  onValueChange={(value) => void setEffort(value)}
+                  intl={intl}
+                  triggerRef={thoughtTriggerRef}
+                  restoreFocusSelector={COMPOSER_INPUT_SELECTOR}
+                />
+              ) : null}
+            </span>
+            {running ? (
+              <ControlHintTooltip title="停止" shortcut="Esc">
+                <Button type="button" variant="secondary" size="icon-md" onClick={() => void interrupt()} aria-label="停止">
+                  <SquareIcon className="size-4 fill-current" />
+                </Button>
+              </ControlHintTooltip>
+            ) : (
+              <ControlHintTooltip title="发送" shortcut="Enter">
+                <Button
+                  type="submit"
+                  size="icon-md"
+                  disabled={!canSend || conversation.loading || adding > 0 || submitting}
+                  aria-label="发送"
+                  className="cursor-pointer gap-1 rounded-lg bg-brand text-ui-base text-foreground-inverse hover:bg-brand/80"
+                >
+                  <ArrowUpIcon className="size-4" />
+                </Button>
+              </ControlHintTooltip>
+            )}
+          </div>
+        </div>
       </div>
     </form>
     {isDraft ? <DraftContextBar conversation={conversation} /> : null}

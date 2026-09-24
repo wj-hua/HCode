@@ -43,6 +43,8 @@ export interface Conversation {
   model: string;
   /** Claude 实际使用的模型 id（来自 init）。 */
   activeModel?: string;
+  /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
+  effort: string;
 }
 
 interface AppState {
@@ -77,6 +79,8 @@ interface AppState {
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
+  /** 思考强度随下一次发送生效，并记为该 CLI 新会话的默认值。 */
+  setEffort(effort: string): Promise<void>;
   respondPermission(interactionId: string, decision: PermissionDecision): Promise<void>;
   addProject(): Promise<void>;
   setProjectPinned(path: string, pinned: boolean): Promise<void>;
@@ -87,6 +91,11 @@ interface AppState {
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
   setSettingsOpen(open: boolean): void;
+}
+
+/** 模型支持的思考强度档位；模型列表还没拉到或模型不支持时为空。 */
+export function modelEfforts(models: readonly ModelOption[], model: string): string[] {
+  return models.find((item) => item.value === model)?.efforts ?? [];
 }
 
 export function errorMessage(error: unknown): string {
@@ -225,6 +234,7 @@ export const useAppStore = create<AppState>((set, get) => {
         runState: "idle",
         permissionMode: settings.defaultPermissionModes[summary.agent],
         model: settings.defaultModels[summary.agent],
+        effort: settings.defaultEfforts[summary.agent],
       };
       set((state) => ({
         conversations: { ...state.conversations, [viewId]: conv },
@@ -267,6 +277,7 @@ export const useAppStore = create<AppState>((set, get) => {
             runState: "idle",
             permissionMode: settings.defaultPermissionModes[agent],
             model: settings.defaultModels[agent],
+            effort: settings.defaultEfforts[agent],
           },
         },
         activeViewId: viewId,
@@ -281,6 +292,7 @@ export const useAppStore = create<AppState>((set, get) => {
         agent,
         permissionMode: settings.defaultPermissionModes[agent],
         model: settings.defaultModels[agent],
+        effort: settings.defaultEfforts[agent],
         activeModel: undefined,
       });
       void get().loadModels(agent);
@@ -309,6 +321,8 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return false;
       const sessionKey = conv.sessionKey ?? crypto.randomUUID();
       const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
+      const models = get().models[conv.agent] ?? AGENTS[conv.agent].models;
+      const effort = modelEfforts(models, conv.model).includes(conv.effort) ? conv.effort : "";
       patchConversation(conv.viewId, { sessionKey, runState: "running", error: undefined });
       try {
         await hcode.invoke("chat:send", {
@@ -321,6 +335,7 @@ export const useAppStore = create<AppState>((set, get) => {
           ...(files.length ? { files } : {}),
           permissionMode: conv.permissionMode,
           ...(conv.model ? { model: conv.model } : {}),
+          ...(effort ? { effort } : {}),
         });
         return true;
       } catch (error) {
@@ -355,6 +370,13 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!conv) return;
       patchConversation(conv.viewId, { model });
       if (conv.sessionKey) await hcode.invoke("chat:setModel", conv.sessionKey, model).catch(() => undefined);
+    },
+
+    async setEffort(effort) {
+      const conv = activeConversation();
+      if (!conv) return;
+      patchConversation(conv.viewId, { effort });
+      await get().updateSettings({ defaultEfforts: { [conv.agent]: effort } });
     },
 
     async respondPermission(interactionId, decision) {

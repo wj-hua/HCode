@@ -43,6 +43,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
     defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),
     defaultModels: pick(raw.defaultModels, DEFAULT_SETTINGS.defaultModels),
+    defaultEfforts: pick(raw.defaultEfforts, DEFAULT_SETTINGS.defaultEfforts),
   };
   if (typeof raw.claudePath === "string" && raw.claudePath) settings.agentPaths.claude = raw.claudePath;
   if (typeof raw.defaultPermissionMode === "string") {
@@ -66,12 +67,13 @@ function mergeDefined<T extends object>(base: T, patch: Partial<T> | undefined):
 
 /** 按 CLI 分组的字段逐项合并，只改补丁里给出的 CLI。 */
 export function mergeSettings(current: Settings, patch: SettingsPatch): Settings {
-  const { agentPaths, defaultPermissionModes, defaultModels, ...rest } = patch;
+  const { agentPaths, defaultPermissionModes, defaultModels, defaultEfforts, ...rest } = patch;
   return {
     ...mergeDefined(current, rest),
     agentPaths: mergeDefined(current.agentPaths, agentPaths),
     defaultPermissionModes: mergeDefined(current.defaultPermissionModes, defaultPermissionModes),
     defaultModels: mergeDefined(current.defaultModels, defaultModels),
+    defaultEfforts: mergeDefined(current.defaultEfforts, defaultEfforts),
   };
 }
 

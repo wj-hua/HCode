@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   query,
   type CanUseTool,
+  type EffortLevel,
   type PermissionMode as ClaudePermissionMode,
   type PermissionResult,
   type PermissionUpdate,
@@ -82,6 +83,7 @@ export class ClaudeSession {
   sessionId: string | undefined;
   permissionMode: PermissionMode;
   model: string | undefined;
+  effort: string | undefined;
 
   private readonly projector = new ClaudeRowProjector();
   private activeQuery: Query | null = null;
@@ -101,6 +103,7 @@ export class ClaudeSession {
       resumeSessionId?: string;
       permissionMode: PermissionMode;
       model?: string;
+      effort?: string;
     },
   ) {
     this.key = options.key;
@@ -108,6 +111,7 @@ export class ClaudeSession {
     this.sessionId = options.resumeSessionId;
     this.permissionMode = options.permissionMode;
     this.model = options.model || undefined;
+    this.effort = options.effort || undefined;
   }
 
   /** 续聊时先把历史喂给投影器，保证新行的 rowId 接在历史后面。 */
@@ -173,6 +177,7 @@ export class ClaudeSession {
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code" },
         ...(this.model ? { model: this.model } : {}),
+        ...(this.effort ? { effort: this.effort as EffortLevel } : {}),
         stderr: (data: string) => {
           if (process.env.HCODE_DEBUG) process.stderr.write(`[claude] ${data}`);
         },
@@ -344,6 +349,15 @@ export class ClaudeSession {
     this.emitState();
     try {
       await this.activeQuery?.setModel(model || undefined);
+    } catch {
+      // 下次启动时生效
+    }
+  }
+
+  async setEffort(effort: string) {
+    this.effort = effort || undefined;
+    try {
+      await this.activeQuery?.applyFlagSettings({ effortLevel: (effort || null) as EffortLevel | null });
     } catch {
       // 下次启动时生效
     }

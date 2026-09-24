@@ -47,6 +47,8 @@ export class StepSession {
   sessionFile: string | undefined;
   permissionMode: PermissionMode;
   model: string | undefined;
+  /** 思考强度（--thinking），变化后下一次发送时重启进程生效。 */
+  effort: string | undefined;
   /** step 实际使用的模型（get_state 返回）。 */
   private reportedModel: string | undefined;
 
@@ -119,13 +121,14 @@ export class StepSession {
   private launchArgs(): string[] {
     const args = this.variant.launchArgs(this.permissionMode);
     if (this.model) args.push("--model", this.model);
+    if (this.effort) args.push("--thinking", this.effort);
     if (this.sessionFile && existsSync(this.sessionFile)) args.push("--session", this.sessionFile);
     else if (this.sessionId) args.push("--session-id", this.sessionId);
     return args;
   }
 
   private async ensureProcess(): Promise<StepRpcProcess> {
-    const signature = JSON.stringify([this.permissionMode, this.model ?? ""]);
+    const signature = JSON.stringify([this.permissionMode, this.model ?? "", this.effort ?? ""]);
     if (this.process?.running && this.launchedWith === signature) return this.process;
     this.process?.dispose();
     const rpc = new StepRpcProcess(await this.host.resolveLaunch(this.projectPath, this.launchArgs()));

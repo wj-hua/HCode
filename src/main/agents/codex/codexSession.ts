@@ -73,6 +73,8 @@ export class CodexSession {
   threadId: string | undefined;
   permissionMode: PermissionMode;
   model: string | undefined;
+  /** 思考强度，随每轮 turn/start 发送。 */
+  effort: string | undefined;
   /** app-server 实际使用的模型（thread/start、thread/resume 返回）。 */
   private reportedModel: string | undefined;
 
@@ -125,6 +127,7 @@ export class CodexSession {
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: sandboxPolicyObject(policy.sandbox),
         ...(this.model ? { model: this.model } : {}),
+        ...(this.effort ? { effort: this.effort } : {}),
         summary: "auto",
       });
       this.currentTurnId = result.turn.id;

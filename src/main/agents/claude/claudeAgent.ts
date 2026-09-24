@@ -139,6 +139,7 @@ export class ClaudeAgent implements AgentProvider {
           ...(params.resumeSessionId ? { resumeSessionId: params.resumeSessionId } : {}),
           permissionMode: params.permissionMode,
           ...(params.model ? { model: params.model } : {}),
+          ...(params.effort ? { effort: params.effort } : {}),
         },
       );
       this.sessions.set(session.key, session);
@@ -147,8 +148,9 @@ export class ClaudeAgent implements AgentProvider {
         session.seedHistory(records);
       }
       session.emitState();
-    } else if (session.permissionMode !== params.permissionMode) {
-      await session.setPermissionMode(params.permissionMode);
+    } else {
+      if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
+      if (session.effort !== (params.effort || undefined)) await session.setEffort(params.effort ?? "");
     }
     session.send(params.text, params.images, params.files);
     return { sessionKey: session.key };

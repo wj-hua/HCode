@@ -14,6 +14,8 @@ export interface ModelOption {
   value: string;
   label: string;
   description?: string;
+  /** 该模型可选的思考强度（按由低到高排列）；为空表示不支持调节。 */
+  efforts?: string[];
 }
 
 export interface AgentStatus {
@@ -143,6 +145,8 @@ export interface ChatSendParams {
   files?: FileInput[];
   permissionMode: PermissionMode;
   model?: string;
+  /** 思考强度；不传 = CLI 默认。 */
+  effort?: string;
 }
 
 /** 额度窗口：5 小时滚动窗口、周窗口，或其他时长。 */
@@ -187,10 +191,12 @@ export interface Settings {
   agentPaths: Record<AgentKind, string>;
   defaultPermissionModes: Record<AgentKind, PermissionMode>;
   defaultModels: Record<AgentKind, string>;
+  /** 输入框里最近选择的思考强度（空串 = CLI 默认），新建会话沿用。 */
+  defaultEfforts: Record<AgentKind, string>;
 }
 
 /** 按 CLI 分组的设置项。 */
-type PerAgentSettingKey = "agentPaths" | "defaultPermissionModes" | "defaultModels";
+type PerAgentSettingKey = "agentPaths" | "defaultPermissionModes" | "defaultModels" | "defaultEfforts";
 
 /** settings:set 的补丁：按 CLI 分组的字段只需传要改的 CLI，主进程逐项合并。 */
 export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey>> & {
@@ -204,4 +210,5 @@ export const DEFAULT_SETTINGS: Settings = {
   agentPaths: { claude: "", codex: "", step: "", agy: "", pi: "" },
   defaultPermissionModes: { claude: "default", codex: "on-request", step: "ask", agy: "default", pi: "default" },
   defaultModels: { claude: "", codex: "", step: "", agy: "", pi: "" },
+  defaultEfforts: { claude: "", codex: "", step: "", agy: "", pi: "" },
 };

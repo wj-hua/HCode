@@ -19,6 +19,9 @@ export interface AgentDescriptor {
   models: ModelOption[];
 }
 
+/** Claude Code 的 effort 档位；模型不支持的档位由 CLI 自动降级。 */
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
 export const AGENTS: Record<AgentKind, AgentDescriptor> = {
   claude: {
     kind: "claude",
@@ -37,9 +40,9 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
       },
     ],
     models: [
-      { value: "", label: "默认模型" },
-      { value: "opus", label: "Opus" },
-      { value: "sonnet", label: "Sonnet" },
+      { value: "", label: "默认模型", efforts: CLAUDE_EFFORTS },
+      { value: "opus", label: "Opus", efforts: CLAUDE_EFFORTS },
+      { value: "sonnet", label: "Sonnet", efforts: CLAUDE_EFFORTS },
       { value: "haiku", label: "Haiku" },
     ],
   },

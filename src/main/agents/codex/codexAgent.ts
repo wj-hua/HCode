@@ -96,15 +96,29 @@ export class CodexAgent implements AgentProvider {
   async listModels(): Promise<ModelOption[]> {
     if (this.models) return this.models;
     try {
-      const result = await this.client.call<{ data: { model: string; displayName: string; description: string; hidden: boolean }[] }>(
-        "model/list",
-        {},
-      );
+      const result = await this.client.call<{
+        data: {
+          model: string;
+          displayName: string;
+          description: string;
+          hidden: boolean;
+          isDefault?: boolean;
+          supportedReasoningEfforts?: { reasoningEffort: string }[];
+        }[];
+      }>("model/list", {});
+      const efforts = (model: (typeof result.data)[number]) =>
+        model.supportedReasoningEfforts?.map((item) => item.reasoningEffort);
+      const defaultModel = result.data.find((model) => model.isDefault);
       this.models = [
-        AGENTS.codex.models[0]!,
+        { ...AGENTS.codex.models[0]!, ...(defaultModel ? { efforts: efforts(defaultModel) } : {}) },
         ...result.data
           .filter((model) => !model.hidden)
-          .map((model) => ({ value: model.model, label: model.displayName || model.model, description: model.description })),
+          .map((model) => ({
+            value: model.model,
+            label: model.displayName || model.model,
+            description: model.description,
+            efforts: efforts(model),
+          })),
       ];
     } catch {
       return AGENTS.codex.models;
@@ -258,6 +272,7 @@ export class CodexAgent implements AgentProvider {
     } else if (session.permissionMode !== params.permissionMode) {
       await session.setPermissionMode(params.permissionMode);
     }
+    session.effort = params.effort || undefined;
     void session.send(params.text, params.images, params.files);
     return { sessionKey: session.key };
   }
