@@ -1,8 +1,10 @@
 // Claude Code 接入：历史 + 实时会话 + 审批的统一入口。
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { AGENTS } from "../../../shared/agents.js";
 import type {
+  AgentQuota,
   AgentStatus,
   ChatSendParams,
   ModelOption,
@@ -12,9 +14,17 @@ import type {
   SessionSummary,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
+import { claudeQuota, quotaError } from "../quota.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
 import { ClaudeHistory } from "./claudeHistory.js";
 import { ClaudeSession } from "./claudeSession.js";
+
+const QUOTA_TIMEOUT_MS = 30_000;
+
+/** 不产出任何消息的输入流：只用来拉起 claude 进程发控制请求，不会发起对话。 */
+async function* idleInput(signal: AbortSignal): AsyncGenerator<never> {
+  await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+}
 
 export class ClaudeAgent implements AgentProvider {
   readonly kind = "claude" as const;
@@ -42,6 +52,38 @@ export class ClaudeAgent implements AgentProvider {
 
   async listModels(): Promise<ModelOption[]> {
     return AGENTS.claude.models;
+  }
+
+  /** 起一个空闲的 SDK 进程读 /usage 的额度数据，不发消息、不消耗 token。 */
+  async getQuota(): Promise<AgentQuota> {
+    const status = await this.getStatus();
+    if (!status.found || !status.path) return quotaError("claude", "未找到 claude 命令");
+    const abort = new AbortController();
+    const activeQuery = query({
+      prompt: idleInput(abort.signal),
+      options: {
+        cwd: homedir(),
+        pathToClaudeCodeExecutable: status.path,
+        env: this.getEnv(),
+        abortController: abort,
+        // 只读用户设置（登录方式可能在里面），不跑 hook、不起 MCP、不落会话文件
+        settingSources: ["user"],
+        settings: { disableAllHooks: true },
+        strictMcpConfig: true,
+        persistSession: false,
+      },
+    });
+    const timer = setTimeout(() => abort.abort(), QUOTA_TIMEOUT_MS);
+    try {
+      const usage = await activeQuery.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
+      return claudeQuota(usage);
+    } catch (error) {
+      return quotaError("claude", abort.signal.aborted ? "读取额度超时" : error);
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+      activeQuery.close();
+    }
   }
 
   listSessions(): Promise<SessionSummary[]> {
@@ -89,6 +131,7 @@ export class ClaudeAgent implements AgentProvider {
           onSessionId: (_key, _sessionId, projectPath) => {
             this.history.invalidate([projectPath]);
           },
+          onQuotaChanged: () => this.events.quotaStale("claude"),
         },
         {
           key: params.sessionKey,

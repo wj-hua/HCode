@@ -1,6 +1,7 @@
 // IPC 契约：preload 暴露的 window.hcode 与主进程 handler 共用同一份定义。
 import type {
   AgentKind,
+  AgentQuota,
   AgentStatus,
   ModelOption,
   ChatRowsEvent,
@@ -23,6 +24,8 @@ import type {
 export interface InvokeMap {
   "agent:status": [[], AgentStatus[]];
   "agent:models": [[agent: AgentKind], ModelOption[]];
+  /** 各 CLI 的订阅额度；force 时忽略主进程缓存。 */
+  "quota:list": [[force?: boolean], AgentQuota[]];
   "projects:list": [[], Project[]];
   "projects:add": [[], Project | null];
   "projects:setPinned": [[path: string, pinned: boolean], void];
@@ -58,6 +61,7 @@ export interface EventMap {
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
+  "quota:updated": AgentQuota;
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -73,6 +77,7 @@ export interface HCodeBridge {
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "agent:status",
   "agent:models",
+  "quota:list",
   "projects:list",
   "projects:add",
   "projects:setPinned",
@@ -107,4 +112,5 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "permission:requested",
   "permission:resolved",
   "window:fullscreen",
+  "quota:updated",
 ];

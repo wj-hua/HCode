@@ -9,6 +9,7 @@ macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZC
 - 审批卡片：Claude Code、Codex、StepCode 的工具审批与提问；Antigravity 无头模式不能交互审批，需要确认的操作会自动拒绝
 - 按 CLI 提供各自支持的权限模式与模型切换
 - 已添加项目中，终端新建或更新的会话会自动刷新；Claude Code 正在终端运行的会话会提示冲突风险
+- 订阅额度：侧边栏底部显示 Claude Code、Codex、Antigravity 的 5 小时和每周剩余额度，点开查看分组明细与重置时间（API key 等没有订阅额度的登录方式会注明）
 
 ## 使用
 
@@ -49,6 +50,8 @@ src/main/        Electron 主进程
   agents/step/     StepCode 接入：读 ~/.stepcode/agent/sessions 历史；每个会话一个 `step --mode rpc` 进程
   agents/agy/      Antigravity 接入：读 ~/.gemini/antigravity-cli 的 transcript 历史；每个会话一个 `agy -p` stream-json 进程
   agents/rowProjectorBase.ts  各 CLI 投影器公共部分：把记录 / 流事件投影为 ZCode v4 ConversationRow
+  agents/quota.ts  订阅额度解析：Claude SDK usage 请求 / codex account/rateLimits/read / `agy -p /quota` → AgentQuota
+  quotaService.ts  额度缓存与刷新（过期重读，对话结束或 CLI 推送额度变化后重读），推送 quota:updated
 src/preload/     contextBridge 暴露 window.hcode（通道白名单见 src/shared/ipc.ts）
 src/shared/      主/渲染进程共用类型与 IPC 契约
 src/renderer/

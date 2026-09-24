@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGENTS } from "../../../shared/agents.js";
 import type {
+  AgentQuota,
   AgentStatus,
   ChatSendParams,
   ModelOption,
@@ -13,6 +14,7 @@ import type {
   SessionSummary,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
+import { codexQuota, quotaError, quotaUnavailable } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
 import { AppServerClient, type ServerRequest } from "./appServerClient.js";
@@ -108,6 +110,21 @@ export class CodexAgent implements AgentProvider {
       return AGENTS.codex.models;
     }
     return this.models;
+  }
+
+  /** 只有 ChatGPT 账号登录才有订阅额度；API key 等登录方式返回 unavailable。 */
+  async getQuota(): Promise<AgentQuota> {
+    const status = await this.getStatus();
+    if (!status.found) return quotaError("codex", "未找到 codex 命令");
+    try {
+      const { account } = await this.client.call<{ account: { type?: string } | null }>("account/read", {});
+      if (!account) return quotaUnavailable("codex", "codex 尚未登录");
+      if (account.type !== "chatgpt") return quotaUnavailable("codex", "当前登录方式没有订阅额度（API key 等）");
+      const result = await this.client.call("account/rateLimits/read", { excludeResetCreditDetails: true });
+      return codexQuota(result);
+    } catch (error) {
+      return quotaError("codex", error);
+    }
   }
 
   // ───────────────────────── 历史 ─────────────────────────
@@ -256,6 +273,10 @@ export class CodexAgent implements AgentProvider {
   private onNotification(method: string, params: Record<string, unknown>) {
     if (method === "thread/name/updated" || method === "thread/started") {
       this.invalidate();
+    }
+    if (method === "account/rateLimits/updated") {
+      this.events.quotaStale("codex");
+      return;
     }
     if (method === "serverRequest/resolved") {
       this.sessionForThread(params.threadId)?.resolveServerRequest(params.requestId as number | string);

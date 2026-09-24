@@ -14,6 +14,7 @@ import type { AgentEvents } from "./agents/types.js";
 import { listBranches, switchBranch } from "./git.js";
 import { buildProjects } from "./projects.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
+import { QuotaService } from "./quotaService.js";
 import { createMainWindow } from "./window.js";
 
 app.setName("HCode");
@@ -60,6 +61,7 @@ function buildAgentEnv(): Record<string, string> {
 async function bootstrap() {
   shellEnv = (await captureLoginShellEnvSnapshot()) ?? {};
   const store = new AppStore(app.getPath("userData"));
+  let quota: QuotaService | null = null;
 
   const events: AgentEvents = {
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
@@ -70,6 +72,7 @@ async function bootstrap() {
     },
     permissionResolved: (event) => send("permission:resolved", event),
     indexChanged: (projectPaths) => send("sessions:indexChanged", { projectPaths }),
+    quotaStale: (agent) => quota?.markStale(agent),
   };
   const agents = new AgentRegistry({
     claude: new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude),
@@ -77,6 +80,7 @@ async function bootstrap() {
     step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
   });
+  quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const requireSession = (sessionKey: string) => {
     const provider = agents.bySessionKey(sessionKey);
     if (!provider) throw new Error("会话不存在或已关闭");
@@ -85,6 +89,7 @@ async function bootstrap() {
 
   handle("agent:status", () => agents.statuses(true));
   handle("agent:models", (agent) => agents.get(agent).listModels());
+  handle("quota:list", (force) => quota!.list(force));
 
   handle("projects:list", async () => buildProjects(await agents.allSessions(), store));
   handle("projects:add", async () => {
@@ -205,7 +210,10 @@ async function bootstrap() {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(store);
   });
-  app.on("before-quit", () => agents.dispose());
+  app.on("before-quit", () => {
+    quota?.dispose();
+    agents.dispose();
+  });
 }
 
 app.on("second-instance", () => {

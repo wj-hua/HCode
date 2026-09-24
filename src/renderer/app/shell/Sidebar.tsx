@@ -13,6 +13,7 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
 import { useAppStore } from "../store/appStore";
 import { ProjectItem } from "./ProjectItem";
+import { QuotaIndicator } from "./QuotaIndicator";
 
 export function Sidebar() {
   const projects = useAppStore((state) => state.projects);
@@ -119,7 +120,9 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="flex h-11 shrink-0 items-center justify-end border-t border-border/60 px-3">
+      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-t border-border/60 pr-3 pl-2">
+        <QuotaIndicator />
+        <div className="flex-1" />
         <ControlHintTooltip title="设置" shortcut="⌘," side="top">
           <Button
             variant="ghost"
