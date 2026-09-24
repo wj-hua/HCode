@@ -1,4 +1,4 @@
-// 一个正在进行的 StepCode 会话：对应一个 `step --mode rpc` 子进程。
+// 一个正在进行的 StepCode / pi 会话：对应一个 `step --mode rpc`（或 `pi --mode rpc`）子进程。
 // 权限模式与模型在启动参数里指定（step 的 /permissions、set_model 会改写全局配置，这里不用），
 // 切换后下一次发送时带 --session 重启进程续上同一个会话文件。
 import { randomUUID } from "node:crypto";
@@ -16,17 +16,11 @@ import type {
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
 import { withFileReferences } from "../fileAttachments.js";
+import type { PiVariant } from "./piVariant.js";
 import { StepRpcProcess, type StepLaunch } from "./stepRpc.js";
 import { activeBranch, StepRowProjector, type StepEntry, type StepMessage } from "./stepProjector.js";
 
 const FLUSH_INTERVAL_MS = 16;
-
-/** HCode 权限模式 → step 的 --approval-mode（confirm / strict / auto 分别对应预设 ask / read-only / bypass）。 */
-function approvalMode(mode: PermissionMode): string {
-  if (mode === "read-only") return "strict";
-  if (mode === "bypass") return "auto";
-  return "confirm";
-}
 
 export interface StepSessionHost {
   resolveLaunch(cwd: string, args: string[]): Promise<StepLaunch>;
@@ -56,7 +50,8 @@ export class StepSession {
   /** step 实际使用的模型（get_state 返回）。 */
   private reportedModel: string | undefined;
 
-  private readonly projector = new StepRowProjector();
+  private readonly variant: PiVariant;
+  private readonly projector: StepRowProjector;
   private process: StepRpcProcess | null = null;
   /** 当前进程启动时的参数，与现在的设置不同就要重启。 */
   private launchedWith = "";
@@ -71,6 +66,7 @@ export class StepSession {
   constructor(
     private readonly host: StepSessionHost,
     options: {
+      variant: PiVariant;
       key: string;
       projectPath: string;
       sessionId?: string;
@@ -79,6 +75,8 @@ export class StepSession {
       model?: string;
     },
   ) {
+    this.variant = options.variant;
+    this.projector = new StepRowProjector(options.variant.projectTool, options.variant.name);
     this.key = options.key;
     this.projectPath = options.projectPath;
     this.sessionId = options.sessionId;
@@ -119,7 +117,7 @@ export class StepSession {
   }
 
   private launchArgs(): string[] {
-    const args = ["--approval-mode", approvalMode(this.permissionMode), "--exclude-tools", "clarify_user"];
+    const args = this.variant.launchArgs(this.permissionMode);
     if (this.model) args.push("--model", this.model);
     if (this.sessionFile && existsSync(this.sessionFile)) args.push("--session", this.sessionFile);
     else if (this.sessionId) args.push("--session-id", this.sessionId);
@@ -166,7 +164,7 @@ export class StepSession {
         const message = event.message as StepMessage;
         this.projector.consumeMessage(message, now);
         if (message.role === "assistant" && message.stopReason === "error") {
-          this.error = typeof message.errorMessage === "string" ? message.errorMessage : "StepCode 执行出错";
+          this.error = typeof message.errorMessage === "string" ? message.errorMessage : `${this.variant.name} 执行出错`;
         }
         break;
       }
@@ -350,7 +348,7 @@ export class StepSession {
 
   private fail(message: string) {
     this.error = message;
-    this.projector.failTurn(`StepCode 出错：${message}`, Date.now());
+    this.projector.failTurn(`${this.variant.name} 出错：${message}`, Date.now());
     this.cancelAllPending();
     this.flushNow();
     this.setState("error");
@@ -366,7 +364,7 @@ export class StepSession {
     const model = this.model ?? this.reportedModel;
     this.host.emitState({
       sessionKey: this.key,
-      agent: "step",
+      agent: this.variant.kind,
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       projectPath: this.projectPath,
       state: this.state,

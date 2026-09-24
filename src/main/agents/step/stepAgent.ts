@@ -1,5 +1,5 @@
-// StepCode 接入：历史读取会话 JSONL（step 没有列会话的 RPC 命令，格式见 step 自带的 docs/session-format.md），
-// 实时会话、审批、改名、模型列表都走 `step --mode rpc`。
+// StepCode / pi 接入：历史读取会话 JSONL（没有列会话的 RPC 命令，格式见自带的 docs/session-format.md），
+// 实时会话、审批、改名、模型列表都走 `--mode rpc`。两者的差异见 PiVariant，这里默认是 StepCode。
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -17,12 +17,31 @@ import type {
 import { probeCli } from "../../util/locateCli.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
-import { projectStepHistory, type StepEntry } from "./stepProjector.js";
+import type { PiVariant } from "./piVariant.js";
+import { projectStepHistory, projectStepTool, type StepEntry } from "./stepProjector.js";
 import { StepRpcProcess, type StepLaunch } from "./stepRpc.js";
 import { StepSession } from "./stepSession.js";
 
-/** 官方安装脚本的位置；优先于 PATH，避免和同名的 smallstep `step` 命令混淆。 */
-const STEP_BIN = join(homedir(), ".stepcode/bin/step");
+/** HCode 权限模式 → step 的 --approval-mode（confirm / strict / auto 分别对应预设 ask / read-only / bypass）。 */
+function approvalMode(mode: PermissionMode): string {
+  if (mode === "read-only") return "strict";
+  if (mode === "bypass") return "auto";
+  return "confirm";
+}
+
+export const STEP_VARIANT: PiVariant = {
+  kind: "step",
+  name: "StepCode",
+  command: "step",
+  // 官方安装脚本的位置；优先于 PATH，避免和同名的 smallstep `step` 命令混淆
+  preferredBin: join(homedir(), ".stepcode/bin/step"),
+  // 与 step 自己的规则一致：STEP_CODING_AGENT_SESSION_DIR > STEP_CODING_AGENT_DIR/sessions > ~/.stepcode/agent/sessions
+  sessionsDir: (env) =>
+    env.STEP_CODING_AGENT_SESSION_DIR || join(env.STEP_CODING_AGENT_DIR || join(homedir(), ".stepcode/agent"), "sessions"),
+  // clarify_user 只能在 step 的终端界面里用，RPC 下会直接报错
+  launchArgs: (mode) => ["--approval-mode", approvalMode(mode), "--exclude-tools", "clarify_user"],
+  projectTool: projectStepTool,
+};
 
 interface ParsedSession {
   header: { id: string; cwd: string; timestamp?: string };
@@ -69,7 +88,7 @@ function firstUserText(entries: readonly StepEntry[]): string {
   return "";
 }
 
-function toSummary(parsed: ParsedSession, mtimeMs: number): SessionSummary {
+function toSummary(kind: PiVariant["kind"], parsed: ParsedSession, mtimeMs: number): SessionSummary {
   let name = "";
   for (const entry of parsed.entries) {
     if (entry.type === "session_info") name = typeof entry.name === "string" ? entry.name : "";
@@ -78,7 +97,7 @@ function toSummary(parsed: ParsedSession, mtimeMs: number): SessionSummary {
   const createdAt = parsed.header.timestamp ? Date.parse(parsed.header.timestamp) || mtimeMs : mtimeMs;
   return {
     id: parsed.header.id,
-    agent: "step",
+    agent: kind,
     projectPath: parsed.header.cwd,
     title: raw.length > 80 ? `${raw.slice(0, 80)}…` : raw || "未命名会话",
     createdAt,
@@ -87,7 +106,7 @@ function toSummary(parsed: ParsedSession, mtimeMs: number): SessionSummary {
 }
 
 export class StepAgent implements AgentProvider {
-  readonly kind = "step" as const;
+  readonly kind: PiVariant["kind"];
   private readonly sessions = new Map<string, StepSession>();
   private status: AgentStatus | null = null;
   private models: ModelOption[] | null = null;
@@ -105,32 +124,31 @@ export class StepAgent implements AgentProvider {
     private readonly events: AgentEvents,
     private readonly getEnv: () => Record<string, string>,
     private readonly getPathOverride: () => string,
-  ) {}
+    private readonly variant: PiVariant = STEP_VARIANT,
+  ) {
+    this.kind = variant.kind;
+  }
 
-  /** 与 step 自己的规则一致：STEP_CODING_AGENT_SESSION_DIR > STEP_CODING_AGENT_DIR/sessions > ~/.stepcode/agent/sessions */
   private sessionsDir(): string {
-    const env = this.getEnv();
-    return (
-      env.STEP_CODING_AGENT_SESSION_DIR ||
-      join(env.STEP_CODING_AGENT_DIR || join(homedir(), ".stepcode/agent"), "sessions")
-    );
+    return this.variant.sessionsDir(this.getEnv());
   }
 
   async getStatus(refresh = false): Promise<AgentStatus> {
     if (!this.status || refresh) {
-      const override = this.getPathOverride() || (existsSync(STEP_BIN) ? STEP_BIN : "");
-      this.status = await probeCli("step", "step", this.getEnv(), override);
+      const { kind, command, preferredBin } = this.variant;
+      const override = this.getPathOverride() || (preferredBin && existsSync(preferredBin) ? preferredBin : "");
+      this.status = await probeCli(kind, command, this.getEnv(), override);
     }
     return this.status;
   }
 
   private async resolveLaunch(cwd: string, args: string[]): Promise<StepLaunch> {
     const status = await this.getStatus();
-    if (!status.found || !status.path) throw new Error("未找到 step 命令，请在设置中指定路径");
-    return { path: status.path, env: this.getEnv(), cwd, args };
+    if (!status.found || !status.path) throw new Error(`未找到 ${this.variant.command} 命令，请在设置中指定路径`);
+    return { command: this.variant.command, path: status.path, env: this.getEnv(), cwd, args };
   }
 
-  /** 起一个临时的 step RPC 进程做一次性查询（模型列表、给不在运行的会话改名）。 */
+  /** 起一个临时的 RPC 进程做一次性查询（模型列表、给不在运行的会话改名）。 */
   private async withTempProcess<T>(cwd: string, args: string[], run: (rpc: StepRpcProcess) => Promise<T>): Promise<T> {
     const rpc = new StepRpcProcess(await this.resolveLaunch(cwd, args));
     try {
@@ -147,11 +165,11 @@ export class StepAgent implements AgentProvider {
         rpc.request<{ models: { provider: string; id: string; name?: string }[] }>("get_available_models"),
       );
       this.models = [
-        AGENTS.step.models[0]!,
+        AGENTS[this.kind].models[0]!,
         ...result.models.map((model) => ({ value: `${model.provider}/${model.id}`, label: model.name || model.id })),
       ];
     } catch {
-      return AGENTS.step.models;
+      return AGENTS[this.kind].models;
     }
     return this.models;
   }
@@ -178,16 +196,20 @@ export class StepAgent implements AgentProvider {
   private async scanSessions(): Promise<SessionSummary[]> {
     const root = this.sessionsDir();
     const dirs = await readdir(root, { withFileTypes: true }).catch(() => []);
-    const files = (
-      await Promise.all(
-        dirs
-          .filter((dir) => dir.isDirectory())
-          .map(async (dir) => {
-            const names = await readdir(join(root, dir.name)).catch(() => [] as string[]);
-            return names.filter((name) => name.endsWith(".jsonl")).map((name) => join(root, dir.name, name));
-          }),
-      )
-    ).flat();
+    // 默认按项目分子目录；自定义会话目录时文件直接放在根目录下
+    const files = [
+      ...dirs.filter((item) => item.isFile() && item.name.endsWith(".jsonl")).map((item) => join(root, item.name)),
+      ...(
+        await Promise.all(
+          dirs
+            .filter((dir) => dir.isDirectory())
+            .map(async (dir) => {
+              const names = await readdir(join(root, dir.name)).catch(() => [] as string[]);
+              return names.filter((name) => name.endsWith(".jsonl")).map((name) => join(root, dir.name, name));
+            }),
+        )
+      ).flat(),
+    ];
     const summaries = await Promise.all(files.map((file) => this.summaryOf(file)));
     return summaries.filter((item): item is SessionSummary => item !== null).sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -200,7 +222,7 @@ export class StepAgent implements AgentProvider {
       const parsed = await readSessionFile(file);
       // 只有元数据、还没有任何消息的会话不列出
       const hasUser = parsed?.entries.some((entry) => entry.type === "message" && entry.message?.role === "user");
-      const summary = parsed && hasUser ? toSummary(parsed, info.mtimeMs) : null;
+      const summary = parsed && hasUser ? toSummary(this.kind, parsed, info.mtimeMs) : null;
       this.fileCache.set(file, { mtimeMs: info.mtimeMs, summary });
       if (summary) this.paths.set(summary.id, file);
       return summary;
@@ -212,14 +234,17 @@ export class StepAgent implements AgentProvider {
   private async sessionPath(id: string): Promise<string> {
     if (!this.paths.has(id)) await this.listSessions();
     const path = this.paths.get(id);
-    if (!path) throw new Error("找不到这个 StepCode 会话文件");
+    if (!path) throw new Error(`找不到这个 ${this.variant.name} 会话文件`);
     return path;
   }
 
   async loadSession(id: string, _projectPath: string): Promise<SessionLoadResult> {
     const parsed = await readSessionFile(await this.sessionPath(id));
     const summary = (await this.listSessions()).find((item) => item.id === id) ?? null;
-    return { summary, rows: parsed ? projectStepHistory(parsed.entries).snapshot() : [] };
+    return {
+      summary,
+      rows: parsed ? projectStepHistory(parsed.entries, this.variant.projectTool, this.variant.name).snapshot() : [],
+    };
   }
 
   async renameSession(id: string, projectPath: string, title: string): Promise<void> {
@@ -233,7 +258,7 @@ export class StepAgent implements AgentProvider {
 
   async resumeCommand(sessionId: string): Promise<string[]> {
     const status = await this.getStatus();
-    return [status.path ?? "step", "--session", sessionId];
+    return [status.path ?? this.variant.command, "--session", sessionId];
   }
 
   private invalidate(projectPaths: string[] = []) {
@@ -252,7 +277,7 @@ export class StepAgent implements AgentProvider {
         this.debounce = setTimeout(() => this.invalidate(), 800);
       });
     } catch {
-      // 没用过 step 时目录不存在
+      // 没用过这个 CLI 时目录不存在
     }
   }
 
@@ -276,6 +301,7 @@ export class StepAgent implements AgentProvider {
           onSettled: (done) => this.invalidate([done.projectPath]),
         },
         {
+          variant: this.variant,
           key: params.sessionKey,
           projectPath: params.projectPath,
           ...(params.resumeSessionId ? { sessionId: params.resumeSessionId } : {}),

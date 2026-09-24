@@ -1,4 +1,4 @@
-// StepCode（基于 pi）的消息 → ZCode v4 ConversationRow。
+// StepCode / pi 的消息 → ZCode v4 ConversationRow（工具名映射由 PiVariant.projectTool 提供）。
 // 历史（会话 JSONL 里的 message 条目）与实时（RPC 的 message_start / message_update / message_end 等事件）共用：
 // 两边都是 pi 的 AgentMessage（user / assistant / toolResult / bashExecution …）。
 // step 的工具名映射到 ZCode 已认识的工具族，卡片就能直接复用：
@@ -21,6 +21,7 @@ import {
   type UserAttachment,
 } from "../rowProjectorBase.js";
 import type { FileInput, ImageInput } from "../../../shared/types.js";
+import type { ProjectTool } from "./piVariant.js";
 
 export type StepMessage = JsonRecord & { role: string };
 
@@ -128,6 +129,14 @@ export class StepRowProjector extends RowProjectorBase {
   /** 实时发送时已在本地写过用户气泡，跳过 step 回显的第一条 user 消息。 */
   private skipNextUserEcho = false;
 
+  constructor(
+    private readonly projectTool: ProjectTool = projectStepTool,
+    /** 错误信息里的 CLI 名称 */
+    private readonly cliName = "StepCode",
+  ) {
+    super();
+  }
+
   beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[]) {
     this.beginUserTurn(text, at, undefined, inputAttachments(images, files));
     this.skipNextUserEcho = true;
@@ -219,7 +228,7 @@ export class StepRowProjector extends RowProjectorBase {
       const row: AssistantTextRow = {
         ...this.base(at),
         kind: "assistantText",
-        text: str(message.errorMessage) || "StepCode 执行出错",
+        text: str(message.errorMessage) || `${this.cliName} 执行出错`,
         state: "failed",
       };
       this.put(row);
@@ -248,7 +257,7 @@ export class StepRowProjector extends RowProjectorBase {
   }
 
   private upsertToolCall(id: string, name: string, args: unknown, at: number) {
-    const { toolName, input } = projectStepTool(name, isRecord(args) ? args : {});
+    const { toolName, input } = this.projectTool(name, isRecord(args) ? args : {});
     const existing = this.toolRows.get(id);
     if (existing === undefined) {
       this.createToolRow(id, toolName, input, at, "running");
@@ -318,7 +327,7 @@ export class StepRowProjector extends RowProjectorBase {
         const id = str(event.id);
         if (!id || this.toolRows.has(id)) break;
         this.ensureTurn(at);
-        const { toolName } = projectStepTool(str(event.toolName) ?? "tool", {});
+        const { toolName } = this.projectTool(str(event.toolName) ?? "tool", {});
         this.createToolRow(id, toolName, undefined, at, "inputStreaming");
         break;
       }
@@ -370,8 +379,12 @@ export function activeBranch(entries: readonly StepEntry[]): StepEntry[] {
   return path.reverse();
 }
 
-export function projectStepHistory(entries: readonly StepEntry[]): StepRowProjector {
-  const projector = new StepRowProjector();
+export function projectStepHistory(
+  entries: readonly StepEntry[],
+  projectTool: ProjectTool = projectStepTool,
+  cliName?: string,
+): StepRowProjector {
+  const projector = new StepRowProjector(projectTool, cliName);
   let lastAt = 0;
   for (const entry of activeBranch(entries)) {
     projector.consumeEntry(entry);

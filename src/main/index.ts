@@ -7,6 +7,7 @@ import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
+import { PI_VARIANT } from "./agents/pi/piAgent.js";
 import { StepAgent } from "./agents/step/stepAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
@@ -79,6 +80,7 @@ async function bootstrap() {
     codex: new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion()),
     step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
+    pi: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.pi, PI_VARIANT),
   });
   quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const requireSession = (sessionKey: string) => {
