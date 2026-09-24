@@ -1,7 +1,7 @@
 {
   "name": "hcode",
   "productName": "HCode",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Desktop workbench for coding-agent CLIs (Claude Code, Codex, StepCode, Antigravity), UI based on ZCode.",
   "license": "Apache-2.0",
@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
-    "dist": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --mac --arm64",
+    "dist": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run"
   },

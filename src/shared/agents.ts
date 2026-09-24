@@ -15,7 +15,7 @@ export interface AgentDescriptor {
   name: string;
   command: string;
   permissionModes: PermissionModeOption[];
-  /** 内置模型选项；codex / step / agy 还会在运行时拉取完整列表。 */
+  /** 内置模型选项；codex / step / agy / pi 还会在运行时拉取完整列表。 */
   models: ModelOption[];
 }
 
@@ -112,6 +112,23 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     ],
     models: [{ value: "", label: "默认模型" }],
   },
+  pi: {
+    kind: "pi",
+    name: "pi",
+    command: "pi",
+    // pi 没有工具审批：默认直接执行所有工具；只读模式用 --tools 只开放读取类工具
+    permissionModes: [
+      {
+        mode: "default",
+        label: "直接执行",
+        description: "pi 不做工具审批，改文件、执行命令都不会询问（谨慎使用）",
+        icon: "danger",
+        dangerous: true,
+      },
+      { mode: "read-only", label: "只读", description: "只开放读取、搜索和列目录工具", icon: "readonly" },
+    ],
+    models: [{ value: "", label: "默认模型" }],
+  },
 };
 
-export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step", "agy"];
+export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step", "agy", "pi"];

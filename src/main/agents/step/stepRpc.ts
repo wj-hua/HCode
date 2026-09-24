@@ -1,4 +1,4 @@
-// `step --mode rpc` 客户端：stdin 写命令、stdout 读响应与事件（严格 JSONL，只按 \n 切分）。
+// `step --mode rpc` / `pi --mode rpc` 客户端：stdin 写命令、stdout 读响应与事件（严格 JSONL，只按 \n 切分）。
 // 与 codex app-server 不同，一个 step 进程只驱动一个会话，所以每个 HCode 会话各起一个进程。
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -9,6 +9,8 @@ type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => vo
 const REQUEST_TIMEOUT_MS = 60_000;
 
 export interface StepLaunch {
+  /** 错误信息里的命令名（step / pi） */
+  command: string;
   path: string;
   env: Record<string, string>;
   cwd: string;
@@ -23,9 +25,11 @@ export class StepRpcProcess extends EventEmitter {
   private readonly pending = new Map<string, Pending>();
   private stderrTail = "";
   private exited = false;
+  private readonly command: string;
 
   constructor(launch: StepLaunch) {
     super();
+    this.command = launch.command;
     const child = spawn(launch.path, ["--mode", "rpc", ...launch.args], {
       cwd: launch.cwd,
       env: launch.env,
@@ -37,11 +41,11 @@ export class StepRpcProcess extends EventEmitter {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       this.stderrTail = (this.stderrTail + chunk).slice(-4000);
-      if (process.env.HCODE_DEBUG) process.stderr.write(`[step] ${chunk}`);
+      if (process.env.HCODE_DEBUG) process.stderr.write(`[${this.command}] ${chunk}`);
     });
     child.on("exit", (code, signal) => {
       const lastLine = this.stderrTail.trim().split("\n").at(-1);
-      this.finish(`step 进程已退出（${signal ?? code}）${lastLine ? `：${lastLine}` : ""}`);
+      this.finish(`${this.command} 进程已退出（${signal ?? code}）${lastLine ? `：${lastLine}` : ""}`);
     });
     child.on("error", (error) => this.finish(error.message));
   }
@@ -94,11 +98,11 @@ export class StepRpcProcess extends EventEmitter {
 
   /** 发送命令并等待对应的 response（按 id 关联）。 */
   request<T = unknown>(type: string, params: JsonRecord = {}): Promise<T> {
-    if (this.exited) return Promise.reject(new Error("step 进程未运行"));
+    if (this.exited) return Promise.reject(new Error(`${this.command} 进程未运行`));
     const id = `hcode-${this.nextId++}`;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`step 请求超时：${type}`));
+        if (this.pending.delete(id)) reject(new Error(`${this.command} 请求超时：${type}`));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, {
         resolve: (value) => {
@@ -122,7 +126,7 @@ export class StepRpcProcess extends EventEmitter {
   dispose() {
     if (this.exited) return;
     this.exited = true;
-    for (const pending of this.pending.values()) pending.reject(new Error("step 进程已关闭"));
+    for (const pending of this.pending.values()) pending.reject(new Error(`${this.command} 进程已关闭`));
     this.pending.clear();
     this.child.stdin.end();
     this.child.kill();

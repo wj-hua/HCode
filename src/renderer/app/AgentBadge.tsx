@@ -8,6 +8,7 @@ const STYLE: Record<AgentKind, { letter: string; className: string }> = {
   codex: { letter: "X", className: "bg-foreground text-background" },
   step: { letter: "S", className: "bg-[#2563eb] text-white" },
   agy: { letter: "A", className: "bg-[#16a34a] text-white" },
+  pi: { letter: "π", className: "bg-[#7c3aed] text-white" },
 };
 
 export function AgentBadge({ agent, className }: { agent: AgentKind; className?: string }) {
