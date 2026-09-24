@@ -25,7 +25,7 @@ import { shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
 import { SessionItem } from "./SessionItem";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
 
 export function ProjectItem({ project, query }: { project: Project; query: string }) {
   const expanded = useAppStore((state) => state.expanded[project.path] ?? false);
