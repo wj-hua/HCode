@@ -11,6 +11,16 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 }
 
+/** 侧边栏会话行的紧凑时间，照 ZCode formatTaskRelativeTime（“5分”“3小时”“2天”）。 */
+export function formatCompactRelativeTime(timestamp: number, now = Date.now()): string {
+  const minutes = Math.floor(Math.max(0, now - timestamp) / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes}分`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时`;
+  return `${Math.floor(hours / 24)}天`;
+}
+
 export function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} 秒`;

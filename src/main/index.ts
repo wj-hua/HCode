@@ -101,7 +101,7 @@ async function bootstrap() {
     if (result.canceled || !path) return null;
     store.updateProjects((prefs) => ({
       ...prefs,
-      manual: prefs.manual.includes(path) ? prefs.manual : [...prefs.manual, path],
+      manual: prefs.manual.includes(path) ? prefs.manual : [path, ...prefs.manual],
     }));
     const projects = buildProjects(await agents.allSessions(), store);
     return projects.find((project) => project.path === path) ?? null;
@@ -112,8 +112,15 @@ async function bootstrap() {
       pinned: pinned ? [...new Set([...prefs.pinned, path])] : prefs.pinned.filter((p) => p !== path),
     }));
   });
+  handle("projects:reorder", (paths) => {
+    store.updateProjects((prefs) => ({
+      ...prefs,
+      manual: [...paths.filter((p) => prefs.manual.includes(p)), ...prefs.manual.filter((p) => !paths.includes(p))],
+    }));
+  });
   handle("projects:remove", (path) => {
     store.updateProjects((prefs) => ({
+      ...prefs,
       pinned: prefs.pinned.filter((p) => p !== path),
       manual: prefs.manual.filter((p) => p !== path),
     }));

@@ -1,4 +1,5 @@
 // HCode 渲染进程主状态：项目、会话列表、打开的对话、审批请求。
+import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import type {
   AgentKind,
@@ -80,6 +81,8 @@ interface AppState {
   addProject(): Promise<void>;
   setProjectPinned(path: string, pinned: boolean): Promise<void>;
   removeProject(path: string): Promise<void>;
+  /** 拖动排序：把 activePath 移到 overPath 所在位置。 */
+  reorderProjects(activePath: string, overPath: string): Promise<void>;
   renameSession(summary: SessionSummary, title: string): Promise<void>;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
@@ -376,6 +379,18 @@ export const useAppStore = create<AppState>((set, get) => {
 
     async removeProject(path) {
       await hcode.invoke("projects:remove", path);
+      await get().refreshProjects();
+    },
+
+    async reorderProjects(activePath, overPath) {
+      const projects = get().projects;
+      const from = projects.findIndex((project) => project.path === activePath);
+      const to = projects.findIndex((project) => project.path === overPath);
+      if (from === -1 || to === -1 || from === to) return;
+      // 先乐观更新，避免松手后项目弹回原位再跳到新位置
+      const next = arrayMove(projects, from, to);
+      set({ projects: next });
+      await hcode.invoke("projects:reorder", next.map((project) => project.path));
       await get().refreshProjects();
     },
 
