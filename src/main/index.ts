@@ -7,6 +7,7 @@ import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
 import { StepAgent } from "./agents/step/stepAgent.js";
+import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
 import { buildProjects } from "./projects.js";
@@ -72,6 +73,7 @@ async function bootstrap() {
     claude: new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude),
     codex: new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex),
     step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
+    agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
   });
   const requireSession = (sessionKey: string) => {
     const provider = agents.bySessionKey(sessionKey);

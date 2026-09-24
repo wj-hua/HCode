@@ -15,7 +15,7 @@ export interface AgentDescriptor {
   name: string;
   command: string;
   permissionModes: PermissionModeOption[];
-  /** 内置模型选项；codex / step 还会在运行时拉取完整列表。 */
+  /** 内置模型选项；codex / step / agy 还会在运行时拉取完整列表。 */
   models: ModelOption[];
 }
 
@@ -84,6 +84,34 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     ],
     models: [{ value: "", label: "默认模型" }],
   },
+  agy: {
+    kind: "agy",
+    name: "Antigravity",
+    command: "agy",
+    // agy 无头模式（-p）不能交互审批：需要确认的操作会被自动拒绝，所以只提供启动参数能表达的几档
+    permissionModes: [
+      {
+        mode: "default",
+        label: "按 agy 设置",
+        description: "遵循 agy 的权限规则，需要确认的操作会被自动拒绝",
+        icon: "shield",
+      },
+      {
+        mode: "accept-edits",
+        label: "自动接受编辑",
+        description: "文件修改自动通过，其他操作仍按 agy 的权限规则",
+        icon: "edit",
+      },
+      {
+        mode: "bypass",
+        label: "完全放行",
+        description: "不再询问任何操作（谨慎使用）",
+        icon: "danger",
+        dangerous: true,
+      },
+    ],
+    models: [{ value: "", label: "默认模型" }],
+  },
 };
 
-export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step"];
+export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step", "agy"];

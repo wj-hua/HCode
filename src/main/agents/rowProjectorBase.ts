@@ -7,6 +7,8 @@ import type {
   TurnHeaderRow,
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
+import { readFileSync, statSync } from "node:fs";
+import { extname } from "node:path";
 import type { ImageInput, RowOp } from "../../shared/types.js";
 
 export type JsonRecord = Record<string, unknown>;
@@ -39,6 +41,26 @@ export function imageAttachment(mimeType: string, data: string, fileName = "图�
 
 export function imageInputAttachments(images: readonly ImageInput[] | undefined): UserAttachment[] {
   return (images ?? []).map((image) => imageAttachment(image.mimeType, image.data, image.name));
+}
+
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+const MAX_LOCAL_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** localImage 只记录了本地路径：读出来转成 data URL；文件已不在或过大时退回文字占位。 */
+export function localImageAttachment(path: string): UserAttachment | null {
+  try {
+    if (statSync(path).size > MAX_LOCAL_IMAGE_BYTES) return null;
+    const mime = IMAGE_MIME[extname(path).toLowerCase()] ?? "image/png";
+    return imageAttachment(mime, readFileSync(path).toString("base64"), path.split("/").at(-1));
+  } catch {
+    return null;
+  }
 }
 
 export class RowProjectorBase {

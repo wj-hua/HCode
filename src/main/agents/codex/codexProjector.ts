@@ -10,12 +10,11 @@ import type {
   ToolCallRow,
   TurnHeaderRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import { readFileSync, statSync } from "node:fs";
-import { extname } from "node:path";
 import {
   imageAttachment,
   imageInputAttachments,
   isRecord,
+  localImageAttachment,
   RowProjectorBase,
   truncate,
   type JsonRecord,
@@ -99,26 +98,6 @@ export function parseUnifiedDiff(diff: string, kind: string): { hunks: Hunk[]; a
     current.lines.push(line);
   }
   return { hunks, additions, deletions };
-}
-
-const IMAGE_MIME: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-};
-const MAX_LOCAL_IMAGE_BYTES = 20 * 1024 * 1024;
-
-/** localImage 只记录了本地路径：读出来转成 data URL；文件已不在或过大时退回文字占位。 */
-function localImageAttachment(path: string): UserAttachment | null {
-  try {
-    if (statSync(path).size > MAX_LOCAL_IMAGE_BYTES) return null;
-    const mime = IMAGE_MIME[extname(path).toLowerCase()] ?? "image/png";
-    return imageAttachment(mime, readFileSync(path).toString("base64"), path.split("/").at(-1));
-  } catch {
-    return null;
-  }
 }
 
 function userInputParts(content: unknown): { text: string; attachments: UserAttachment[] } {

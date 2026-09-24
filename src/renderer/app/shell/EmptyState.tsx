@@ -19,7 +19,7 @@ export function EmptyState() {
         <div className="flex flex-col gap-1.5">
           <h1 className="text-ui-xl font-semibold text-foreground">开始一个新会话</h1>
           <p className="text-ui-base text-foreground-subtle">
-            选择项目后用 Claude Code、Codex 或 StepCode 开始对话，或者从左侧打开历史会话继续。
+            选择项目后用 Claude Code、Codex、StepCode 或 Antigravity 开始对话，或者从左侧打开历史会话继续。
           </p>
         </div>
         {noAgent ? (

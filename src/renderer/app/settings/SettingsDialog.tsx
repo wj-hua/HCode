@@ -69,8 +69,11 @@ function AgentSection({ kind }: { kind: AgentKind }) {
   return (
     <div className="flex flex-col py-2">
       <div className="flex items-center gap-2 pt-2 text-ui-base font-medium text-foreground">
-        <AgentBadge agent={kind} />
+        <AgentBadge agent={kind} className={status?.found === false ? "opacity-40" : ""} />
         {agent.name}
+        <span className="ml-auto text-ui-sm font-normal text-foreground-subtle">
+          {!status ? "正在检测…" : status.found ? (status.version ? `版本 ${status.version}` : "未知版本") : "未安装"}
+        </span>
       </div>
       <Row label="默认权限模式">
         <select
@@ -107,7 +110,7 @@ function AgentSection({ kind }: { kind: AgentKind }) {
       <div className="flex flex-col gap-2 py-2">
         <span className="text-ui-sm text-foreground-subtle">
           {agent.command} 路径（留空自动查找）。当前：
-          {status?.found ? `${status.path}（${status.version ?? "未知版本"}）` : "未找到"}
+          {status?.found ? status.path : "未找到"}
         </span>
         <div className="flex gap-2">
           <input
