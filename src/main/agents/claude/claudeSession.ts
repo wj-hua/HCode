@@ -36,6 +36,8 @@ export interface ClaudeSessionHost {
   emitPermission(event: PermissionRequestEvent): void;
   emitPermissionResolved(event: PermissionResolvedEvent): void;
   onSessionId(sessionKey: string, sessionId: string, projectPath: string): void;
+  /** 一轮结束或收到 rate_limit_event：额度可能变了。 */
+  onQuotaChanged(): void;
 }
 
 /** 可以不断 push 的 AsyncIterable，作为 SDK 的流式输入。 */
@@ -211,8 +213,10 @@ export class ClaudeSession {
       if (message.model) this.model = message.model;
       this.emitState();
     }
+    if (message.type === "rate_limit_event") this.host.onQuotaChanged();
     this.projector.consume(message as unknown as ClaudeRecord);
     if (message.type === "result") {
+      this.host.onQuotaChanged();
       this.flushNow();
       if (this.pending.size === 0) this.setState("idle");
       this.scheduleIdleClose();

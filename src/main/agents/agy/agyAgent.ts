@@ -11,8 +11,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
 import { AGENTS } from "../../../shared/agents.js";
 import type {
+  AgentQuota,
   AgentStatus,
   ChatSendParams,
   ModelOption,
@@ -22,6 +24,7 @@ import type {
   SessionSummary,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
+import { agyQuota, quotaError } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
 import { projectAgyHistory, userRequestText, type AgyStep } from "./agyProjector.js";
@@ -209,6 +212,24 @@ export class AgyAgent implements AgentProvider {
     return this.models;
   }
 
+  /** `agy -p /quota` 是本地斜杠命令：不调用模型、不新建会话，stdout 的 command.data 里是按组的额度桶。 */
+  async getQuota(): Promise<AgentQuota> {
+    try {
+      const { path, env } = await this.resolveLaunch(homedir(), []);
+      const { stdout } = await execFileAsync(path, ["-p", "/quota", "--output-format", "json"], {
+        env,
+        cwd: homedir(),
+        timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      return agyQuota(stdout);
+    } catch (error) {
+      // 非 0 退出时 stdout 里可能仍有带错误说明的 JSON
+      const stdout = isRecord(error) && typeof error.stdout === "string" ? error.stdout : "";
+      return stdout.trim() ? agyQuota(stdout) : quotaError("agy", error);
+    }
+  }
+
   // ───────────────────────── 历史 ─────────────────────────
 
   async listSessions(): Promise<SessionSummary[]> {
@@ -324,7 +345,10 @@ export class AgyAgent implements AgentProvider {
           resolveLaunch: (cwd, args) => this.resolveLaunch(cwd, args),
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
-          onSettled: (done) => this.invalidate([done.projectPath]),
+          onSettled: (done) => {
+            this.invalidate([done.projectPath]);
+            this.events.quotaStale("agy");
+          },
         },
         {
           key: params.sessionKey,

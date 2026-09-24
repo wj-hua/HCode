@@ -1,6 +1,7 @@
 // 每个 CLI 接入实现一个 AgentProvider；AgentRegistry 负责按 agent / sessionKey / interactionId 路由。
 import type {
   AgentKind,
+  AgentQuota,
   AgentStatus,
   ChatSendParams,
   ChatStateEvent,
@@ -20,12 +21,16 @@ export interface AgentEvents {
   permission(event: PermissionRequestEvent): void;
   permissionResolved(event: PermissionResolvedEvent): void;
   indexChanged(projectPaths: string[]): void;
+  /** 额度可能已变化（一轮对话结束、CLI 推送了额度更新），由 QuotaService 稍后重新读取。 */
+  quotaStale(agent: AgentKind): void;
 }
 
 export interface AgentProvider {
   readonly kind: AgentKind;
   getStatus(refresh?: boolean): Promise<AgentStatus>;
   listModels(): Promise<ModelOption[]>;
+  /** 订阅额度（5 小时 / 每周）；不支持的 CLI 不实现。 */
+  getQuota?(): Promise<AgentQuota>;
   /** 全部历史会话（按更新时间倒序）。 */
   listSessions(): Promise<SessionSummary[]>;
   loadSession(id: string, projectPath: string): Promise<SessionLoadResult>;

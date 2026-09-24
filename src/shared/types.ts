@@ -145,6 +145,36 @@ export interface ChatSendParams {
   model?: string;
 }
 
+/** 额度窗口：5 小时滚动窗口、周窗口，或其他时长。 */
+export type QuotaWindowKind = "5h" | "weekly" | "other";
+
+export interface QuotaWindow {
+  kind: QuotaWindowKind;
+  /** 显示名，如 “5 小时”“每周”“每周 · Opus”。 */
+  label: string;
+  /** 已用百分比，0–100。 */
+  usedPercent: number;
+  /** 重置时间（毫秒时间戳）。 */
+  resetsAt?: number;
+}
+
+/** 共用同一组额度的模型（如 agy 的 “Gemini Models”）；只有一组时 name 为空。 */
+export interface QuotaGroup {
+  name?: string;
+  windows: QuotaWindow[];
+}
+
+export interface AgentQuota {
+  agent: AgentKind;
+  /** unavailable：该登录方式没有订阅额度（API key 等）；error：读取失败。 */
+  status: "ok" | "unavailable" | "error";
+  message?: string;
+  /** 订阅档位，如 max、plus。 */
+  plan?: string;
+  groups: QuotaGroup[];
+  updatedAt: number;
+}
+
 export interface Settings {
   theme: "system" | "light" | "dark";
   locale: "zh-CN" | "en-US";

@@ -24,3 +24,14 @@ export function shortenHome(path: string): string {
   const match = /^\/Users\/[^/]+/.exec(path);
   return match ? `~${path.slice(match[0].length)}` : path;
 }
+
+/** 额度重置倒计时，如 “3 小时 36 分后重置”。 */
+export function formatResetIn(resetsAt: number, now = Date.now()): string {
+  const minutes = Math.ceil((resetsAt - now) / 60_000);
+  if (minutes <= 0) return "即将重置";
+  if (minutes < 60) return `${minutes} 分钟后重置`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 ? `${hours} 小时 ${minutes % 60} 分后重置` : `${hours} 小时后重置`;
+  const days = Math.floor(hours / 24);
+  return hours % 24 ? `${days} 天 ${hours % 24} 小时后重置` : `${days} 天后重置`;
+}
