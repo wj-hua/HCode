@@ -1,11 +1,11 @@
-// 各 CLI 的订阅额度：主进程缓存并推送更新，这里只保存最新一份。
+// 各来源的订阅额度：主进程缓存并推送更新，这里只保存最新一份。
 import { create } from "zustand";
-import type { AgentKind, AgentQuota } from "@hcode/shared/types";
-import { AGENT_KINDS } from "@hcode/shared/agents";
+import type { AgentQuota, QuotaSource } from "@hcode/shared/types";
+import { QUOTA_SOURCES } from "@hcode/shared/agents";
 import { hcode } from "../bridge";
 
 interface QuotaState {
-  quotas: Partial<Record<AgentKind, AgentQuota>>;
+  quotas: Partial<Record<QuotaSource, AgentQuota>>;
   loading: boolean;
   load(force?: boolean): Promise<void>;
 }
@@ -31,7 +31,7 @@ hcode.on("quota:updated", (quota) => {
   useQuotaStore.setState((state) => ({ quotas: { ...state.quotas, [quota.agent]: quota } }));
 });
 
-/** 按 CLI 固定顺序排列。 */
-export function orderedQuotas(quotas: Partial<Record<AgentKind, AgentQuota>>): AgentQuota[] {
-  return AGENT_KINDS.map((kind) => quotas[kind]).filter((quota): quota is AgentQuota => quota !== undefined);
+/** 按固定顺序排列。 */
+export function orderedQuotas(quotas: Partial<Record<QuotaSource, AgentQuota>>): AgentQuota[] {
+  return QUOTA_SOURCES.map((kind) => quotas[kind]).filter((quota): quota is AgentQuota => quota !== undefined);
 }

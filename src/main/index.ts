@@ -82,7 +82,7 @@ async function bootstrap() {
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
     pi: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.pi, PI_VARIANT),
   });
-  quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
+  quota = new QuotaService(agents, buildAgentEnv, (snapshot) => send("quota:updated", snapshot));
   const requireSession = (sessionKey: string) => {
     const provider = agents.bySessionKey(sessionKey);
     if (!provider) throw new Error("会话不存在或已关闭");

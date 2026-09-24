@@ -2,7 +2,8 @@
 // - Claude：Agent SDK 的 usage 控制请求（/usage 背后的数据，utilization 0–100，resets_at 为 ISO 时间）
 // - Codex：app-server 的 account/rateLimits/read（usedPercent 0–100，resetsAt 为秒级时间戳，窗口时长看 windowDurationMins）
 // - Antigravity：`agy -p /quota --output-format json` 的 command.data.groups（remaining_fraction 0–1，reset_time 为 ISO 时间）
-import type { AgentKind, AgentQuota, QuotaGroup, QuotaWindow, QuotaWindowKind } from "../../shared/types.js";
+// - GLM Coding Plan：/api/monitor/usage/quota/limit 的 data.limits（percentage 0–100，nextResetTime 为毫秒时间戳）
+import type { AgentQuota, QuotaGroup, QuotaSource, QuotaWindow, QuotaWindowKind } from "../../shared/types.js";
 import { isRecord, type JsonRecord } from "./rowProjectorBase.js";
 
 const FIVE_HOURS_MIN = 5 * 60;
@@ -28,12 +29,12 @@ function makeWindow(kind: QuotaWindowKind, label: string, usedPercent: number, r
   return { kind, label, usedPercent: clampPercent(usedPercent), ...(resetsAt !== undefined ? { resetsAt } : {}) };
 }
 
-export function quotaError(agent: AgentKind, error: unknown): AgentQuota {
+export function quotaError(agent: QuotaSource, error: unknown): AgentQuota {
   const message = error instanceof Error ? error.message : String(error);
   return { agent, status: "error", message, groups: [], updatedAt: Date.now() };
 }
 
-export function quotaUnavailable(agent: AgentKind, message: string): AgentQuota {
+export function quotaUnavailable(agent: QuotaSource, message: string): AgentQuota {
   return { agent, status: "unavailable", message, groups: [], updatedAt: Date.now() };
 }
 
@@ -160,4 +161,43 @@ export function agyQuota(stdout: string, now = Date.now()): AgentQuota {
     groups.push({ ...(typeof group.name === "string" && group.name ? { name: group.name } : {}), windows: sortWindows(windows) });
   }
   return { agent: "agy", status: "ok", groups, updatedAt: now };
+}
+
+// ───────────────────────── GLM Coding Plan ─────────────────────────
+
+/** unit：3 = 小时、5 = 月、6 = 周；TOKENS_LIMIT（团队版叫 CREDIT_LIMIT）是模型额度，TIME_LIMIT 是工具调用额度。 */
+function glmWindowLabel(type: unknown, unit: unknown, number: unknown): [QuotaWindowKind, string] {
+  const count = typeof number === "number" ? number : 1;
+  const tool = type === "TIME_LIMIT";
+  const prefix = tool ? "工具调用 · " : "";
+  if (!tool && unit === 3 && count === 5) return ["5h", "5 小时"];
+  if (!tool && unit === 6 && count === 1) return ["weekly", "每周"];
+  if (unit === 3) return ["other", `${prefix}${count} 小时`];
+  if (unit === 6) return ["other", `${prefix}${count === 1 ? "每周" : `${count} 周`}`];
+  if (unit === 5) return ["other", `${prefix}${count === 1 ? "每月" : `${count} 个月`}`];
+  return ["other", tool ? "工具调用" : "额度"];
+}
+
+/** 参数是 quota/limit 接口的完整响应体。 */
+export function glmQuota(response: unknown, now = Date.now()): AgentQuota {
+  const data = isRecord(response) && isRecord(response.data) ? response.data : null;
+  if (!data || !Array.isArray(data.limits)) {
+    const message = isRecord(response) && typeof response.msg === "string" ? response.msg : "quota/limit 返回格式无法识别";
+    return { ...quotaError("glm", message), updatedAt: now };
+  }
+  const windows: QuotaWindow[] = [];
+  for (const limit of data.limits.filter(isRecord)) {
+    if (typeof limit.percentage !== "number") continue;
+    const [kind, label] = glmWindowLabel(limit.type, limit.unit, limit.number);
+    const resetsAt = typeof limit.nextResetTime === "number" ? limit.nextResetTime : undefined;
+    windows.push(makeWindow(kind, label, limit.percentage, resetsAt));
+  }
+  const plan = typeof data.level === "string" && data.level ? data.level : undefined;
+  return {
+    agent: "glm",
+    status: "ok",
+    ...(plan ? { plan } : {}),
+    groups: windows.length ? [{ windows: sortWindows(windows) }] : [],
+    updatedAt: now,
+  };
 }

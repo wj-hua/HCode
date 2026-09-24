@@ -1,5 +1,5 @@
 // 各 CLI 的静态描述：名称、权限模式、内置模型选项。主进程与渲染进程共用。
-import type { AgentKind, ModelOption, PermissionMode } from "./types.js";
+import type { AgentKind, ModelOption, PermissionMode, QuotaSource } from "./types.js";
 
 export interface PermissionModeOption {
   mode: PermissionMode;
@@ -132,3 +132,10 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
 };
 
 export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step", "agy", "pi"];
+
+/** 额度面板里的排列顺序。 */
+export const QUOTA_SOURCES: QuotaSource[] = [...AGENT_KINDS, "glm"];
+
+export function quotaSourceName(source: QuotaSource): string {
+  return source === "glm" ? "GLM Coding Plan" : AGENTS[source].name;
+}

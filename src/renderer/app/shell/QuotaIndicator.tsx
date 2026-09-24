@@ -1,7 +1,8 @@
-// 侧边栏底部的订阅额度：每个 CLI 一个徽标 + 5 小时 / 每周两条迷你进度条，点开是详细面板。
+// 侧边栏底部的订阅额度：每个来源一个徽标 + 5 小时 / 每周两条迷你进度条，点开是详细面板。
+// 来源多、放不下时进度条一起缩短（最短 16px），保证每个来源都露出来。
 // 面板行样式照 ZCode CodingPlanUsageRemainingPanel，数值同样显示“剩余”。
 import type { AgentQuota, QuotaGroup, QuotaWindow } from "@hcode/shared/types";
-import { AGENTS } from "@hcode/shared/agents";
+import { quotaSourceName } from "@hcode/shared/agents";
 import { Loader2, RefreshCwIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button.js";
@@ -35,7 +36,7 @@ function headlineWindows(quota: AgentQuota): QuotaWindow[] {
 function MiniBar({ limit }: { limit: QuotaWindow }) {
   const remaining = remainingPercent(limit);
   return (
-    <span className="block h-[3px] w-8 overflow-hidden rounded-full bg-foreground/12">
+    <span className="block h-[3px] w-full overflow-hidden rounded-full bg-foreground/12">
       <span className={cn("block h-full rounded-full", barColor(remaining))} style={{ width: `${remaining}%` }} />
     </span>
   );
@@ -46,10 +47,10 @@ function QuotaChip({ quota }: { quota: AgentQuota }) {
   const title =
     windows.map((item) => `${item.label}剩余 ${remainingPercent(item)}%`).join("，") || quota.message || "";
   return (
-    <span className="flex items-center gap-1" title={`${AGENTS[quota.agent].name}${title ? `：${title}` : ""}`}>
+    <span className="flex min-w-0 items-center gap-1" title={`${quotaSourceName(quota.agent)}${title ? `：${title}` : ""}`}>
       <AgentBadge agent={quota.agent} className={cn(windows.length === 0 && "opacity-40")} />
       {windows.length ? (
-        <span className="flex flex-col gap-[3px]">
+        <span className="flex w-8 min-w-4 flex-col gap-[3px]">
           {windows.map((item) => (
             <MiniBar key={item.label} limit={item} />
           ))}
@@ -97,7 +98,7 @@ function AgentSection({ quota, now }: { quota: AgentQuota; now: number }) {
     <div className="px-3 py-2">
       <div className="flex items-center gap-1.5">
         <AgentBadge agent={quota.agent} />
-        <span className="min-w-0 truncate text-ui-base font-medium text-foreground">{AGENTS[quota.agent].name}</span>
+        <span className="min-w-0 truncate text-ui-base font-medium text-foreground">{quotaSourceName(quota.agent)}</span>
         {quota.plan ? (
           <span className="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-ui-xs leading-none font-medium text-foreground-subtle capitalize">
             {quota.plan}
@@ -162,7 +163,7 @@ export function QuotaIndicator() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex h-7 min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-1.5 hover:bg-menu-hover"
+          className="flex h-7 min-w-0 items-center gap-2 overflow-hidden rounded-md px-1 hover:bg-menu-hover"
           aria-label="订阅额度"
         >
           {list.map((quota) => (

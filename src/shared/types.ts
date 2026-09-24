@@ -164,8 +164,11 @@ export interface QuotaGroup {
   windows: QuotaWindow[];
 }
 
+/** 额度来源：各 CLI，外加不属于某个 CLI 的 GLM Coding Plan（按 API key 读取）。 */
+export type QuotaSource = AgentKind | "glm";
+
 export interface AgentQuota {
-  agent: AgentKind;
+  agent: QuotaSource;
   /** unavailable：该登录方式没有订阅额度（API key 等）；error：读取失败。 */
   status: "ok" | "unavailable" | "error";
   message?: string;

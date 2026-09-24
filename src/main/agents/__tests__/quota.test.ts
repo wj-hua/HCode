@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agyQuota, claudeQuota, codexQuota } from "../quota.js";
+import { agyQuota, claudeQuota, codexQuota, glmQuota } from "../quota.js";
 
 const NOW = Date.parse("2026-09-24T09:15:00Z");
 
@@ -156,5 +156,48 @@ describe("agyQuota", () => {
   it("没有额度数据时返回错误和 agy 的说明", () => {
     const quota = agyQuota(JSON.stringify({ status: "ERROR", response: "Please log in first." }), NOW);
     expect(quota).toMatchObject({ agent: "agy", status: "error", message: "Please log in first.", groups: [] });
+  });
+});
+
+describe("glmQuota", () => {
+  it("5 小时、每周和每月工具调用", () => {
+    const quota = glmQuota(
+      {
+        code: 200,
+        success: true,
+        data: {
+          level: "lite",
+          limits: [
+            { type: "TIME_LIMIT", unit: 5, number: 1, usage: 100, currentValue: 10, percentage: 10, nextResetTime: 1790900000000 },
+            { type: "CREDIT_LIMIT", unit: 6, number: 1, usage: 10000, currentValue: 6852, percentage: 68, nextResetTime: 1790305715998 },
+            { type: "CREDIT_LIMIT", unit: 3, number: 5, usage: 2000, currentValue: 47, percentage: 2, nextResetTime: 1790287584022 },
+          ],
+        },
+      },
+      NOW,
+    );
+    expect(quota).toEqual({
+      agent: "glm",
+      status: "ok",
+      plan: "lite",
+      updatedAt: NOW,
+      groups: [
+        {
+          windows: [
+            { kind: "5h", label: "5 小时", usedPercent: 2, resetsAt: 1790287584022 },
+            { kind: "weekly", label: "每周", usedPercent: 68, resetsAt: 1790305715998 },
+            { kind: "other", label: "工具调用 · 每月", usedPercent: 10, resetsAt: 1790900000000 },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("key 无效时显示接口的错误信息", () => {
+    expect(glmQuota({ code: 401, msg: "令牌已过期或验证不正确", success: false }, NOW)).toMatchObject({
+      agent: "glm",
+      status: "error",
+      message: "令牌已过期或验证不正确",
+    });
   });
 });
