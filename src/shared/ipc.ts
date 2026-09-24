@@ -29,6 +29,7 @@ export interface InvokeMap {
   "projects:list": [[], Project[]];
   "projects:add": [[], Project | null];
   "projects:setPinned": [[path: string, pinned: boolean], void];
+  "projects:reorder": [[paths: string[]], void];
   "projects:remove": [[path: string], void];
   "sessions:list": [[projectPath: string], SessionSummary[]];
   "sessions:load": [[ref: SessionRef], SessionLoadResult];
@@ -81,6 +82,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "projects:list",
   "projects:add",
   "projects:setPinned",
+  "projects:reorder",
   "projects:remove",
   "sessions:list",
   "sessions:load",

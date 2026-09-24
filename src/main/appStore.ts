@@ -5,7 +5,10 @@ import { DEFAULT_SETTINGS, type Settings, type SettingsPatch } from "../shared/t
 
 interface ProjectPrefs {
   pinned: string[];
+  /** 项目列表的顺序即此数组顺序（侧边栏可拖动调整）。 */
   manual: string[];
+  /** 旧版本按活动时间自动排序；为 false/缺省时首次加载会按活动时间初始化一次手动顺序。 */
+  ordered?: boolean;
 }
 
 interface WindowState {
