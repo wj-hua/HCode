@@ -1,4 +1,4 @@
-// HCode 自己的少量持久化数据：设置、用户手动添加/置顶/移除的项目。对话内容不在这里。
+// HCode 自己的少量持久化数据：设置、用户手动添加/置顶的项目。对话内容不在这里。
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/types.js";
@@ -6,7 +6,6 @@ import { DEFAULT_SETTINGS, type Settings } from "../shared/types.js";
 interface ProjectPrefs {
   pinned: string[];
   manual: string[];
-  removed: string[];
 }
 
 interface WindowState {
@@ -66,7 +65,7 @@ export class AppStore {
     this.projectsPath = join(dataDir, "projects.json");
     this.windowPath = join(dataDir, "window.json");
     this.settings = migrateSettings(readJson<Record<string, unknown>>(this.settingsPath, {}));
-    this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [], removed: [] });
+    this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [] });
   }
 
   updateSettings(patch: Partial<Settings>): Settings {

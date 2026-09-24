@@ -93,7 +93,6 @@ async function bootstrap() {
     store.updateProjects((prefs) => ({
       ...prefs,
       manual: prefs.manual.includes(path) ? prefs.manual : [...prefs.manual, path],
-      removed: prefs.removed.filter((item) => item !== path),
     }));
     const projects = buildProjects(await agents.allSessions(), store);
     return projects.find((project) => project.path === path) ?? null;
@@ -108,7 +107,6 @@ async function bootstrap() {
     store.updateProjects((prefs) => ({
       pinned: prefs.pinned.filter((p) => p !== path),
       manual: prefs.manual.filter((p) => p !== path),
-      removed: [...new Set([...prefs.removed, path])],
     }));
   });
 

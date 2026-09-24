@@ -31,8 +31,6 @@ export interface Project {
   lastActiveAt: number;
   sessionCount: number;
   pinned: boolean;
-  /** 用户手动添加、但还没有任何会话的项目。 */
-  manual: boolean;
   exists: boolean;
 }
 
