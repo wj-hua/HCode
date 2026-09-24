@@ -46,6 +46,13 @@ export interface SessionSummary {
   activeInTerminal?: boolean;
 }
 
+export interface GitBranches {
+  /** 当前分支；detached HEAD 时为 null。 */
+  current: string | null;
+  /** 本地分支，最近提交的在前。 */
+  branches: string[];
+}
+
 export interface SessionRef {
   agent: AgentKind;
   id: string;

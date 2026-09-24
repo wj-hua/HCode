@@ -67,6 +67,8 @@ interface AppState {
   newChat(projectPath: string, agent?: AgentKind): void;
   /** 草稿会话（还没发送过）切换使用的 CLI。 */
   setDraftAgent(agent: AgentKind): void;
+  /** 草稿会话切换工作目录。 */
+  setDraftProject(projectPath: string): void;
   loadModels(agent: AgentKind): Promise<void>;
   send(text: string, images?: ImageInput[]): Promise<void>;
   interrupt(): Promise<void>;
@@ -82,7 +84,7 @@ interface AppState {
   setSettingsOpen(open: boolean): void;
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   // ipcRenderer.invoke 的错误带有 "Error invoking remote method 'x': Error: " 前缀
   return raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
@@ -279,6 +281,13 @@ export const useAppStore = create<AppState>((set, get) => {
       void get().loadModels(agent);
     },
 
+    setDraftProject(projectPath) {
+      const conv = activeConversation();
+      if (!conv || conv.sessionKey || conv.sessionId || conv.projectPath === projectPath) return;
+      patchConversation(conv.viewId, { projectPath });
+      get().toggleProject(projectPath, true);
+    },
+
     async loadModels(agent) {
       if (get().models[agent]) return;
       set((state) => ({ models: { ...state.models, [agent]: AGENTS[agent].models } }));
@@ -349,7 +358,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!project) return;
       await get().refreshProjects();
       get().toggleProject(project.path, true);
-      get().newChat(project.path);
+      // 正在编辑的草稿直接挪到新项目，保留已输入的内容
+      const conv = activeConversation();
+      if (conv && !conv.sessionKey && !conv.sessionId) get().setDraftProject(project.path);
+      else get().newChat(project.path);
     },
 
     async setProjectPinned(path, pinned) {

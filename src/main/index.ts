@@ -10,6 +10,7 @@ import { StepAgent } from "./agents/step/stepAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
+import { listBranches, switchBranch } from "./git.js";
 import { buildProjects } from "./projects.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { createMainWindow } from "./window.js";
@@ -126,6 +127,9 @@ async function bootstrap() {
   handle("chat:setModel", (sessionKey, model) => requireSession(sessionKey).setModel(sessionKey, model));
   handle("chat:close", (sessionKey) => agents.bySessionKey(sessionKey)?.closeSession(sessionKey));
   handle("permission:respond", (interactionId, decision) => agents.respondPermission(interactionId, decision));
+
+  handle("git:branches", (cwd) => listBranches(cwd, buildAgentEnv()));
+  handle("git:switchBranch", (cwd, branch) => switchBranch(cwd, buildAgentEnv(), branch));
 
   handle("fs:readText", async (path, maxBytes = 2 * 1024 * 1024) => {
     try {

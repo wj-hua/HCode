@@ -6,6 +6,7 @@ import type {
   ChatRowsEvent,
   ChatSendParams,
   ChatStateEvent,
+  GitBranches,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -34,6 +35,8 @@ export interface InvokeMap {
   "chat:setModel": [[sessionKey: string, model: string], void];
   "chat:close": [[sessionKey: string], void];
   "permission:respond": [[interactionId: string, decision: PermissionDecision], void];
+  "git:branches": [[cwd: string], GitBranches | null];
+  "git:switchBranch": [[cwd: string, branch: string], void];
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "app:openPath": [[path: string], void];
@@ -80,6 +83,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "chat:setModel",
   "chat:close",
   "permission:respond",
+  "git:branches",
+  "git:switchBranch",
   "fs:readText",
   "fs:stat",
   "app:openPath",

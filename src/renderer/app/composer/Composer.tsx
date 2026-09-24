@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
 import type { ImageInput } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
+import { DraftContextBar } from "./DraftContextBar";
 import { ImageAttachments } from "../ImageAttachments";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -343,6 +344,7 @@ export function Composer({
         )}
       </div>
     </form>
+    {isDraft ? <DraftContextBar conversation={conversation} /> : null}
     </>
   );
 }
