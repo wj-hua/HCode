@@ -31,6 +31,8 @@ export class AppServerClient extends EventEmitter {
 
   constructor(
     private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string> }>,
+    /** initialize 握手里上报的 HCode 版本。 */
+    private readonly clientVersion: string,
   ) {
     super();
     this.setMaxListeners(100);
@@ -79,7 +81,7 @@ export class AppServerClient extends EventEmitter {
       this.emit("exit", error.message);
     });
     await this.request("initialize", {
-      clientInfo: { name: "hcode", title: "HCode", version: "0.3.1" },
+      clientInfo: { name: "hcode", title: "HCode", version: this.clientVersion },
       capabilities: null,
     });
     this.notify("initialized");

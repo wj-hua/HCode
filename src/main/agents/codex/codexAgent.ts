@@ -68,12 +68,13 @@ export class CodexAgent implements AgentProvider {
     private readonly events: AgentEvents,
     private readonly getEnv: () => Record<string, string>,
     private readonly getPathOverride: () => string,
+    appVersion: string,
   ) {
     this.client = new AppServerClient(async () => {
       const status = await this.getStatus();
       if (!status.found || !status.path) throw new Error("未找到 codex 命令，请在设置中指定路径");
       return { path: status.path, env: this.getEnv() };
-    });
+    }, appVersion);
     this.client.on("notification", (method: string, params: Record<string, unknown>) =>
       this.onNotification(method, params),
     );

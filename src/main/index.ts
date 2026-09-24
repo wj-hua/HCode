@@ -73,7 +73,7 @@ async function bootstrap() {
   };
   const agents = new AgentRegistry({
     claude: new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude),
-    codex: new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex),
+    codex: new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion()),
     step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
   });

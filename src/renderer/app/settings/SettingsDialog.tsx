@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AgentKind, Settings } from "@hcode/shared/types";
+import type { AgentKind, SettingsPatch } from "@hcode/shared/types";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
 import { Button } from "@/components/ui/button.js";
@@ -79,9 +79,7 @@ function AgentSection({ kind }: { kind: AgentKind }) {
         <select
           value={settings.defaultPermissionModes[kind]}
           onChange={(event) =>
-            void updateSettings({
-              defaultPermissionModes: { ...settings.defaultPermissionModes, [kind]: event.target.value },
-            })
+            void updateSettings({ defaultPermissionModes: { [kind]: event.target.value } })
           }
           className="h-8 rounded-lg border border-input-border bg-input px-2 text-ui-base text-foreground"
         >
@@ -96,7 +94,7 @@ function AgentSection({ kind }: { kind: AgentKind }) {
         <select
           value={settings.defaultModels[kind]}
           onChange={(event) =>
-            void updateSettings({ defaultModels: { ...settings.defaultModels, [kind]: event.target.value } })
+            void updateSettings({ defaultModels: { [kind]: event.target.value } })
           }
           className="h-8 max-w-56 rounded-lg border border-input-border bg-input px-2 text-ui-base text-foreground"
         >
@@ -122,7 +120,7 @@ function AgentSection({ kind }: { kind: AgentKind }) {
           <Button
             variant="outline"
             size="lg"
-            onClick={() => void updateSettings({ agentPaths: { ...settings.agentPaths, [kind]: path.trim() } })}
+            onClick={() => void updateSettings({ agentPaths: { [kind]: path.trim() } })}
           >
             保存并检测
           </Button>
@@ -138,7 +136,7 @@ export function SettingsDialog() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
 
-  const update = (patch: Partial<Settings>) => void updateSettings(patch);
+  const update = (patch: SettingsPatch) => void updateSettings(patch);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
