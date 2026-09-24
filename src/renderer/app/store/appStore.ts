@@ -14,6 +14,7 @@ import type {
   Project,
   SessionSummary,
   Settings,
+  SettingsPatch,
 } from "@hcode/shared/types";
 import { DEFAULT_SETTINGS } from "@hcode/shared/types";
 import { AGENTS } from "@hcode/shared/agents";
@@ -80,7 +81,7 @@ interface AppState {
   setProjectPinned(path: string, pinned: boolean): Promise<void>;
   removeProject(path: string): Promise<void>;
   renameSession(summary: SessionSummary, title: string): Promise<void>;
-  updateSettings(patch: Partial<Settings>): Promise<void>;
+  updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
   setSettingsOpen(open: boolean): void;
 }

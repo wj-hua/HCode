@@ -16,6 +16,7 @@ import type {
   SessionRef,
   SessionSummary,
   Settings,
+  SettingsPatch,
 } from "./types.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
@@ -46,7 +47,7 @@ export interface InvokeMap {
   "app:openInTerminal": [[cwd: string, session?: { agent: AgentKind; id: string }], void];
   "app:copyText": [[text: string], void];
   "settings:get": [[], Settings];
-  "settings:set": [[patch: Partial<Settings>], Settings];
+  "settings:set": [[patch: SettingsPatch], Settings];
 }
 
 /** 主进程 → 渲染进程事件 */

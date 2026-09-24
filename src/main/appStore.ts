@@ -1,7 +1,7 @@
 // HCode 自己的少量持久化数据：设置、用户手动添加/置顶的项目。对话内容不在这里。
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_SETTINGS, type Settings } from "../shared/types.js";
+import { DEFAULT_SETTINGS, type Settings, type SettingsPatch } from "../shared/types.js";
 
 interface ProjectPrefs {
   pinned: string[];
@@ -52,6 +52,26 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
   return settings;
 }
 
+/** 用补丁中有值的字段覆盖 base（undefined 视为未提供）。 */
+function mergeDefined<T extends object>(base: T, patch: Partial<T> | undefined): T {
+  const next = { ...base };
+  for (const [key, value] of Object.entries(patch ?? {})) {
+    if (value !== undefined) (next as Record<string, unknown>)[key] = value;
+  }
+  return next;
+}
+
+/** 按 CLI 分组的字段逐项合并，只改补丁里给出的 CLI。 */
+export function mergeSettings(current: Settings, patch: SettingsPatch): Settings {
+  const { agentPaths, defaultPermissionModes, defaultModels, ...rest } = patch;
+  return {
+    ...mergeDefined(current, rest),
+    agentPaths: mergeDefined(current.agentPaths, agentPaths),
+    defaultPermissionModes: mergeDefined(current.defaultPermissionModes, defaultPermissionModes),
+    defaultModels: mergeDefined(current.defaultModels, defaultModels),
+  };
+}
+
 export class AppStore {
   private readonly settingsPath: string;
   private readonly projectsPath: string;
@@ -68,8 +88,8 @@ export class AppStore {
     this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [] });
   }
 
-  updateSettings(patch: Partial<Settings>): Settings {
-    this.settings = { ...this.settings, ...patch };
+  updateSettings(patch: SettingsPatch): Settings {
+    this.settings = mergeSettings(this.settings, patch);
     writeJson(this.settingsPath, this.settings);
     return this.settings;
   }

@@ -156,6 +156,14 @@ export interface Settings {
   defaultModels: Record<AgentKind, string>;
 }
 
+/** 按 CLI 分组的设置项。 */
+type PerAgentSettingKey = "agentPaths" | "defaultPermissionModes" | "defaultModels";
+
+/** settings:set 的补丁：按 CLI 分组的字段只需传要改的 CLI，主进程逐项合并。 */
+export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey>> & {
+  [K in PerAgentSettingKey]?: Partial<Settings[K]>;
+};
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   locale: "zh-CN",
