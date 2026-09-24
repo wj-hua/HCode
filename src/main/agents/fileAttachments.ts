@@ -6,7 +6,8 @@ const FILES_HEADER = "附件文件（本机绝对路径，请按需读取或分�
 export function withFileReferences(text: string, files: readonly FileInput[]): string {
   if (files.length === 0) return text;
   const references = files.map((file) => `- ${JSON.stringify(file)}`).join("\n");
-  return `${text}${text.trim() ? "\n\n" : ""}${FILES_HEADER}${references}`;
+  // 只有空白的文字不保留，否则历史里无法按清单格式还原附件
+  return `${text.trim() ? `${text}\n\n` : ""}${FILES_HEADER}${references}`;
 }
 
 /** CLI 历史只保存 prompt；从尾部的附件清单还原用户气泡。 */

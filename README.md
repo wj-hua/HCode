@@ -18,6 +18,7 @@ macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZC
 pnpm install
 pnpm dev          # 开发模式（Vite HMR + 主进程自动重启）
 pnpm typecheck    # 类型检查
+pnpm test         # 单元测试（vitest：各 CLI 投影器、附件清单）
 pnpm dist         # 打包 release/HCode-<版本>-arm64.dmg（本地未签名）
 ```
 

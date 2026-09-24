@@ -11,7 +11,8 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "dist": "node scripts/build.mjs && electron-builder --config electron-builder.config.cjs --mac --arm64",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {},
   "devDependencies": {
@@ -57,6 +58,7 @@
     "typescript": "6.0.2",
     "unified": "11.0.5",
     "vite": "8.0.8",
+    "vitest": "4.1.11",
     "zod": "4.6.5",
     "zustand": "5.0.12"
   },
