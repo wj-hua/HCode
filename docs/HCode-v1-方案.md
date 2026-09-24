@@ -1,5 +1,7 @@
 # HCode 开发方案（v1：仅支持 Claude Code CLI）
 
+> 本文记录 v1 的原始方案。当前版本的项目列表仅显示手动添加的文件夹；各 CLI 的会话只用于统计这些项目并展示其历史。现状以 [README](../README.md) 和 `src/main/projects.ts` 为准。
+
 > 本计划批准后执行的第一个动作：把本文件原样保存为 `/Users/hwj/my/mac/code/hcode/docs/HCode-v1-方案.md`（同时 `git init` hcode 目录）。之后按照下文“实施阶段”开发。
 
 
