@@ -32,6 +32,8 @@ import {
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
+import { appendPromptHistoryEntry, navigatePromptHistory } from "@/lib/promptHistory.js";
+import { persistPromptHistoryEntries, readPromptHistoryEntries } from "@/lib/promptHistoryStorage.js";
 import { useAppStore, type Conversation } from "../store/appStore";
 
 const MODE_ICONS: Record<PermissionModeOption["icon"], ReactNode> = {
@@ -102,6 +104,12 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // ↑/↓ 历史输入：照 ZCode PromptHistoryPlugin，按项目存 localStorage；index 为 null 表示不在历史浏览态
+  const [promptHistory, setPromptHistory] = useState<readonly string[]>(() =>
+    readPromptHistoryEntries(conversation.projectPath),
+  );
+  const historyIndexRef = useRef<number | null>(null);
+  const caretToEndRef = useRef(false);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
   const activeInTerminal = useAppStore(
     (state) =>
@@ -163,6 +171,11 @@ export function Composer({
   }, [conversation.viewId]);
 
   useEffect(() => {
+    setPromptHistory(readPromptHistoryEntries(conversation.projectPath));
+    historyIndexRef.current = null;
+  }, [conversation.projectPath]);
+
+  useEffect(() => {
     void loadModels(conversation.agent);
   }, [conversation.agent, loadModels]);
 
@@ -171,6 +184,10 @@ export function Composer({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+    if (caretToEndRef.current) {
+      caretToEndRef.current = false;
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
   }, [text]);
 
   const canSend = Boolean(text.trim() || images.length > 0 || files.length > 0);
@@ -178,8 +195,13 @@ export function Composer({
   const submit = () => {
     if (!canSend || running || conversation.loading || adding || submitting) return;
     setSubmitting(true);
+    const projectPath = conversation.projectPath;
     void send(text, images, files).then((sent) => {
       if (!sent) return;
+      const nextHistory = appendPromptHistoryEntry(readPromptHistoryEntries(projectPath), text);
+      persistPromptHistoryEntries(projectPath, nextHistory);
+      setPromptHistory(nextHistory);
+      historyIndexRef.current = null;
       setText((current) => current === text ? "" : current);
       setImages((current) => current === images ? [] : current);
       setFiles((current) => current === files ? [] : current);
@@ -225,7 +247,12 @@ export function Composer({
         ref={textareaRef}
         value={text}
         rows={2}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          const index = historyIndexRef.current;
+          // 手动改过回填的历史后退出浏览态，上下键恢复为移动光标
+          if (index !== null && event.target.value !== promptHistory[index]) historyIndexRef.current = null;
+          setText(event.target.value);
+        }}
         onPaste={(event) => {
           const files = [...event.clipboardData.files];
           if (files.length === 0) return;
@@ -239,6 +266,24 @@ export function Composer({
           } else if (event.key === "Escape" && running) {
             event.preventDefault();
             void interrupt();
+          } else if (
+            (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+            !event.shiftKey &&
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.altKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            // 只在空输入或已处于历史浏览态时接管上下键，避免抢走多行输入的光标移动
+            if (historyIndexRef.current === null && text.length > 0) return;
+            const result = navigatePromptHistory(promptHistory, historyIndexRef.current, event.key === "ArrowUp" ? "up" : "down");
+            if (!result.shouldHandle) return;
+            event.preventDefault();
+            historyIndexRef.current = result.nextIndex;
+            if (result.nextValue !== text) {
+              caretToEndRef.current = true;
+              setText(result.nextValue);
+            }
           }
         }}
         placeholder={running ? `${agent.name} 正在工作…（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
