@@ -195,6 +195,8 @@ export interface Settings {
   defaultEfforts: Record<AgentKind, string>;
   /** 有会话正在运行时阻止电脑休眠（显示器仍可关闭）。 */
   preventSleepWhileRunning: boolean;
+  /** HCode 不在前台时，任务完成 / 出错 / 等待审批发系统通知。 */
+  notifyOnFinish: boolean;
 }
 
 /** 按 CLI 分组的设置项。 */
@@ -214,4 +216,5 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultModels: { claude: "", codex: "", step: "", agy: "", pi: "" },
   defaultEfforts: { claude: "", codex: "", step: "", agy: "", pi: "" },
   preventSleepWhileRunning: true,
+  notifyOnFinish: true,
 };

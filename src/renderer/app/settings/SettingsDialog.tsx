@@ -184,6 +184,16 @@ export function SettingsDialog() {
               onChange={(value) => update({ preventSleepWhileRunning: value === "on" })}
             />
           </Row>
+          <Row label="系统通知" hint="HCode 不在前台时，任务完成、出错或等待审批会发通知">
+            <Segmented
+              value={settings.notifyOnFinish ? "on" : "off"}
+              options={[
+                { value: "on", label: "开启" },
+                { value: "off", label: "关闭" },
+              ]}
+              onChange={(value) => update({ notifyOnFinish: value === "on" })}
+            />
+          </Row>
           {AGENT_KINDS.map((kind) => (
             <AgentSection key={kind} kind={kind} />
           ))}

@@ -8,7 +8,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 
 | 优先级 | 编号 | 功能 | 涉及 CLI |
 |---|---|---|---|
-| P0 | F1 | 任务完成 / 出错系统通知 | 全部 |
+| P0 | F1 | 任务完成 / 出错系统通知（已完成） | 全部 |
 | P0 | F2 | 运行中排队发送 | 全部 |
 | P0 | F3 | 删除 / 归档会话 | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件 | 全部 |
@@ -31,11 +31,11 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 ### F1 任务完成 / 出错系统通知
 **现状**：只有审批请求且窗口未聚焦时 Dock 跳动（`src/main/index.ts` 的 `events.permission`）；一轮跑完或出错没有提醒。
 
-**做法**
-- 主进程 `events.state`：会话从 `running` 变为 `idle` / `error`，且窗口未聚焦时，用 Electron `Notification` 发通知。
-  标题为会话标题（或项目名），正文为“已完成” / 错误信息首行。
-- 审批请求同样发通知（保留 Dock 跳动）。
-- 点击通知：`mainWindow.show()` + 新增事件 `app:focusSession { sessionKey }`，渲染进程切到该会话。
+**做法**（已实现）
+- 渲染进程 `appStore` 收到 `chat:state` 时，会话由 `running` / `awaitingApproval` 变为 `idle` / `error`，
+  且 `document.hasFocus()` 为 false，用 Web `Notification` 发通知；等待审批（`permission:requested`）同样通知，主进程的 Dock 跳动保留。
+- 标题为“CLI 名 + 状态”，正文为会话标题（没有则项目名）+ 最后一条回复首行 / 错误信息。
+- 点击通知：切到该会话，并调用新增的 `app:focusWindow` 恢复、聚焦主窗口。
 - 设置里加开关 `notifyOnFinish`（默认开）。
 
 **验收**：切到其他应用后，任务结束弹出通知；点击回到 HCode 并定位到该会话；关闭开关后不再通知。

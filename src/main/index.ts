@@ -215,6 +215,12 @@ async function bootstrap() {
     });
   });
   handle("app:copyText", (text) => clipboard.writeText(text));
+  handle("app:focusWindow", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
   handle("fs:stageAttachment", async ({ name, data }) => {
     // 剪贴板文件没有磁盘路径时，保存到持久目录供 CLI 和历史会话继续读取。

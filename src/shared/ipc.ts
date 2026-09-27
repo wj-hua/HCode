@@ -50,6 +50,8 @@ export interface InvokeMap {
   "app:openExternal": [[url: string], void];
   "app:openInTerminal": [[cwd: string, session?: { agent: AgentKind; id: string }], void];
   "app:copyText": [[text: string], void];
+  /** 显示并聚焦主窗口（点击系统通知时用）。 */
+  "app:focusWindow": [[], void];
   "settings:get": [[], Settings];
   "settings:set": [[patch: SettingsPatch], Settings];
 }
@@ -103,6 +105,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "app:openExternal",
   "app:openInTerminal",
   "app:copyText",
+  "app:focusWindow",
   "settings:get",
   "settings:set",
 ];

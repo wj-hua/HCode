@@ -104,6 +104,17 @@ export function errorMessage(error: unknown): string {
   return raw.replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 }
 
+/** 最后一条助手回复的首行，作为通知正文。 */
+function lastAssistantText(rows: readonly ConversationRow[]): string {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]!;
+    if (row.kind !== "assistantText") continue;
+    const line = row.text.split("\n").map((item) => item.trim()).find(Boolean);
+    if (line) return line;
+  }
+  return "";
+}
+
 let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -122,6 +133,22 @@ export const useAppStore = create<AppState>((set, get) => {
     return activeViewId ? conversations[activeViewId] : undefined;
   };
 
+  /** 窗口不在前台时发系统通知，点击后回到 HCode 并切到该会话。 */
+  const notify = (conv: Conversation, status: string, body: string) => {
+    if (!get().settings.notifyOnFinish || document.hasFocus()) return;
+    const summary = conv.sessionId
+      ? get().sessions[conv.projectPath]?.find((item) => item.id === conv.sessionId)
+      : undefined;
+    const title = summary?.title ?? conv.title ?? conv.projectPath.split("/").filter(Boolean).at(-1) ?? "HCode";
+    const notification = new Notification(`${AGENTS[conv.agent].name} ${status}`, {
+      body: `${title}\n${body}`.slice(0, 200),
+    });
+    notification.onclick = () => {
+      if (get().conversations[conv.viewId]) set({ activeViewId: conv.viewId });
+      void hcode.invoke("app:focusWindow");
+    };
+  };
+
   const subscribeEvents = () => {
     hcode.on("chat:rows", ({ sessionKey, ops }) => {
       const conv = findBySessionKey(sessionKey);
@@ -131,6 +158,12 @@ export const useAppStore = create<AppState>((set, get) => {
     hcode.on("chat:state", (event) => {
       const conv = findBySessionKey(event.sessionKey);
       if (!conv) return;
+      const wasBusy = conv.runState === "running" || conv.runState === "awaitingApproval";
+      if (wasBusy && event.state === "error") {
+        notify(conv, "运行出错", event.error ?? "未知错误");
+      } else if (wasBusy && event.state === "idle") {
+        notify(conv, "任务已完成", lastAssistantText(conv.rows));
+      }
       patchConversation(conv.viewId, {
         runState: event.state,
         error: event.error,
@@ -140,6 +173,8 @@ export const useAppStore = create<AppState>((set, get) => {
       });
     });
     hcode.on("permission:requested", (event) => {
+      const conv = findBySessionKey(event.sessionKey);
+      if (conv) notify(conv, "等待审批", event.title ?? event.toolName);
       set((state) => ({ permissions: { ...state.permissions, [event.interactionId]: event } }));
     });
     hcode.on("permission:resolved", ({ interactionId }) => {
