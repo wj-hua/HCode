@@ -3,8 +3,8 @@ import { BrowserWindow, screen, shell } from "electron";
 import { fileURLToPath } from "node:url";
 import type { AppStore } from "./appStore.js";
 
-// ZCode desktopWindowButtonPosition.ts 的基准红绿灯位置
-const MACOS_TRAFFIC_LIGHT_POSITION = { x: 22, y: 23 };
+// 红绿灯垂直中心与侧边栏顶栏、主区域 Header 的按钮中心对齐
+const MACOS_TRAFFIC_LIGHT_POSITION = { x: 22, y: 20 };
 
 export function createMainWindow(store: AppStore): BrowserWindow {
   const saved = store.readWindowState();

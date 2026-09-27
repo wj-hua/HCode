@@ -88,8 +88,8 @@ export function Sidebar() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* 顶部：给红绿灯留位置，整条可拖动窗口 */}
-      <div className={cn("app-drag flex h-12 shrink-0 items-center gap-1 pr-2", fullscreen ? "pl-3" : "pl-[84px]")}>
+      {/* 顶部：给红绿灯留位置，整条可拖动窗口；高度 54 使按钮与红绿灯、主区域 Header 按钮垂直居中对齐 */}
+      <div className={cn("app-drag flex h-[54px] shrink-0 items-center gap-1 pr-2", fullscreen ? "pl-3" : "pl-[84px]")}>
         <ControlHintTooltip title="收起侧边栏" shortcut="⌘B" side="bottom">
           <Button
             variant="ghost"
