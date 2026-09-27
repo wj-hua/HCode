@@ -221,13 +221,21 @@ export class AgyAgent implements AgentProvider {
         env,
         cwd: homedir(),
         timeout: 30_000,
+        killSignal: "SIGKILL",
         maxBuffer: 4 * 1024 * 1024,
       });
       return agyQuota(stdout);
     } catch (error) {
       // 非 0 退出时 stdout 里可能仍有带错误说明的 JSON
       const stdout = isRecord(error) && typeof error.stdout === "string" ? error.stdout : "";
-      return stdout.trim() ? agyQuota(stdout) : quotaError("agy", error);
+      if (stdout.trim()) return agyQuota(stdout);
+      if (isRecord(error)) {
+        if (error.killed === true) return quotaError("agy", "读取额度超时（30 秒），请稍后重试");
+        const stderr = typeof error.stderr === "string" ? error.stderr.trim() : "";
+        if (stderr) return quotaError("agy", stderr.slice(-500));
+        if (typeof error.code === "number") return quotaError("agy", `agy 额度查询失败（退出码 ${error.code}）`);
+      }
+      return quotaError("agy", error);
     }
   }
 
