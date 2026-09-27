@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, powerSaveBlocker, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
@@ -64,9 +64,27 @@ async function bootstrap() {
   const store = new AppStore(app.getPath("userData"));
   let quota: QuotaService | null = null;
 
+  // 有会话在运行且开关打开时阻止系统休眠
+  const runningSessions = new Set<string>();
+  let sleepBlockerId: number | null = null;
+  const syncSleepBlocker = () => {
+    const shouldBlock = store.settings.preventSleepWhileRunning && runningSessions.size > 0;
+    if (shouldBlock && sleepBlockerId === null) {
+      sleepBlockerId = powerSaveBlocker.start("prevent-app-suspension");
+    } else if (!shouldBlock && sleepBlockerId !== null) {
+      powerSaveBlocker.stop(sleepBlockerId);
+      sleepBlockerId = null;
+    }
+  };
+
   const events: AgentEvents = {
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
-    state: (event) => send("chat:state", event),
+    state: (event) => {
+      if (event.state === "running") runningSessions.add(event.sessionKey);
+      else runningSessions.delete(event.sessionKey);
+      syncSleepBlocker();
+      send("chat:state", event);
+    },
     permission: (event) => {
       send("permission:requested", event);
       if (mainWindow && !mainWindow.isFocused()) app.dock?.bounce("informational");
@@ -211,7 +229,11 @@ async function bootstrap() {
   });
 
   handle("settings:get", () => store.settings);
-  handle("settings:set", (patch) => store.updateSettings(patch));
+  handle("settings:set", (patch) => {
+    const settings = store.updateSettings(patch);
+    syncSleepBlocker();
+    return settings;
+  });
 
   agents.startWatching();
   mainWindow = createMainWindow(store);

@@ -174,6 +174,16 @@ export function SettingsDialog() {
               onChange={(defaultAgent) => update({ defaultAgent })}
             />
           </Row>
+          <Row label="运行任务时阻止休眠" hint="有会话正在运行时，电脑不会自动进入睡眠">
+            <Segmented
+              value={settings.preventSleepWhileRunning ? "on" : "off"}
+              options={[
+                { value: "on", label: "开启" },
+                { value: "off", label: "关闭" },
+              ]}
+              onChange={(value) => update({ preventSleepWhileRunning: value === "on" })}
+            />
+          </Row>
           {AGENT_KINDS.map((kind) => (
             <AgentSection key={kind} kind={kind} />
           ))}
