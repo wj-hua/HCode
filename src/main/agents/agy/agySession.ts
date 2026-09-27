@@ -17,6 +17,7 @@ import type {
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
 import { withFileReferences } from "../fileAttachments.js";
+import { withProjectFilePaths } from "../../projectFiles.js";
 import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
 
 /** agy CLI 的数据目录（会话、transcript、上传的图片都在这里）。 */
@@ -174,7 +175,7 @@ export class AgySession {
       const agy = await this.ensureProcess();
       const paths = await this.saveImages(images);
       if (!this.isBusy) return; // 启动期间已被停止
-      const prompt = withFileReferences(text, files);
+      const prompt = withFileReferences(await withProjectFilePaths(text, this.projectPath), files);
       agy.sendUser(paths.length > 0 ? `${prompt}${uploadedImagesNote(paths)}` : prompt);
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));

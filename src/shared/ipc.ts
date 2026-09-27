@@ -45,6 +45,7 @@ export interface InvokeMap {
   "git:switchBranch": [[cwd: string, branch: string], void];
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
+  "fs:listProjectFiles": [[cwd: string, query: string], string[]];
   "fs:stageAttachment": [[file: { name: string; data: string }], string];
   "app:openPath": [[path: string], void];
   "app:showInFinder": [[path: string], void];
@@ -101,6 +102,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "git:switchBranch",
   "fs:readText",
   "fs:stat",
+  "fs:listProjectFiles",
   "fs:stageAttachment",
   "app:openPath",
   "app:showInFinder",

@@ -17,6 +17,7 @@ import { buildProjects } from "./projects.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { QuotaService } from "./quotaService.js";
 import { createMainWindow } from "./window.js";
+import { listProjectFiles } from "./projectFiles.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -191,6 +192,7 @@ async function bootstrap() {
       return null;
     }
   });
+  handle("fs:listProjectFiles", (cwd, query) => listProjectFiles(cwd, query));
 
   handle("app:openPath", async (path) => {
     await shell.openPath(path);

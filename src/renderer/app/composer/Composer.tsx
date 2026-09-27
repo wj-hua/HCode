@@ -35,6 +35,7 @@ import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycle
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
+import { FileDisplayInline } from "@/lib/fileDisplay.js";
 import { appendPromptHistoryEntry, navigatePromptHistory } from "@/lib/promptHistory.js";
 import { persistPromptHistoryEntries, readPromptHistoryEntries } from "@/lib/promptHistoryStorage.js";
 import { modelEfforts, useAppStore, type Conversation, type QueuedMessage } from "../store/appStore";
@@ -97,6 +98,12 @@ function restoreInputFocus(event: Event) {
   document.querySelector<HTMLElement>(COMPOSER_INPUT_SELECTOR)?.focus();
 }
 
+function fileMentionAt(text: string, caret: number): { start: number; query: string } | null {
+  const before = text.slice(0, caret);
+  const match = /(^|[\s，,、(（])@([^\s@]*)$/.exec(before);
+  return match ? { start: caret - match[2]!.length - 1, query: match[2]! } : null;
+}
+
 export function Composer({
   conversation,
   onSubmitted,
@@ -121,6 +128,10 @@ export function Composer({
   const [files, setFiles] = useState<FileInput[]>(() => fileDrafts.get(conversation.viewId) ?? []);
   const [adding, setAdding] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [caret, setCaret] = useState(() => text.length);
+  const [dismissedMention, setDismissedMention] = useState("");
+  const [fileResults, setFileResults] = useState<{ key: string; paths: string[]; loading: boolean }>({ key: "", paths: [], loading: false });
+  const [activeFileIndex, setActiveFileIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const thoughtTriggerRef = useRef<HTMLSpanElement>(null);
   const { intl } = useZCodeIntl();
@@ -141,6 +152,45 @@ export function Composer({
             ?.activeInTerminal,
       ),
   );
+  const mention = fileMentionAt(text, caret);
+  const mentionKey = mention ? `${conversation.projectPath}\0${mention.start}\0${mention.query}` : "";
+  const showFileResults = Boolean(mention && mentionKey !== dismissedMention);
+
+  useEffect(() => {
+    if (!showFileResults || !mention) return;
+    let cancelled = false;
+    const key = mentionKey;
+    const query = mention.query;
+    const timer = window.setTimeout(() => {
+      setFileResults({ key, paths: [], loading: true });
+      void hcode.invoke("fs:listProjectFiles", conversation.projectPath, query).then((paths) => {
+        if (!cancelled) {
+          setFileResults({ key, paths, loading: false });
+          setActiveFileIndex(0);
+        }
+      }).catch(() => {
+        if (!cancelled) setFileResults({ key, paths: [], loading: false });
+      });
+    }, 100);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [conversation.projectPath, mentionKey, showFileResults]);
+
+  const insertFileMention = (path: string) => {
+    if (!mention) return;
+    const end = caret;
+    const suffix = text.slice(end);
+    const token = /[\s@"\\，,、。!?;:]|\.$/.test(path) ? `@${JSON.stringify(path)}` : `@${path}`;
+    const addition = `${token}${!/^\s/.test(suffix) ? " " : ""}`;
+    const next = text.slice(0, mention.start) + addition + suffix;
+    const nextCaret = mention.start + addition.length;
+    setText(next);
+    setCaret(nextCaret);
+    setDismissedMention("");
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
 
   useEffect(() => {
     drafts.set(conversation.viewId, text);
@@ -331,7 +381,9 @@ export function Composer({
           // 手动改过回填的历史后退出浏览态，上下键恢复为移动光标
           if (index !== null && event.target.value !== promptHistory[index]) historyIndexRef.current = null;
           setText(event.target.value);
+          setCaret(event.target.selectionStart);
         }}
+        onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
         onPaste={(event) => {
           const files = [...event.clipboardData.files];
           if (files.length === 0) return;
@@ -339,6 +391,26 @@ export function Composer({
           void addFiles(files);
         }}
         onKeyDown={(event) => {
+          if (showFileResults && !event.nativeEvent.isComposing) {
+            const paths = fileResults.key === mentionKey ? fileResults.paths : [];
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setDismissedMention(mentionKey);
+              return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              if (paths.length) setActiveFileIndex((index) => (index + (event.key === "ArrowDown" ? 1 : paths.length - 1)) % paths.length);
+              return;
+            }
+            if (event.key === "Enter" || event.key === "Tab") {
+              if (paths.length || fileResults.key !== mentionKey || fileResults.loading) {
+                event.preventDefault();
+                if (paths.length) insertFileMention(paths[Math.min(activeFileIndex, paths.length - 1)]!);
+                return;
+              }
+            }
+          }
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
             submit();
@@ -368,6 +440,29 @@ export function Composer({
         placeholder={running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
+      {showFileResults ? (
+        <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="项目文件">
+          {fileResults.key !== mentionKey || fileResults.loading ? (
+            <div className="px-2 py-2 text-ui-sm text-foreground-subtle">搜索项目文件中…</div>
+          ) : fileResults.paths.length ? fileResults.paths.map((path, index) => (
+            <button
+              key={path}
+              type="button"
+              role="option"
+              aria-selected={index === activeFileIndex}
+              className={cn("flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left text-ui-sm hover:bg-surface-hover", index === activeFileIndex && "bg-surface-hover")}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveFileIndex(index)}
+              onClick={() => insertFileMention(path)}
+            >
+              <FileDisplayInline path={path} options={{ className: "inline-flex min-w-0 items-center gap-1", fileNameClassName: "truncate" }} />
+              <span className="ml-2 min-w-0 truncate text-foreground-subtle">{path}</span>
+            </button>
+          )) : (
+            <div className="px-2 py-2 text-ui-sm text-foreground-subtle">没有匹配的项目文件</div>
+          )}
+        </div>
+      ) : null}
       <input
         ref={fileInputRef}
         type="file"

@@ -16,6 +16,7 @@ import type {
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
 import { withFileReferences } from "../fileAttachments.js";
+import { withProjectFilePaths } from "../../projectFiles.js";
 import type { PiVariant } from "./piVariant.js";
 import { StepRpcProcess, type StepLaunch } from "./stepRpc.js";
 import { activeBranch, StepRowProjector, type StepEntry, type StepMessage } from "./stepProjector.js";
@@ -108,7 +109,7 @@ export class StepSession {
     try {
       const rpc = await this.ensureProcess();
       await rpc.request("prompt", {
-        message: withFileReferences(text, files),
+        message: withFileReferences(this.variant.kind === "pi" ? text : await withProjectFilePaths(text, this.projectPath), files),
         ...(images.length
           ? { images: images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType })) }
           : {}),

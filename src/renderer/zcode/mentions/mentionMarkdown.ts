@@ -1,7 +1,7 @@
 const LINK_MENTION_MARKDOWN_PATTERN =
   /\[((?:\\.|[^\\\]])*)\]\((?:<((?:\\.|[^>])*?)>|((?:\\.|[^)])*))\)/g;
 const INLINE_MENTION_TOKEN_PATTERN =
-  /(^|\s)(\$[a-zA-Z0-9._-]+|\/[a-zA-Z0-9._-]+|@[a-zA-Z0-9._-]+|#sess_[a-zA-Z0-9._-]+)(?=$|\s)/g;
+  /(^|[\s，,、(（])(\$[a-zA-Z0-9._-]+|\/[a-zA-Z0-9._-]+|@(?:"(?:\\.|[^"\\])*"|[^\s@，,、。!?;:]*[^\s@，,、。!?;:.])|#sess_[a-zA-Z0-9._-]+)(?=$|\s|[，,、。.!?;:])/g;
 
 function escapeMarkdownLabel(label: string): string {
   return label.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
@@ -158,7 +158,12 @@ function parseInlineMentionTokens(segment: string): MentionTextPart[] {
     } else if (token.startsWith("/")) {
       parts.push({ type: "command", label: token.slice(1) });
     } else if (token.startsWith("@")) {
-      parts.push({ type: "subagent", label: token.slice(1) });
+      const raw = token.slice(1);
+      let label = raw;
+      if (raw.startsWith('"')) {
+        try { label = JSON.parse(raw) as string; } catch { /* 保留原文 */ }
+      }
+      parts.push({ type: raw.startsWith('"') || label.includes("/") || /\.[a-zA-Z0-9]+$/.test(label) ? "file" : "subagent", label });
     } else if (token.startsWith("#")) {
       parts.push({ type: "session", label: token.slice(1) });
     } else {
