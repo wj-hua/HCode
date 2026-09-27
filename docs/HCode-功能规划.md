@@ -9,7 +9,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | 优先级 | 编号 | 功能 | 涉及 CLI |
 |---|---|---|---|
 | P0 | F1 | 任务完成 / 出错系统通知（已完成） | 全部 |
-| P0 | F2 | 运行中排队发送 | 全部 |
+| P0 | F2 | 运行中排队发送（已完成） | 全部 |
 | P0 | F3 | 删除 / 归档会话 | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件 | 全部 |
 | P0 | F5 | `/` 斜杠命令补全 | Claude 优先 |
@@ -43,11 +43,11 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 ### F2 运行中排队发送
 **现状**：`Composer.tsx` 的 `submit()` 在 `running` 时直接返回，只能等本轮结束再输入发送。
 
-**做法**
-- 渲染进程 `Conversation` 增加 `queue: { text, images, files }[]`；运行中按 Enter 入队，输入框清空。
-- 收到 `chat:state` 变为 `idle` 时自动取队首发送；变为 `error` 时暂停队列，由用户决定继续或清空。
-- 输入框上方显示排队条目，可删除 / 编辑。可参考 `zcode/ToolCallBlocks/QueuedSummaryContent.tsx` 的样式。
-- Esc 停止时询问或保留队列（默认保留，不自动发送）。
+**做法**（已实现）
+- `appStore` 的 `Conversation` 增加 `queue: { id, text, images, files }[]` 与 `queuePaused`；运行中按 Enter 调 `enqueue` 入队，输入框清空。
+- 收到 `chat:state` 由运行变为 `idle` 时 `drainQueue` 自动发送队首（此时不发“任务已完成”通知）；变为 `error` 时暂停队列（`queuePaused: "error"`），发送失败的条目放回队首。
+- 输入框上方 `QueuedMessages` 显示排队条目，可移除，或“编辑”退回输入框（输入框有内容时提示先发送或清空）；暂停时显示原因与“继续”按钮。文案照 ZCode `chat.queue.*`。
+- Esc 停止时保留队列并暂停（`queuePaused: "stopped"`），不自动发送；队列为空时直接发送会清除暂停状态。
 
 **验收**：运行中连发两条，本轮结束后依次自动发送；出错后队列不继续；排队项可删除。
 

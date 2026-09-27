@@ -16,6 +16,7 @@ import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/ag
 import type { FileInput, ImageInput } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
+import { QueuedMessages } from "./QueuedMessages";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { hcode } from "../bridge";
@@ -36,7 +37,7 @@ import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
 import { appendPromptHistoryEntry, navigatePromptHistory } from "@/lib/promptHistory.js";
 import { persistPromptHistoryEntries, readPromptHistoryEntries } from "@/lib/promptHistoryStorage.js";
-import { modelEfforts, useAppStore, type Conversation } from "../store/appStore";
+import { modelEfforts, useAppStore, type Conversation, type QueuedMessage } from "../store/appStore";
 
 const MODE_ICONS = {
   shield: ShieldCheckIcon,
@@ -105,6 +106,8 @@ export function Composer({
 }) {
   const send = useAppStore((state) => state.send);
   const interrupt = useAppStore((state) => state.interrupt);
+  const enqueue = useAppStore((state) => state.enqueue);
+  const removeQueued = useAppStore((state) => state.removeQueued);
   const setPermissionMode = useAppStore((state) => state.setPermissionMode);
   const setModel = useAppStore((state) => state.setModel);
   const setEffort = useAppStore((state) => state.setEffort);
@@ -210,21 +213,48 @@ export function Composer({
 
   const canSend = Boolean(text.trim() || images.length > 0 || files.length > 0);
 
-  const submit = () => {
-    if (!canSend || running || conversation.loading || adding || submitting) return;
-    setSubmitting(true);
+  const rememberPrompt = (value: string) => {
     const projectPath = conversation.projectPath;
+    const nextHistory = appendPromptHistoryEntry(readPromptHistoryEntries(projectPath), value);
+    persistPromptHistoryEntries(projectPath, nextHistory);
+    setPromptHistory(nextHistory);
+    historyIndexRef.current = null;
+  };
+
+  const submit = () => {
+    if (!canSend || conversation.loading || adding || submitting) return;
+    if (running) {
+      // 运行中先排队，本轮结束后自动发送
+      enqueue(text, images, files);
+      rememberPrompt(text);
+      setText("");
+      setImages([]);
+      setFiles([]);
+      return;
+    }
+    setSubmitting(true);
     void send(text, images, files).then((sent) => {
       if (!sent) return;
-      const nextHistory = appendPromptHistoryEntry(readPromptHistoryEntries(projectPath), text);
-      persistPromptHistoryEntries(projectPath, nextHistory);
-      setPromptHistory(nextHistory);
-      historyIndexRef.current = null;
+      rememberPrompt(text);
       setText((current) => current === text ? "" : current);
       setImages((current) => current === images ? [] : current);
       setFiles((current) => current === files ? [] : current);
       onSubmitted();
     }).finally(() => setSubmitting(false));
+  };
+
+  /** 把排队消息退回输入框编辑；输入框有内容时不覆盖。 */
+  const editQueued = (item: QueuedMessage) => {
+    if (canSend) {
+      toast("请先发送或清空当前草稿，再编辑队列消息。", { variant: "warning" });
+      return;
+    }
+    removeQueued(item.id);
+    caretToEndRef.current = true;
+    setText(item.text);
+    setImages(item.images);
+    setFiles(item.files);
+    textareaRef.current?.focus();
   };
 
   const agent = AGENTS[conversation.agent];
@@ -269,6 +299,7 @@ export function Composer({
         这个会话正在某个终端的 claude 中运行。在这里继续发送会与终端同时写入同一会话，建议先在终端里退出。
       </div>
     ) : null}
+    <QueuedMessages conversation={conversation} onEdit={editQueued} />
     <form
       onSubmit={(event) => {
         event.preventDefault();
@@ -334,7 +365,7 @@ export function Composer({
             }
           }
         }}
-        placeholder={running ? `${agent.name} 正在工作…（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
+        placeholder={running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
       <input

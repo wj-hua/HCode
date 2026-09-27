@@ -24,6 +24,14 @@ import { hcode } from "../bridge";
 import { applyRowOps } from "../rows";
 import { useUiStore } from "./uiStore";
 
+/** 运行中输入、等本轮结束后自动发送的消息。 */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  images: ImageInput[];
+  files: FileInput[];
+}
+
 export interface Conversation {
   viewId: string;
   agent: AgentKind;
@@ -45,6 +53,9 @@ export interface Conversation {
   activeModel?: string;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
+  queue: QueuedMessage[];
+  /** 队列暂停原因：用户停止或本轮出错后不再自动发送，等用户点「继续」。 */
+  queuePaused?: "stopped" | "error";
 }
 
 interface AppState {
@@ -76,6 +87,11 @@ interface AppState {
   setDraftProject(projectPath: string): void;
   loadModels(agent: AgentKind): Promise<void>;
   send(text: string, images?: ImageInput[], files?: FileInput[]): Promise<boolean>;
+  /** 运行中把消息加入当前会话的队列。 */
+  enqueue(text: string, images: ImageInput[], files: FileInput[]): void;
+  removeQueued(id: string): void;
+  /** 取消暂停，空闲时立即发送队首。 */
+  resumeQueue(): void;
   interrupt(): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
@@ -149,6 +165,64 @@ export const useAppStore = create<AppState>((set, get) => {
     };
   };
 
+  const sendConversation = async (
+    viewId: string,
+    text: string,
+    images: ImageInput[],
+    files: FileInput[],
+  ): Promise<boolean> => {
+    const conv = get().conversations[viewId];
+    if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return false;
+    const sessionKey = conv.sessionKey ?? crypto.randomUUID();
+    const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
+    const models = get().models[conv.agent] ?? AGENTS[conv.agent].models;
+    const effort = modelEfforts(models, conv.model).includes(conv.effort) ? conv.effort : "";
+    patchConversation(conv.viewId, {
+      sessionKey,
+      runState: "running",
+      error: undefined,
+      // 队列已清空时，上次停止 / 出错留下的暂停状态没有意义
+      ...(conv.queue.length === 0 ? { queuePaused: undefined } : {}),
+    });
+    try {
+      await hcode.invoke("chat:send", {
+        agent: conv.agent,
+        sessionKey,
+        ...(resumeSessionId ? { resumeSessionId } : {}),
+        projectPath: conv.projectPath,
+        text,
+        ...(images.length ? { images } : {}),
+        ...(files.length ? { files } : {}),
+        permissionMode: conv.permissionMode,
+        ...(conv.model ? { model: conv.model } : {}),
+        ...(effort ? { effort } : {}),
+      });
+      return true;
+    } catch (error) {
+      const message = errorMessage(error);
+      patchConversation(conv.viewId, {
+        runState: "error",
+        error: message,
+        // 主进程没建起会话时丢掉 key，下次发送重新创建
+        ...(conv.sessionKey ? {} : { sessionKey: undefined }),
+      });
+      toast(message, { variant: "warning" });
+      return false;
+    }
+  };
+
+  /** 会话空闲且队列未暂停时发送队首；发送失败则放回队首并暂停。 */
+  const drainQueue = (viewId: string) => {
+    const conv = get().conversations[viewId];
+    const next = conv?.queue[0];
+    if (!conv || !next || conv.queuePaused || conv.runState !== "idle") return;
+    patchConversation(viewId, { queue: conv.queue.slice(1) });
+    void sendConversation(viewId, next.text, next.images, next.files).then((sent) => {
+      const current = get().conversations[viewId];
+      if (!sent && current) patchConversation(viewId, { queue: [next, ...current.queue], queuePaused: "error" });
+    });
+  };
+
   const subscribeEvents = () => {
     hcode.on("chat:rows", ({ sessionKey, ops }) => {
       const conv = findBySessionKey(sessionKey);
@@ -159,9 +233,10 @@ export const useAppStore = create<AppState>((set, get) => {
       const conv = findBySessionKey(event.sessionKey);
       if (!conv) return;
       const wasBusy = conv.runState === "running" || conv.runState === "awaitingApproval";
+      const willContinue = conv.queue.length > 0 && !conv.queuePaused;
       if (wasBusy && event.state === "error") {
         notify(conv, "运行出错", event.error ?? "未知错误");
-      } else if (wasBusy && event.state === "idle") {
+      } else if (wasBusy && event.state === "idle" && !willContinue) {
         notify(conv, "任务已完成", lastAssistantText(conv.rows));
       }
       patchConversation(conv.viewId, {
@@ -170,7 +245,9 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: event.permissionMode,
         ...(event.sessionId ? { sessionId: event.sessionId } : {}),
         ...(event.model ? { activeModel: event.model } : {}),
+        ...(event.state === "error" ? { queuePaused: "error" as const } : {}),
       });
+      if (wasBusy && event.state === "idle") drainQueue(conv.viewId);
     });
     hcode.on("permission:requested", (event) => {
       const conv = findBySessionKey(event.sessionKey);
@@ -270,6 +347,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: settings.defaultPermissionModes[summary.agent],
         model: settings.defaultModels[summary.agent],
         effort: settings.defaultEfforts[summary.agent],
+        queue: [],
       };
       set((state) => ({
         conversations: { ...state.conversations, [viewId]: conv },
@@ -313,6 +391,7 @@ export const useAppStore = create<AppState>((set, get) => {
             permissionMode: settings.defaultPermissionModes[agent],
             model: settings.defaultModels[agent],
             effort: settings.defaultEfforts[agent],
+            queue: [],
           },
         },
         activeViewId: viewId,
@@ -352,43 +431,36 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async send(text, images = [], files = []) {
+      const { activeViewId } = get();
+      return activeViewId ? sendConversation(activeViewId, text, images, files) : false;
+    },
+
+    enqueue(text, images, files) {
       const conv = activeConversation();
-      if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return false;
-      const sessionKey = conv.sessionKey ?? crypto.randomUUID();
-      const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
-      const models = get().models[conv.agent] ?? AGENTS[conv.agent].models;
-      const effort = modelEfforts(models, conv.model).includes(conv.effort) ? conv.effort : "";
-      patchConversation(conv.viewId, { sessionKey, runState: "running", error: undefined });
-      try {
-        await hcode.invoke("chat:send", {
-          agent: conv.agent,
-          sessionKey,
-          ...(resumeSessionId ? { resumeSessionId } : {}),
-          projectPath: conv.projectPath,
-          text,
-          ...(images.length ? { images } : {}),
-          ...(files.length ? { files } : {}),
-          permissionMode: conv.permissionMode,
-          ...(conv.model ? { model: conv.model } : {}),
-          ...(effort ? { effort } : {}),
-        });
-        return true;
-      } catch (error) {
-        const message = errorMessage(error);
-        patchConversation(conv.viewId, {
-          runState: "error",
-          error: message,
-          // 主进程没建起会话时丢掉 key，下次发送重新创建
-          ...(conv.sessionKey ? {} : { sessionKey: undefined }),
-        });
-        toast(message, { variant: "warning" });
-        return false;
-      }
+      if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return;
+      patchConversation(conv.viewId, {
+        queue: [...conv.queue, { id: crypto.randomUUID(), text, images, files }],
+      });
+    },
+
+    removeQueued(id) {
+      const conv = activeConversation();
+      if (conv) patchConversation(conv.viewId, { queue: conv.queue.filter((item) => item.id !== id) });
+    },
+
+    resumeQueue() {
+      const conv = activeConversation();
+      if (!conv) return;
+      patchConversation(conv.viewId, { queuePaused: undefined });
+      drainQueue(conv.viewId);
     },
 
     async interrupt() {
       const conv = activeConversation();
-      if (conv?.sessionKey) await hcode.invoke("chat:interrupt", conv.sessionKey);
+      if (!conv?.sessionKey) return;
+      // 用户主动停止后保留队列但不自动发送
+      patchConversation(conv.viewId, { queuePaused: "stopped" });
+      await hcode.invoke("chat:interrupt", conv.sessionKey);
     },
 
     async setPermissionMode(mode) {
