@@ -151,6 +151,7 @@ async function bootstrap() {
   );
   handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
+  handle("sessions:delete", (ref) => agents.get(ref.agent).deleteSession(ref.id, ref.projectPath));
 
   handle("chat:send", async (params) => {
     const files = await Promise.all((params.files ?? []).map(async (file) => {

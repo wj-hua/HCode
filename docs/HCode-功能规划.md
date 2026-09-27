@@ -10,7 +10,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 |---|---|---|---|
 | P0 | F1 | 任务完成 / 出错系统通知（已完成） | 全部 |
 | P0 | F2 | 运行中排队发送（已完成） | 全部 |
-| P0 | F3 | 删除 / 归档会话 | 全部（能力不同） |
+| P0 | F3 | 删除 / 归档会话（已完成） | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件 | 全部 |
 | P0 | F5 | `/` 斜杠命令补全 | Claude 优先 |
 | P1 | F6 | 上下文用量与本轮花费 | Claude、Codex 优先 |
@@ -54,17 +54,17 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 ### F3 删除 / 归档会话
 **现状**：会话只能重命名（`sessions:rename`），无法删除，侧边栏越积越多。
 
-**做法**
-- `AgentProvider` 增加可选 `deleteSession?(id, projectPath)`，新增 IPC `sessions:delete`。
+**做法**（已实现）
+- `AgentProvider` 增加 `deleteSession(id, projectPath)`，新增 IPC `sessions:delete`；文件统一用 `shell.trashItem` 移到废纸篓（`src/main/util/trash.ts`）。
 - 各 CLI：
   | CLI | 做法 |
   |---|---|
-  | Claude | Agent SDK `deleteSession()` |
-  | Codex | app-server 的归档接口（`thread/archive`，接入前核实协议） |
-  | StepCode / pi | 删除会话 JSONL 文件（移到废纸篓：`shell.trashItem`） |
-  | Antigravity | 删除 `brain/<会话>` 目录（移到废纸篓），并清理摘要库记录 |
-- 会话右键 / 悬停菜单加“删除”，二次确认；正在运行的会话先关闭。
-- 不支持的 CLI 不显示该菜单项。
+  | Claude | 与 SDK `deleteSession()` 删除的内容相同（`<id>.jsonl` 与子 agent 目录 `<id>/`），但移到废纸篓 |
+  | Codex | app-server `thread/archive`（归档后 `thread/list` 默认不返回） |
+  | StepCode / pi | 会话 JSONL 移到废纸篓 |
+  | Antigravity | `brain/<id>`、`conversations/<id>.db*`、`annotations/<id>.pbtxt` 移到废纸篓，删除摘要库记录 |
+- 会话右键菜单加“删除会话”（Codex 为“归档会话”），二次确认；删除前关闭 HCode 里已打开的活动会话并关掉对话视图。
+- 正在运行（HCode 中运行 / 等待审批，或在终端中运行）的会话菜单项禁用，避免 CLI 继续写会话文件。
 
 **验收**：删除后侧边栏与项目会话数更新；在对应 CLI 终端里也看不到该会话（Codex 为归档）；文件可从废纸篓恢复。
 

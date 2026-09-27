@@ -35,6 +35,8 @@ export interface AgentProvider {
   listSessions(): Promise<SessionSummary[]>;
   loadSession(id: string, projectPath: string): Promise<SessionLoadResult>;
   renameSession(id: string, projectPath: string, title: string): Promise<void>;
+  /** 删除会话（Codex 为归档）；会话文件移到废纸篓。调用前 HCode 里的活动会话需已关闭。 */
+  deleteSession(id: string, projectPath: string): Promise<void>;
   /** 在终端里继续该会话的命令行（不含 cd）。 */
   resumeCommand(sessionId: string): Promise<string[]>;
   send(params: ChatSendParams): Promise<{ sessionKey: string }>;

@@ -10,6 +10,7 @@ import {
   type SDKSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionLoadResult, SessionSummary } from "../../../shared/types.js";
+import { trashPaths } from "../../util/trash.js";
 import { projectHistory, type ClaudeRecord } from "./rowProjector.js";
 
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
@@ -125,6 +126,17 @@ export class ClaudeHistory {
 
   async rename(sessionId: string, projectPath: string, title: string): Promise<void> {
     await renameSession(sessionId, title, { dir: projectPath });
+    this.invalidate([projectPath]);
+  }
+
+  /** 与 SDK 的 deleteSession 删除的内容相同（<id>.jsonl 与子 agent 目录 <id>/），但移到废纸篓以便恢复。 */
+  async delete(sessionId: string, projectPath: string): Promise<void> {
+    const dirs = await readdir(CLAUDE_PROJECTS_DIR).catch(() => [] as string[]);
+    const paths = dirs.flatMap((dir) => [
+      join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`),
+      join(CLAUDE_PROJECTS_DIR, dir, sessionId),
+    ]);
+    if ((await trashPaths(paths)) === 0) throw new Error("找不到这个 Claude 会话文件");
     this.invalidate([projectPath]);
   }
 

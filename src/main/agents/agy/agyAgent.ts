@@ -24,6 +24,7 @@ import type {
   SessionSummary,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
+import { trashPaths } from "../../util/trash.js";
 import { agyQuota, quotaError } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
@@ -301,6 +302,31 @@ export class AgyAgent implements AgentProvider {
     } catch {
       // 摘要库只是 agy 的缓存，更新失败不影响
     }
+    this.invalidate([projectPath]);
+  }
+
+  /** 会话目录、会话库、标题都移到废纸篓；摘要库只是 agy 的缓存，直接删掉对应记录。 */
+  async deleteSession(id: string, projectPath: string): Promise<void> {
+    const db = join(AGY_DATA_DIR, "conversations", `${id}.db`);
+    const moved = await trashPaths([
+      join(BRAIN_DIR, id),
+      db,
+      `${db}-wal`,
+      `${db}-shm`,
+      join(ANNOTATIONS_DIR, `${id}.pbtxt`),
+    ]);
+    if (moved === 0) throw new Error("找不到这个 Antigravity 会话文件");
+    try {
+      const summaries = new DatabaseSync(SUMMARIES_DB);
+      try {
+        summaries.prepare("DELETE FROM conversation_summaries WHERE conversation_id = ?").run(id);
+      } finally {
+        summaries.close();
+      }
+    } catch {
+      // 摘要库不存在或结构变了
+    }
+    this.workspaces.delete(id);
     this.invalidate([projectPath]);
   }
 

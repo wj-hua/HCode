@@ -34,6 +34,7 @@ export interface InvokeMap {
   "sessions:list": [[projectPath: string], SessionSummary[]];
   "sessions:load": [[ref: SessionRef], SessionLoadResult];
   "sessions:rename": [[ref: SessionRef, title: string], void];
+  "sessions:delete": [[ref: SessionRef], void];
   "chat:send": [[params: ChatSendParams], { sessionKey: string }];
   "chat:interrupt": [[sessionKey: string], void];
   "chat:setPermissionMode": [[sessionKey: string, mode: PermissionMode], void];
@@ -89,6 +90,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "sessions:list",
   "sessions:load",
   "sessions:rename",
+  "sessions:delete",
   "chat:send",
   "chat:interrupt",
   "chat:setPermissionMode",

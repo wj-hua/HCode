@@ -213,6 +213,12 @@ export class CodexAgent implements AgentProvider {
     this.invalidate([projectPath]);
   }
 
+  /** Codex 只支持归档：thread/list 默认不再返回，会话文件移到 archived_sessions。 */
+  async deleteSession(id: string, projectPath: string): Promise<void> {
+    await this.client.call("thread/archive", { threadId: id });
+    this.invalidate([projectPath]);
+  }
+
   async resumeCommand(sessionId: string): Promise<string[]> {
     const status = await this.getStatus();
     return [status.path ?? "codex", "resume", sessionId];
@@ -286,7 +292,7 @@ export class CodexAgent implements AgentProvider {
   }
 
   private onNotification(method: string, params: Record<string, unknown>) {
-    if (method === "thread/name/updated" || method === "thread/started") {
+    if (method === "thread/name/updated" || method === "thread/started" || method === "thread/archived") {
       this.invalidate();
     }
     if (method === "account/rateLimits/updated") {

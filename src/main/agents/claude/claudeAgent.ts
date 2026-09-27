@@ -98,6 +98,10 @@ export class ClaudeAgent implements AgentProvider {
     return this.history.rename(id, projectPath, title);
   }
 
+  deleteSession(id: string, projectPath: string): Promise<void> {
+    return this.history.delete(id, projectPath);
+  }
+
   async resumeCommand(sessionId: string): Promise<string[]> {
     const status = await this.getStatus();
     return [status.path ?? "claude", "--resume", sessionId];

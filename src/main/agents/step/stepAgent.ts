@@ -15,6 +15,7 @@ import type {
   SessionSummary,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
+import { trashPaths } from "../../util/trash.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
 import type { PiVariant } from "./piVariant.js";
@@ -278,6 +279,14 @@ export class StepAgent implements AgentProvider {
       const path = await this.sessionPath(id);
       await this.withTempProcess(projectPath, ["--session", path], (rpc) => rpc.request("set_session_name", { name: title }));
     }
+    this.invalidate([projectPath]);
+  }
+
+  async deleteSession(id: string, projectPath: string): Promise<void> {
+    const path = await this.sessionPath(id);
+    await trashPaths([path]);
+    this.paths.delete(id);
+    this.fileCache.delete(path);
     this.invalidate([projectPath]);
   }
 

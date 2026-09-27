@@ -104,6 +104,8 @@ interface AppState {
   /** 拖动排序：把 activePath 移到 overPath 所在位置。 */
   reorderProjects(activePath: string, overPath: string): Promise<void>;
   renameSession(summary: SessionSummary, title: string): Promise<void>;
+  /** 删除会话（Codex 为归档），并关闭已打开的对话视图。 */
+  deleteSession(summary: SessionSummary): Promise<void>;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
   setSettingsOpen(open: boolean): void;
@@ -527,6 +529,28 @@ export const useAppStore = create<AppState>((set, get) => {
       await hcode.invoke("sessions:rename", { agent: summary.agent, id: summary.id, projectPath: summary.projectPath }, title);
       const conv = Object.values(get().conversations).find((c) => c.sessionId === summary.id);
       if (conv) patchConversation(conv.viewId, { title });
+      await get().loadSessions(summary.projectPath);
+    },
+
+    async deleteSession(summary) {
+      const conv = Object.values(get().conversations).find((c) => c.sessionId === summary.id);
+      try {
+        // 先关闭主进程里的活动会话，避免 CLI 进程继续写已删除的会话文件
+        if (conv?.sessionKey) await hcode.invoke("chat:close", conv.sessionKey);
+        await hcode.invoke("sessions:delete", { agent: summary.agent, id: summary.id, projectPath: summary.projectPath });
+      } catch (error) {
+        toast(`删除失败：${errorMessage(error)}`, { variant: "warning" });
+        return;
+      }
+      if (conv) {
+        set((state) => {
+          const { [conv.viewId]: _removed, ...rest } = state.conversations;
+          return {
+            conversations: rest,
+            activeViewId: state.activeViewId === conv.viewId ? null : state.activeViewId,
+          };
+        });
+      }
       await get().loadSessions(summary.projectPath);
     },
 
