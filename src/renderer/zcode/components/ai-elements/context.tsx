@@ -71,7 +71,7 @@ export const Context = ({ usedTokens, maxTokens, usage, modelId, ...props }: Con
   );
 };
 
-const ContextIcon = () => {
+export const ContextIcon = () => {
   const { usedTokens, maxTokens } = useContextValue();
   const circumference = 2 * Math.PI * ICON_RADIUS;
   const usedPercent = formatUsagePercent(usedTokens, maxTokens);

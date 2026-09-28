@@ -14,6 +14,7 @@ import {
 import type {
   ChatRunState,
   ChatStateEvent,
+  ChatUsage,
   FileInput,
   ImageInput,
   PermissionDecision,
@@ -96,6 +97,9 @@ export class ClaudeSession {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private usage: ChatUsage | undefined;
+  private cumulativeCostUsd: number | null;
+  private usageVersion = 0;
 
   constructor(
     private readonly host: ClaudeSessionHost,
@@ -114,6 +118,7 @@ export class ClaudeSession {
     this.permissionMode = options.permissionMode;
     this.model = options.model || undefined;
     this.effort = options.effort || undefined;
+    this.cumulativeCostUsd = options.resumeSessionId ? null : 0;
   }
 
   /** 续聊时先把历史喂给投影器，保证新行的 rowId 接在历史后面。 */
@@ -121,6 +126,9 @@ export class ClaudeSession {
     let lastAt = 0;
     for (const record of records) {
       this.projector.consume(record);
+      if (record.type === "result" && typeof record.total_cost_usd === "number") {
+        this.cumulativeCostUsd = record.total_cost_usd;
+      }
       const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
       if (Number.isFinite(at)) lastAt = Math.max(lastAt, at);
     }
@@ -145,6 +153,12 @@ export class ClaudeSession {
     if (this.closed) throw new Error("会话已关闭");
     this.clearIdleTimer();
     this.error = undefined;
+    this.usageVersion++;
+    this.usage = this.usage ? {
+      contextUsedTokens: this.usage.contextUsedTokens,
+      contextWindowTokens: this.usage.contextWindowTokens,
+      contextUsedPercent: this.usage.contextUsedPercent,
+    } : undefined;
     this.projector.beginUserTurn(text, Date.now(), undefined, inputAttachments(images, files));
     this.flushNow();
     if (!this.activeQuery) this.start();
@@ -236,9 +250,37 @@ export class ClaudeSession {
     if (message.type === "rate_limit_event") this.host.onQuotaChanged();
     this.projector.consume(message as unknown as ClaudeRecord);
     if (message.type === "result") {
+      const version = this.usageVersion;
+      const previousCost = this.cumulativeCostUsd;
+      const totalCost = message.total_cost_usd;
+      if (Number.isFinite(totalCost) && totalCost >= 0) this.cumulativeCostUsd = totalCost;
+      const input = message.usage.input_tokens + message.usage.cache_read_input_tokens + message.usage.cache_creation_input_tokens;
+      this.usage = {
+        inputTokens: input,
+        outputTokens: message.usage.output_tokens,
+        ...(previousCost !== null && Number.isFinite(totalCost) && totalCost >= 0
+          ? { costUsd: totalCost >= previousCost ? totalCost - previousCost : totalCost }
+          : {}),
+      };
+      const activeQuery = this.activeQuery;
+      if (activeQuery) {
+        void activeQuery.getContextUsage({ detail: "summary" }).then((context) => {
+          if (this.closed || version !== this.usageVersion || !this.usage) return;
+          if (Number.isFinite(context.totalTokens) && context.totalTokens >= 0 && context.maxTokens > 0) {
+            this.usage = {
+              ...this.usage,
+              contextUsedTokens: context.totalTokens,
+              contextWindowTokens: context.maxTokens,
+              contextUsedPercent: context.totalTokens / context.maxTokens * 100,
+            };
+            this.emitState();
+          }
+        }).catch(() => undefined);
+      }
       this.host.onQuotaChanged();
       this.flushNow();
       if (this.pending.size === 0) this.setState("idle");
+      else this.emitState();
       this.scheduleIdleClose();
       return;
     }
@@ -423,6 +465,7 @@ export class ClaudeSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(this.model ? { model: this.model } : {}),
+      ...(this.usage ? { usage: this.usage } : {}),
     });
   }
 

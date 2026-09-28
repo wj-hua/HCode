@@ -6,6 +6,7 @@ import type {
   PermissionMode,
   RowOp,
   ChatStateEvent,
+  ChatUsage,
   FileInput,
   ImageInput,
   PermissionRequestEvent,
@@ -91,6 +92,9 @@ export class CodexSession {
   private readonly pending = new Map<string, PendingRequest>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private usage: ChatUsage | undefined;
+  private totalInputTokens: number | null = null;
+  private totalOutputTokens: number | null = null;
 
   constructor(
     private readonly host: CodexSessionHost,
@@ -116,6 +120,11 @@ export class CodexSession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], skill?: InvokedSkill) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
+    this.usage = this.usage ? {
+      contextUsedTokens: this.usage.contextUsedTokens,
+      contextWindowTokens: this.usage.contextWindowTokens,
+      contextUsedPercent: this.usage.contextUsedPercent,
+    } : undefined;
     this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
     this.setState("running");
@@ -202,6 +211,39 @@ export class CodexSession {
   handleNotification(method: string, params: Record<string, unknown>) {
     const now = Date.now();
     switch (method) {
+      case "thread/tokenUsage/updated": {
+        const tokenUsage = isRecord(params.tokenUsage) ? params.tokenUsage : null;
+        const total = tokenUsage && isRecord(tokenUsage.total) ? tokenUsage.total : null;
+        const last = tokenUsage && isRecord(tokenUsage.last) ? tokenUsage.last : null;
+        if (!total || !last) break;
+        const totalInput = total.inputTokens;
+        const totalOutput = total.outputTokens;
+        const lastInput = last.inputTokens;
+        const lastOutput = last.outputTokens;
+        if (typeof totalInput !== "number" || !Number.isFinite(totalInput) || totalInput < 0 ||
+          typeof totalOutput !== "number" || !Number.isFinite(totalOutput) || totalOutput < 0 ||
+          typeof lastInput !== "number" || !Number.isFinite(lastInput) || lastInput < 0 ||
+          typeof lastOutput !== "number" || !Number.isFinite(lastOutput) || lastOutput < 0) break;
+        const inputDelta = this.totalInputTokens === null || totalInput < this.totalInputTokens
+          ? lastInput : totalInput - this.totalInputTokens;
+        const outputDelta = this.totalOutputTokens === null || totalOutput < this.totalOutputTokens
+          ? lastOutput : totalOutput - this.totalOutputTokens;
+        this.totalInputTokens = totalInput;
+        this.totalOutputTokens = totalOutput;
+        const window = tokenUsage?.modelContextWindow;
+        const contextUsed = lastInput + lastOutput;
+        this.usage = {
+          inputTokens: (this.usage?.inputTokens ?? 0) + inputDelta,
+          outputTokens: (this.usage?.outputTokens ?? 0) + outputDelta,
+          ...(typeof window === "number" && window > 0 && contextUsed > 0 ? {
+            contextUsedTokens: contextUsed,
+            contextWindowTokens: window,
+            contextUsedPercent: contextUsed / window * 100,
+          } : {}),
+        };
+        this.emitState();
+        return;
+      }
       case "turn/started": {
         const turn = isRecord(params.turn) ? params.turn : null;
         if (turn && typeof turn.id === "string") this.currentTurnId = turn.id;
@@ -468,6 +510,7 @@ export class CodexSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...((this.model ?? this.reportedModel) ? { model: this.model ?? this.reportedModel } : {}),
+      ...(this.usage ? { usage: this.usage } : {}),
     });
   }
 

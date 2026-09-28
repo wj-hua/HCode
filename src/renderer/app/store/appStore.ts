@@ -6,6 +6,7 @@ import type {
   AgentStatus,
   ModelOption,
   ChatRunState,
+  ChatUsage,
   ConversationRow,
   FileInput,
   ImageInput,
@@ -51,6 +52,7 @@ export interface Conversation {
   model: string;
   /** Claude 实际使用的模型 id（来自 init）。 */
   activeModel?: string;
+  usage?: ChatUsage;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
   queue: QueuedMessage[];
@@ -183,6 +185,11 @@ export const useAppStore = create<AppState>((set, get) => {
       sessionKey,
       runState: "running",
       error: undefined,
+      usage: conv.usage ? {
+        contextUsedTokens: conv.usage.contextUsedTokens,
+        contextWindowTokens: conv.usage.contextWindowTokens,
+        contextUsedPercent: conv.usage.contextUsedPercent,
+      } : undefined,
       // 队列已清空时，上次停止 / 出错留下的暂停状态没有意义
       ...(conv.queue.length === 0 ? { queuePaused: undefined } : {}),
     });
@@ -247,6 +254,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: event.permissionMode,
         ...(event.sessionId ? { sessionId: event.sessionId } : {}),
         ...(event.model ? { activeModel: event.model } : {}),
+        ...(event.usage ? { usage: event.usage } : {}),
         ...(event.state === "error" ? { queuePaused: "error" as const } : {}),
       });
       if (wasBusy && event.state === "idle") drainQueue(conv.viewId);

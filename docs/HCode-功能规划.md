@@ -13,7 +13,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P0 | F3 | 删除 / 归档会话（已完成） | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件（已完成） | 全部 |
 | P0 | F5 | `/` 斜杠命令补全（Claude、Codex 已完成） | Claude、Codex |
-| P1 | F6 | 上下文用量与本轮花费 | Claude、Codex 优先 |
+| P1 | F6 | 上下文用量与本轮花费（Claude、Codex 已完成） | Claude、Codex 优先 |
 | P1 | F7 | 本轮改动 diff 面板 | 全部（基于 git） |
 | P1 | F8 | 从某条消息分叉 / 回退 | Claude 优先 |
 | P1 | F9 | 会话全文搜索 | 全部 |
@@ -94,7 +94,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 ## P1
 
 ### F6 上下文用量与本轮花费
-**现状**：只显示订阅额度，没有单会话的 token / 上下文占用。
+**现状**：Claude 与 Codex 已显示单会话上下文占用和本轮 Token；Claude 还显示本轮美元估算花费。其他 CLI 暂无可靠数据时隐藏。
 
 **做法**
 - Claude：`result` 消息的 `usage`、`total_cost_usd`；上下文占用用 `Query.getContextUsage()`。

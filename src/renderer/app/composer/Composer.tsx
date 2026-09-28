@@ -16,6 +16,7 @@ import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/ag
 import type { FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
+import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
@@ -657,6 +658,7 @@ export function Composer({
         <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
           <div className="flex min-w-0 items-center gap-1">
             <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden empty:hidden">
+              <UsageIndicator usage={conversation.usage} />
               <ModelConfigSelect
                 modelGroups={modelGroups}
                 showProviderLevel={false}
