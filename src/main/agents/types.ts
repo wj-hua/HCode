@@ -37,6 +37,8 @@ export interface AgentProvider {
   getQuota?(): Promise<AgentQuota>;
   /** 全部历史会话（按更新时间倒序）。 */
   listSessions(): Promise<SessionSummary[]>;
+  /** 已知的会话原始记录文件路径，供全文搜索预筛；未提供时直接读取历史投影。 */
+  sessionFilePath?(id: string): string | undefined;
   loadSession(id: string, projectPath: string): Promise<SessionLoadResult>;
   renameSession(id: string, projectPath: string, title: string): Promise<void>;
   /** 删除会话（Codex 为归档）；会话文件移到废纸篓。调用前 HCode 里的活动会话需已关闭。 */

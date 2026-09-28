@@ -100,6 +100,14 @@ export interface SessionSummary {
   activeInTerminal?: boolean;
 }
 
+export interface SessionSearchResult {
+  session: SessionSummary;
+  /** 标题命中时为空；正文命中时指向会话时间线中的行。 */
+  rowId: number | null;
+  snippet: string;
+  kind: "title" | "user" | "assistant" | "reasoning" | "tool";
+}
+
 export interface GitBranches {
   /** 当前分支；detached HEAD 时为 null。 */
   current: string | null;

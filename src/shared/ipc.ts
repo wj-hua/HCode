@@ -16,6 +16,7 @@ import type {
   Project,
   SessionLoadResult,
   SessionRef,
+  SessionSearchResult,
   SessionSummary,
   Settings,
   SettingsPatch,
@@ -46,6 +47,7 @@ export interface InvokeMap {
   "projects:remove": [[path: string], void];
   "sessions:list": [[projectPath: string], SessionSummary[]];
   "sessions:load": [[ref: SessionRef], SessionLoadResult];
+  "sessions:search": [[query: string], SessionSearchResult[]];
   "sessions:rename": [[ref: SessionRef, title: string], void];
   "sessions:delete": [[ref: SessionRef], void];
   /** 分叉出新会话；回退到第一条消息之前时没有可保留的内容，返回 null。 */
@@ -118,6 +120,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "projects:remove",
   "sessions:list",
   "sessions:load",
+  "sessions:search",
   "sessions:rename",
   "sessions:delete",
   "sessions:fork",

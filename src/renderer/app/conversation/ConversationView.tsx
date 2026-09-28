@@ -8,7 +8,7 @@ import { Timeline } from "./Timeline";
 
 const STICK_THRESHOLD_PX = 80;
 
-export function ConversationView({ conversation }: { conversation: Conversation }) {
+export function ConversationView({ conversation, searchTarget }: { conversation: Conversation; searchTarget: { rowId: number | null; key: number } | null }) {
   const permissions = useAppStore((state) => state.permissions);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -36,6 +36,14 @@ export function ConversationView({ conversation }: { conversation: Conversation 
   useLayoutEffect(() => {
     if (!conversation.loading) scrollToBottom();
   }, [conversation.loading, scrollToBottom]);
+
+  useLayoutEffect(() => {
+    if (conversation.loading || searchTarget?.rowId == null) return;
+    const row = contentRef.current?.querySelector(`[data-search-row-id="${searchTarget.rowId}"]`);
+    if (!row) return;
+    stickRef.current = false;
+    row.scrollIntoView({ block: "center" });
+  }, [conversation.loading, conversation.rows.length, searchTarget?.key, searchTarget?.rowId]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -70,6 +78,7 @@ export function ConversationView({ conversation }: { conversation: Conversation 
               permissions={permissions}
               running={conversation.runState === "running"}
               canFork={Boolean(AGENTS[conversation.agent].fork && conversation.sessionId) && !running}
+              highlightedRowId={searchTarget?.rowId ?? null}
             />
           )}
         </div>

@@ -20,6 +20,7 @@ import { QuotaService } from "./quotaService.js";
 import { createMainWindow } from "./window.js";
 import { listProjectFiles } from "./projectFiles.js";
 import { ExtensionsService } from "./extensions.js";
+import { searchSessions } from "./sessionSearch.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -182,6 +183,11 @@ async function bootstrap() {
     (await agents.allSessions()).filter((session) => session.projectPath === projectPath),
   );
   handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
+  let searchGeneration = 0;
+  handle("sessions:search", (query) => {
+    const generation = ++searchGeneration;
+    return searchSessions(agents, query, () => generation !== searchGeneration);
+  });
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
   handle("sessions:delete", (ref) => agents.get(ref.agent).deleteSession(ref.id, ref.projectPath));
   handle("sessions:fork", (params) => {

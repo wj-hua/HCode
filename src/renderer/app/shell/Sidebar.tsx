@@ -50,7 +50,7 @@ function ProjectDragOverlay({ name, width }: { name: string; width: number | nul
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const [sectionOpen, setSectionOpen] = useState(true);
   const [dragPath, setDragPath] = useState<string | null>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -135,6 +135,7 @@ export function Sidebar() {
               <XIcon className="size-3.5" />
             </button>
           ) : null}
+          <button type="button" onClick={onOpenSearch} className="shrink-0 text-ui-xs text-foreground-subtle hover:text-foreground" title="搜索会话全文（⌘K）">全文</button>
         </div>
       </div>
 

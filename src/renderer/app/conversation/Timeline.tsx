@@ -57,6 +57,7 @@ export function Timeline({
   permissions,
   running,
   canFork,
+  highlightedRowId,
 }: {
   rows: readonly ConversationRow[];
   workspacePath: string;
@@ -64,6 +65,7 @@ export function Timeline({
   running: boolean;
   /** 用户消息悬停时显示分叉 / 回退按钮。 */
   canFork: boolean;
+  highlightedRowId: number | null;
 }) {
   const turns = useMemo(() => groupTurns(rows), [rows]);
   return (
@@ -77,6 +79,7 @@ export function Timeline({
           isLast={index === turns.length - 1}
           running={running}
           canFork={canFork}
+          highlightedRowId={highlightedRowId}
         />
       ))}
     </div>
@@ -90,6 +93,7 @@ function TurnView({
   isLast,
   running,
   canFork,
+  highlightedRowId,
 }: {
   turn: Turn;
   workspacePath: string;
@@ -97,6 +101,7 @@ function TurnView({
   isLast: boolean;
   running: boolean;
   canFork: boolean;
+  highlightedRowId: number | null;
 }) {
   const header = turn.header;
   const turnRunning = header?.state === "running" && isLast && running;
@@ -113,7 +118,9 @@ function TurnView({
   return (
     <div className="flex flex-col gap-3">
       {turn.rows.map((row) => (
-        <RowView key={row.rowId} row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} />
+        <div key={row.rowId} data-search-row-id={row.rowId} className={row.rowId === highlightedRowId ? "rounded-lg ring-2 ring-primary/50" : undefined}>
+          <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} />
+        </div>
       ))}
       {showThinking ? (
         <div className="flex items-center gap-2 text-ui-base text-foreground-subtle">

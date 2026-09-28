@@ -264,6 +264,10 @@ export class StepAgent implements AgentProvider {
     return path;
   }
 
+  sessionFilePath(id: string): string | undefined {
+    return this.paths.get(id);
+  }
+
   async loadSession(id: string, _projectPath: string): Promise<SessionLoadResult> {
     const parsed = await readSessionFile(await this.sessionPath(id));
     const summary = (await this.listSessions()).find((item) => item.id === id) ?? null;
