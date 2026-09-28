@@ -150,6 +150,39 @@ function lastAssistantText(rows: readonly ConversationRow[]): string {
   return "";
 }
 
+/** 已打开会话的占位摘要：标题取首条用户消息。 */
+function liveSummary(conv: Conversation & { sessionId: string }): SessionSummary {
+  const first = conv.rows.find((row) => row.kind === "userInput");
+  const line = first?.kind === "userInput" ? first.text.split("\n").map((item) => item.trim()).find(Boolean) : undefined;
+  const title = conv.title ?? line ?? "新会话";
+  const now = Date.now();
+  return {
+    id: conv.sessionId,
+    agent: conv.agent,
+    projectPath: conv.projectPath,
+    title: title.length > 80 ? `${title.slice(0, 80)}…` : title,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * CLI 的会话索引可能滞后（Codex 新线程要等本轮结束才刷新列表），
+ * 把已打开但列表里还没有的会话补进去，否则切到别的会话后侧栏里就找不到它了。
+ */
+function withLiveSessions(
+  list: SessionSummary[],
+  projectPath: string,
+  conversations: Record<string, Conversation>,
+): SessionSummary[] {
+  const ids = new Set(list.map((item) => item.id));
+  const live = Object.values(conversations)
+    .filter((conv): conv is Conversation & { sessionId: string } =>
+      conv.projectPath === projectPath && Boolean(conv.sessionId) && !ids.has(conv.sessionId!))
+    .map(liveSummary);
+  return live.length ? [...live, ...list].sort((a, b) => b.updatedAt - a.updatedAt) : list;
+}
+
 let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -275,6 +308,14 @@ export const useAppStore = create<AppState>((set, get) => {
         ...(event.usage ? { usage: event.usage } : {}),
         ...(event.state === "error" ? { queuePaused: "error" as const } : {}),
       });
+      // 新会话拿到 id 时立即出现在侧栏，不等 CLI 写索引
+      if (event.sessionId && !conv.sessionId) {
+        set((state) => {
+          const list = state.sessions[conv.projectPath];
+          if (!list) return state;
+          return { sessions: { ...state.sessions, [conv.projectPath]: withLiveSessions(list, conv.projectPath, state.conversations) } };
+        });
+      }
       if (wasBusy && event.state === "idle") drainQueue(conv.viewId);
     });
     hcode.on("git:turnDiff", ({ sessionKey, diff }) => {
@@ -344,7 +385,9 @@ export const useAppStore = create<AppState>((set, get) => {
 
     async loadSessions(projectPath) {
       const list = await hcode.invoke("sessions:list", projectPath);
-      set((state) => ({ sessions: { ...state.sessions, [projectPath]: list } }));
+      set((state) => ({
+        sessions: { ...state.sessions, [projectPath]: withLiveSessions(list, projectPath, state.conversations) },
+      }));
     },
 
     toggleProject(projectPath, expanded) {
