@@ -10,6 +10,7 @@ import type {
   ConversationRow,
   FileInput,
   ImageInput,
+  NotificationEvent,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -22,6 +23,7 @@ import { DEFAULT_SETTINGS } from "@hcode/shared/types";
 import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
+import { playNotificationSound } from "../notificationSound";
 import { applyRowOps } from "../rows";
 import { useUiStore } from "./uiStore";
 
@@ -118,6 +120,12 @@ export function modelEfforts(models: readonly ModelOption[], model: string): str
   return models.find((item) => item.value === model)?.efforts ?? [];
 }
 
+const NOTIFY_STATUS: Record<NotificationEvent, string> = {
+  done: "任务已完成",
+  error: "运行出错",
+  approval: "等待审批",
+};
+
 export function errorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   // ipcRenderer.invoke 的错误带有 "Error invoking remote method 'x': Error: " 前缀
@@ -153,15 +161,18 @@ export const useAppStore = create<AppState>((set, get) => {
     return activeViewId ? conversations[activeViewId] : undefined;
   };
 
-  /** 窗口不在前台时发系统通知，点击后回到 HCode 并切到该会话。 */
-  const notify = (conv: Conversation, status: string, body: string) => {
-    if (!get().settings.notifyOnFinish || document.hasFocus()) return;
+  /** 窗口不在前台时发系统通知并播放提示音，点击后回到 HCode 并切到该会话。 */
+  const notify = async (conv: Conversation, event: NotificationEvent, body: string) => {
+    const { settings } = get();
+    if (!settings.notifyOnFinish || document.hasFocus()) return;
     const summary = conv.sessionId
       ? get().sessions[conv.projectPath]?.find((item) => item.id === conv.sessionId)
       : undefined;
     const title = summary?.title ?? conv.title ?? conv.projectPath.split("/").filter(Boolean).at(-1) ?? "HCode";
-    const notification = new Notification(`${AGENTS[conv.agent].name} ${status}`, {
+    const silent = await playNotificationSound(settings, event);
+    const notification = new Notification(`${AGENTS[conv.agent].name} ${NOTIFY_STATUS[event]}`, {
       body: `${title}\n${body}`.slice(0, 200),
+      silent,
     });
     notification.onclick = () => {
       if (get().conversations[conv.viewId]) set({ activeViewId: conv.viewId });
@@ -244,9 +255,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const wasBusy = conv.runState === "running" || conv.runState === "awaitingApproval";
       const willContinue = conv.queue.length > 0 && !conv.queuePaused;
       if (wasBusy && event.state === "error") {
-        notify(conv, "运行出错", event.error ?? "未知错误");
+        void notify(conv, "error", event.error ?? "未知错误");
       } else if (wasBusy && event.state === "idle" && !willContinue) {
-        notify(conv, "任务已完成", lastAssistantText(conv.rows));
+        void notify(conv, "done", lastAssistantText(conv.rows));
       }
       patchConversation(conv.viewId, {
         runState: event.state,
@@ -261,7 +272,7 @@ export const useAppStore = create<AppState>((set, get) => {
     });
     hcode.on("permission:requested", (event) => {
       const conv = findBySessionKey(event.sessionKey);
-      if (conv) notify(conv, "等待审批", event.title ?? event.toolName);
+      if (conv) void notify(conv, "approval", event.title ?? event.toolName);
       set((state) => ({ permissions: { ...state.permissions, [event.interactionId]: event } }));
     });
     hcode.on("permission:resolved", ({ interactionId }) => {

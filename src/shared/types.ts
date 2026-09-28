@@ -208,6 +208,12 @@ export interface AgentQuota {
   updatedAt: number;
 }
 
+/** 触发通知的事件，每种事件各有一条提示音。 */
+export type NotificationEvent = "done" | "error" | "approval";
+
+/** system：系统默认提示音；xiaoyi / xiaoxiao / xiao：内置语音；custom：用户选的音频文件；none：静音。 */
+export type NotificationSound = "system" | "xiaoyi" | "xiaoxiao" | "xiao" | "custom" | "none";
+
 export interface Settings {
   theme: "system" | "light" | "dark";
   locale: "zh-CN" | "en-US";
@@ -223,6 +229,9 @@ export interface Settings {
   preventSleepWhileRunning: boolean;
   /** HCode 不在前台时，任务完成 / 出错 / 等待审批发系统通知。 */
   notifyOnFinish: boolean;
+  notificationSound: NotificationSound;
+  /** notificationSound 为 custom 时各事件的音频文件路径；空串 = 用系统提示音。 */
+  customSounds: Record<NotificationEvent, string>;
 }
 
 /** 按 CLI 分组的设置项。 */
@@ -243,4 +252,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultEfforts: { claude: "", codex: "", step: "", agy: "", pi: "" },
   preventSleepWhileRunning: true,
   notifyOnFinish: true,
+  notificationSound: "system",
+  customSounds: { done: "", error: "", approval: "" },
 };

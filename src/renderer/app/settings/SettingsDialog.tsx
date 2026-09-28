@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
-import type { AgentKind, SettingsPatch } from "@hcode/shared/types";
+import type { AgentKind, NotificationEvent, SettingsPatch } from "@hcode/shared/types";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
 import { Button } from "@/components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.js";
 import { cn } from "@/components/lib/utils.js";
 import { useAppStore } from "../store/appStore";
+import { hcode } from "../bridge";
+import {
+  isBuiltinSound,
+  NOTIFICATION_EVENTS,
+  NOTIFICATION_SOUND_OPTIONS,
+  playNotificationSound,
+} from "../notificationSound";
 
 function Segmented<T extends string>({
   value,
@@ -130,6 +137,65 @@ function AgentSection({ kind }: { kind: AgentKind }) {
   );
 }
 
+function NotificationSoundSection() {
+  const settings = useAppStore((state) => state.settings);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const sound = settings.notificationSound;
+  const preview = () => void playNotificationSound(settings, "done");
+
+  const pickCustom = async (event: NotificationEvent) => {
+    const path = await hcode.invoke("app:pickAudio");
+    if (path) await updateSettings({ customSounds: { ...settings.customSounds, [event]: path } });
+  };
+
+  return (
+    <div className="flex flex-col">
+      <Row label="通知提示音" hint="内置语音：晓伊、晓晓、潇">
+        <div className="flex items-center gap-2">
+          <Segmented
+            value={sound}
+            options={NOTIFICATION_SOUND_OPTIONS}
+            onChange={(notificationSound) => void updateSettings({ notificationSound })}
+          />
+          {isBuiltinSound(sound) ? (
+            <Button variant="outline" size="lg" onClick={preview}>
+              试听
+            </Button>
+          ) : null}
+        </div>
+      </Row>
+      {sound === "custom"
+        ? NOTIFICATION_EVENTS.map(({ value: event, label }) => {
+            const path = settings.customSounds[event];
+            return (
+              <Row key={event} label={label} hint={path ? path.split("/").at(-1) : "未选择，使用系统提示音"}>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="lg" onClick={() => void pickCustom(event)}>
+                    选择文件
+                  </Button>
+                  {path ? (
+                    <>
+                      <Button variant="outline" size="lg" onClick={() => void playNotificationSound(settings, event)}>
+                        试听
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="lg"
+                        onClick={() => void updateSettings({ customSounds: { ...settings.customSounds, [event]: "" } })}
+                      >
+                        清除
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
+              </Row>
+            );
+          })
+        : null}
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const open = useAppStore((state) => state.settingsOpen);
   const setOpen = useAppStore((state) => state.setSettingsOpen);
@@ -194,6 +260,7 @@ export function SettingsDialog() {
               onChange={(value) => update({ notifyOnFinish: value === "on" })}
             />
           </Row>
+          {settings.notifyOnFinish ? <NotificationSoundSection /> : null}
           {AGENT_KINDS.map((kind) => (
             <AgentSection key={kind} kind={kind} />
           ))}

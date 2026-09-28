@@ -44,6 +44,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),
     defaultModels: pick(raw.defaultModels, DEFAULT_SETTINGS.defaultModels),
     defaultEfforts: pick(raw.defaultEfforts, DEFAULT_SETTINGS.defaultEfforts),
+    customSounds: pick(raw.customSounds, DEFAULT_SETTINGS.customSounds),
   };
   if (typeof raw.claudePath === "string" && raw.claudePath) settings.agentPaths.claude = raw.claudePath;
   if (typeof raw.defaultPermissionMode === "string") {

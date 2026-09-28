@@ -50,6 +50,10 @@ export interface InvokeMap {
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "fs:listProjectFiles": [[cwd: string, query: string], string[]];
   "fs:stageAttachment": [[file: { name: string; data: string }], string];
+  /** 读取提示音文件；不存在、不是文件或超过大小上限时返回 null。 */
+  "fs:readAudio": [[path: string], Uint8Array | null];
+  /** 弹出文件选择框挑一个音频文件，取消返回 null。 */
+  "app:pickAudio": [[], string | null];
   "app:openPath": [[path: string], void];
   "app:showInFinder": [[path: string], void];
   "app:openExternal": [[url: string], void];
@@ -109,6 +113,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "fs:stat",
   "fs:listProjectFiles",
   "fs:stageAttachment",
+  "fs:readAudio",
+  "app:pickAudio",
   "app:openPath",
   "app:showInFinder",
   "app:openExternal",

@@ -197,7 +197,23 @@ async function bootstrap() {
     }
   });
   handle("fs:listProjectFiles", (cwd, query) => listProjectFiles(cwd, query));
+  handle("fs:readAudio", async (path) => {
+    try {
+      const info = await stat(path);
+      if (!info.isFile() || info.size > 10 * 1024 * 1024) return null;
+      return await readFile(path);
+    } catch {
+      return null;
+    }
+  });
 
+  handle("app:pickAudio", async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ["openFile"],
+      filters: [{ name: "音频", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "aiff"] }],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
   handle("app:openPath", async (path) => {
     await shell.openPath(path);
   });

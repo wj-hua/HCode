@@ -9,3 +9,5 @@ HCode 包含复制自 ZCode v3.14（Apache License 2.0，许可证副本见 LICE
 
 ZCode 自身包含的第三方派生代码：`components/ui` 派生自 shadcn/ui（MIT），`components/ai-elements`
 派生自 Vercel AI Elements（Apache-2.0），详见 ZCode `third-party/copied-components.json` 与 `THIRD-PARTY-NOTICES.md`。
+
+`src/renderer/app/sounds/` 中的 `xiaoyi-*`、`xiaoxiao-*` 内置通知语音由 Microsoft Edge 在线语音合成（zh-CN-XiaoyiNeural、zh-CN-XiaoxiaoNeural）生成。
