@@ -62,6 +62,20 @@ describe("parseUnifiedDiff", () => {
 });
 
 describe("Codex 历史投影", () => {
+  it("技能输入只回显一次，审查结果显示为正文", () => {
+    const rows = projectCodexTurns([
+      turn([
+        { type: "userMessage", id: "skill-user", content: [
+          { type: "text", text: "$build 修复测试" },
+          { type: "skill", name: "build", path: "/skills/build/SKILL.md" },
+        ] },
+        { type: "exitedReviewMode", id: "review-result", review: "发现一处问题" },
+      ]),
+    ]).snapshot();
+    expect(ofKind(rows, "userInput")[0]).toMatchObject({ text: "$build 修复测试" });
+    expect(ofKind(rows, "assistantText")[0]).toMatchObject({ text: "发现一处问题" });
+  });
+
   it("命令、读文件、改文件映射到 ZCode 工具族", () => {
     const rows = projectCodexTurns([
       turn([

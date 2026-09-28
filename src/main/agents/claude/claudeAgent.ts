@@ -12,6 +12,7 @@ import type {
   PermissionMode,
   SessionLoadResult,
   SessionSummary,
+  SlashCommandOption,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { claudeQuota, quotaError } from "../quota.js";
@@ -20,6 +21,7 @@ import { ClaudeHistory } from "./claudeHistory.js";
 import { ClaudeSession } from "./claudeSession.js";
 
 const QUOTA_TIMEOUT_MS = 30_000;
+const COMMANDS_TIMEOUT_MS = 15_000;
 
 /** 不产出任何消息的输入流：只用来拉起 claude 进程发控制请求，不会发起对话。 */
 async function* idleInput(signal: AbortSignal): AsyncGenerator<never> {
@@ -52,6 +54,46 @@ export class ClaudeAgent implements AgentProvider {
 
   async listModels(): Promise<ModelOption[]> {
     return AGENTS.claude.models;
+  }
+
+  async listCommands(projectPath: string, sessionKey?: string, sessionId?: string): Promise<SlashCommandOption[]> {
+    const active = sessionKey ? this.sessions.get(sessionKey) : undefined;
+    if (active) {
+      try {
+        const current = await active.listCommands();
+        if (current) return current;
+      } catch {
+        // 进程恰好退出时改用独立查询。
+      }
+    }
+
+    const status = await this.getStatus();
+    if (!status.found || !status.path) return [];
+    const abort = new AbortController();
+    const activeQuery = query({
+      prompt: idleInput(abort.signal),
+      options: {
+        cwd: projectPath,
+        ...(active?.sessionId || sessionId ? { resume: active?.sessionId ?? sessionId } : {}),
+        pathToClaudeCodeExecutable: status.path,
+        env: this.getEnv(),
+        abortController: abort,
+        settingSources: ["user", "project", "local"],
+        systemPrompt: { type: "preset", preset: "claude_code" },
+        persistSession: false,
+      },
+    });
+    const timer = setTimeout(() => abort.abort(), COMMANDS_TIMEOUT_MS);
+    try {
+      const commands = await activeQuery.supportedCommands();
+      return commands.map(({ name, description, argumentHint, aliases }) => ({
+        name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
+      }));
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+      activeQuery.close();
+    }
   }
 
   /** 起一个空闲的 SDK 进程读 /usage 的额度数据，不发消息、不消耗 token。 */
@@ -136,6 +178,7 @@ export class ClaudeAgent implements AgentProvider {
             this.history.invalidate([projectPath]);
           },
           onQuotaChanged: () => this.events.quotaStale("claude"),
+          onCommandsChanged: (key, commands) => this.events.commands(key, commands),
         },
         {
           key: params.sessionKey,

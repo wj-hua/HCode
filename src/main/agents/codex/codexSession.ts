@@ -18,6 +18,11 @@ import { CodexRowProjector, type CodexItem, type CodexTurn } from "./codexProjec
 
 const FLUSH_INTERVAL_MS = 16;
 
+interface InvokedSkill {
+  name: string;
+  path: string;
+}
+
 /** HCode 权限模式 → codex 的审批策略 + 沙箱。 */
 export function codexPolicy(mode: PermissionMode) {
   switch (mode) {
@@ -108,7 +113,7 @@ export class CodexSession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
+  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], skill?: InvokedSkill) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
     this.projector.beginLocalTurn(text, Date.now(), images, files);
@@ -116,12 +121,31 @@ export class CodexSession {
     this.setState("running");
     try {
       await this.attach();
+      if (/^\/compact\s*$/i.test(text)) {
+        if (images.length || files.length) throw new Error("/compact 不能附带文件或图片");
+        await this.host.client.request("thread/compact/start", { threadId: this.threadId });
+        return;
+      }
+      const review = /^\/review(?:\s+([\s\S]*))?$/i.exec(text.trim());
+      if (review) {
+        if (images.length || files.length) throw new Error("/review 不能附带文件或图片");
+        const instructions = review[1]?.trim();
+        const result = await this.host.client.request<{ turn: { id: string } }>("review/start", {
+          threadId: this.threadId,
+          delivery: "inline",
+          target: instructions ? { type: "custom", instructions } : { type: "uncommittedChanges" },
+        });
+        this.currentTurnId = result.turn.id;
+        return;
+      }
       const policy = codexPolicy(this.permissionMode);
-      const prompt = withFileReferences(text, files);
+      const skillPrompt = skill ? text.replace(/^\s*\/[^\s]+/, `$${skill.name}`) : text;
+      const prompt = withFileReferences(skillPrompt, files);
       const result = await this.host.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.threadId,
         input: [
           ...(prompt.trim() || images.length === 0 ? [{ type: "text", text: prompt, text_elements: [] }] : []),
+          ...(skill ? [{ type: "skill", name: skill.name, path: skill.path }] : []),
           ...images.map((image) => ({ type: "image", url: `data:${image.mimeType};base64,${image.data}` })),
         ],
         approvalPolicy: policy.approvalPolicy,

@@ -13,7 +13,7 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ZCodeConfigOption } from "@zcode/shared";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
-import type { FileInput, ImageInput } from "@hcode/shared/types";
+import type { FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { QueuedMessages } from "./QueuedMessages";
@@ -132,6 +132,9 @@ export function Composer({
   const [dismissedMention, setDismissedMention] = useState("");
   const [fileResults, setFileResults] = useState<{ key: string; paths: string[]; loading: boolean }>({ key: "", paths: [], loading: false });
   const [activeFileIndex, setActiveFileIndex] = useState(0);
+  const [slashResults, setSlashResults] = useState<{ key: string; commands: SlashCommandOption[]; loading: boolean }>({ key: "", commands: [], loading: false });
+  const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+  const [dismissedSlash, setDismissedSlash] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const thoughtTriggerRef = useRef<HTMLSpanElement>(null);
   const { intl } = useZCodeIntl();
@@ -155,6 +158,51 @@ export function Composer({
   const mention = fileMentionAt(text, caret);
   const mentionKey = mention ? `${conversation.projectPath}\0${mention.start}\0${mention.query}` : "";
   const showFileResults = Boolean(mention && mentionKey !== dismissedMention);
+  const slashMatch = caret === text.length ? /^\/([^\s]*)$/.exec(text) : null;
+  const slashContext = `${conversation.agent}\0${conversation.projectPath}\0${conversation.sessionKey ?? ""}\0${conversation.sessionId ?? ""}`;
+  const showSlashResults = Boolean(slashMatch && text !== dismissedSlash && !showFileResults);
+  const matchingCommands = slashResults.key === slashContext
+    ? slashResults.commands.filter((command) => {
+        const query = slashMatch?.[1]?.toLowerCase() ?? "";
+        return command.name.toLowerCase().includes(query) || command.aliases?.some((alias) => alias.toLowerCase().includes(query));
+      })
+    : [];
+
+  useEffect(() => {
+    if (!showSlashResults) return;
+    let cancelled = false;
+    setSlashResults((current) => current.key === slashContext ? current : { key: slashContext, commands: [], loading: true });
+    void hcode.invoke("agent:commands", conversation.agent, conversation.projectPath, conversation.sessionKey, conversation.sessionId)
+      .then((commands) => {
+        if (!cancelled) setSlashResults({ key: slashContext, commands, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) setSlashResults({ key: slashContext, commands: [], loading: false });
+      });
+    return () => { cancelled = true; };
+  }, [showSlashResults, slashContext]);
+
+  useEffect(() => {
+    if (!conversation.sessionKey) return;
+    return hcode.on("chat:commands", (event) => {
+      if (event.sessionKey === conversation.sessionKey) {
+        setSlashResults({ key: slashContext, commands: event.commands, loading: false });
+      }
+    });
+  }, [conversation.sessionKey, slashContext]);
+
+  const insertSlashCommand = (command: SlashCommandOption) => {
+    const next = `/${command.name}${command.argumentHint ? " " : ""}`;
+    setText(next);
+    setCaret(next.length);
+    setDismissedSlash(next);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(next.length, next.length);
+    });
+  };
+
+  useEffect(() => { setActiveSlashIndex(0); }, [slashMatch?.[1], slashContext]);
 
   useEffect(() => {
     if (!showFileResults || !mention) return;
@@ -391,6 +439,26 @@ export function Composer({
           void addFiles(files);
         }}
         onKeyDown={(event) => {
+          if (showSlashResults && !event.nativeEvent.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setDismissedSlash(text);
+              return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              if (matchingCommands.length) setActiveSlashIndex((index) =>
+                (index + (event.key === "ArrowDown" ? 1 : matchingCommands.length - 1)) % matchingCommands.length);
+              return;
+            }
+            if (event.key === "Enter" || event.key === "Tab") {
+              if (matchingCommands.length || slashResults.key !== slashContext || slashResults.loading || text === "/") {
+                event.preventDefault();
+                if (matchingCommands.length) insertSlashCommand(matchingCommands[Math.min(activeSlashIndex, matchingCommands.length - 1)]!);
+                return;
+              }
+            }
+          }
           if (showFileResults && !event.nativeEvent.isComposing) {
             const paths = fileResults.key === mentionKey ? fileResults.paths : [];
             if (event.key === "Escape") {
@@ -440,6 +508,31 @@ export function Composer({
         placeholder={running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
+      {showSlashResults ? (
+        <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="斜杠命令">
+          {slashResults.key !== slashContext || slashResults.loading ? (
+            <div className="px-2 py-2 text-ui-sm text-foreground-subtle">读取命令中…</div>
+          ) : matchingCommands.length ? matchingCommands.map((command, index) => (
+            <button
+              key={`${command.name}-${index}`}
+              type="button"
+              role="option"
+              aria-selected={index === activeSlashIndex}
+              className={cn("flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-1.5 text-left text-ui-sm hover:bg-surface-hover", index === activeSlashIndex && "bg-surface-hover")}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveSlashIndex(index)}
+              onClick={() => insertSlashCommand(command)}
+            >
+              <span className="shrink-0 font-medium">/{command.name}</span>
+              {command.kind === "skill" ? <span className="shrink-0 text-foreground-subtlest">技能</span> : null}
+              {command.argumentHint ? <span className="shrink-0 text-foreground-subtle">{command.argumentHint}</span> : null}
+              <span className="min-w-0 truncate text-foreground-subtle">{command.description}</span>
+            </button>
+          )) : (
+            <div className="px-2 py-2 text-ui-sm text-foreground-subtle">没有匹配的命令</div>
+          )}
+        </div>
+      ) : null}
       {showFileResults ? (
         <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="项目文件">
           {fileResults.key !== mentionKey || fileResults.loading ? (

@@ -21,6 +21,7 @@ import type {
   PermissionRequestEvent,
   PermissionResolvedEvent,
   RowOp,
+  SlashCommandOption,
 } from "../../../shared/types.js";
 import { inputAttachments } from "../rowProjectorBase.js";
 import { withFileReferences } from "../fileAttachments.js";
@@ -39,6 +40,7 @@ export interface ClaudeSessionHost {
   onSessionId(sessionKey: string, sessionId: string, projectPath: string): void;
   /** 一轮结束或收到 rate_limit_event：额度可能变了。 */
   onQuotaChanged(): void;
+  onCommandsChanged(sessionKey: string, commands: SlashCommandOption[]): void;
 }
 
 /** 可以不断 push 的 AsyncIterable，作为 SDK 的流式输入。 */
@@ -131,6 +133,14 @@ export class ClaudeSession {
     return this.state === "running" || this.state === "awaitingApproval";
   }
 
+  async listCommands(): Promise<SlashCommandOption[] | null> {
+    if (!this.activeQuery) return null;
+    const commands = await this.activeQuery.supportedCommands();
+    return commands.map(({ name, description, argumentHint, aliases }) => ({
+      name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
+    }));
+  }
+
   send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.clearIdleTimer();
@@ -210,6 +220,11 @@ export class ClaudeSession {
   }
 
   private handleMessage(message: SDKMessage) {
+    if (message.type === "system" && message.subtype === "commands_changed") {
+      this.host.onCommandsChanged(this.key, message.commands.map(({ name, description, argumentHint, aliases }) => ({
+        name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
+      })));
+    }
     if (message.type === "system" && message.subtype === "init") {
       if (message.session_id && message.session_id !== this.sessionId) {
         this.sessionId = message.session_id;

@@ -79,12 +79,13 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 **验收**：输入 `@comp` 能列出 `Composer.tsx`；选择后插入路径；忽略 node_modules 等被 gitignore 的文件。
 
 ### F5 `/` 斜杠命令补全
-**现状**：无补全；`zcode/v4/slashCommands.ts` 已复制未接入。
+**现状**：Claude Code 已接入项目命令和 skills 的 `/` 补全；Codex 已接入 `/compact`、`/review` 和当前项目启用的 skills。其他 CLI 尚未提供可在当前会话协议中执行的命令目录。
 
 **做法**
-- `AgentProvider` 增加可选 `listCommands?(sessionKey | projectPath)`，新增 IPC `agent:commands`。
-- Claude：Agent SDK `Query.supportedCommands()`，并监听 SDK 推送的命令列表更新；其他 CLI 先提供各自内置命令的静态列表（`shared/agents.ts`）。
-- 输入框以 `/` 开头时弹出命令列表，显示名称与说明，选择后填入。
+- `AgentProvider` 增加可选 `listCommands(projectPath, sessionKey?, sessionId?)`，新增 IPC `agent:commands`。
+- Claude：Agent SDK `Query.supportedCommands()` 获取当前项目命令和 skills，并监听 SDK 的 `commands_changed` 更新。
+- Codex：app-server `skills/list` 获取当前项目启用的技能；`/compact` 调用 `thread/compact/start`，`/review` 调用 `review/start`，技能转换为 `turn/start` 的 skill 输入项。监听 `skills/changed` 刷新目录。其他终端专有命令不加入补全。
+- 输入框以 `/` 开头时弹出命令列表，显示名称与说明；支持键盘和鼠标选择，填入后由用户发送。
 
 **验收**：Claude 会话输入 `/` 能看到 `/compact`、项目自定义命令与 skills；选择后正常执行。
 

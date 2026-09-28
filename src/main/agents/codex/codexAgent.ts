@@ -12,6 +12,7 @@ import type {
   PermissionMode,
   SessionLoadResult,
   SessionSummary,
+  SlashCommandOption,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { codexQuota, quotaError, quotaUnavailable } from "../quota.js";
@@ -38,6 +39,14 @@ interface CodexThread {
   gitInfo?: { branch?: string | null } | null;
 }
 
+interface CodexSkill {
+  name: string;
+  description: string;
+  path: string;
+  enabled: boolean;
+  interface?: { shortDescription?: string };
+}
+
 function toSummary(thread: CodexThread): SessionSummary | null {
   if (!thread.cwd || thread.parentThreadId || thread.ephemeral) return null;
   const raw = (thread.name || thread.preview || "未命名会话").trim().split("\n")[0]!.trim();
@@ -61,6 +70,7 @@ export class CodexAgent implements AgentProvider {
   private cache: SessionSummary[] | null = null;
   private loading: Promise<SessionSummary[]> | null = null;
   private models: ModelOption[] | null = null;
+  private readonly skills = new Map<string, Promise<CodexSkill[]>>();
   private watcher: FSWatcher | null = null;
   private debounce: ReturnType<typeof setTimeout> | null = null;
   /** 每次失效 +1；进行中的列表请求返回时如果代数已变，就不写缓存。 */
@@ -124,6 +134,44 @@ export class CodexAgent implements AgentProvider {
       return AGENTS.codex.models;
     }
     return this.models;
+  }
+
+  private listSkills(projectPath: string): Promise<CodexSkill[]> {
+    const cached = this.skills.get(projectPath);
+    if (cached) return cached;
+    const loading = this.client.call<{ data: { cwd: string; skills: CodexSkill[] }[] }>("skills/list", {
+      cwds: [projectPath],
+    }).then((result) => {
+      const unique = new Map<string, CodexSkill>();
+      for (const skill of result.data[0]?.skills ?? []) {
+        if (skill.enabled && skill.name && !unique.has(skill.name)) unique.set(skill.name, skill);
+      }
+      return [...unique.values()];
+    })
+      .catch(() => {
+        this.skills.delete(projectPath);
+        return [];
+      });
+    this.skills.set(projectPath, loading);
+    return loading;
+  }
+
+  async listCommands(projectPath: string, sessionKey?: string, sessionId?: string): Promise<SlashCommandOption[]> {
+    const hasThread = Boolean(sessionId || (sessionKey && this.sessions.get(sessionKey)?.threadId));
+    const builtins: SlashCommandOption[] = [
+      { name: "review", description: "审查当前工作区的改动" },
+      ...(hasThread ? [{ name: "compact", description: "压缩当前会话的上下文" }] : []),
+    ];
+    const reserved = new Set(["review", "compact"]);
+    const skills = (await this.listSkills(projectPath))
+      .filter((skill) => skill.name && !reserved.has(skill.name.toLowerCase()))
+      .map((skill): SlashCommandOption => ({
+        name: skill.name,
+        description: skill.interface?.shortDescription || skill.description,
+        argumentHint: "任务描述",
+        kind: "skill",
+      }));
+    return [...builtins, ...skills];
   }
 
   /** 只有 ChatGPT 账号登录才有订阅额度；API key 等登录方式返回 unavailable。 */
@@ -251,6 +299,14 @@ export class CodexAgent implements AgentProvider {
   }
 
   async send(params: ChatSendParams): Promise<{ sessionKey: string }> {
+    const compact = /^\/compact\s*$/i.test(params.text);
+    const review = /^\/review(?:\s|$)/i.test(params.text.trim());
+    if ((compact || review) && ((params.images?.length ?? 0) > 0 || (params.files?.length ?? 0) > 0)) {
+      throw new Error(`/${compact ? "compact" : "review"} 不能附带文件或图片`);
+    }
+    if (compact && !params.resumeSessionId && !this.sessions.get(params.sessionKey)?.threadId) {
+      throw new Error("请先开始 Codex 会话，再使用 /compact");
+    }
     let session = this.sessions.get(params.sessionKey);
     if (!session) {
       await this.client.ensureStarted();
@@ -279,7 +335,11 @@ export class CodexAgent implements AgentProvider {
       await session.setPermissionMode(params.permissionMode);
     }
     session.effort = params.effort || undefined;
-    void session.send(params.text, params.images, params.files);
+    const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(params.text.trim());
+    const skill = match && !["review", "compact"].includes(match[1]!.toLowerCase())
+      ? (await this.listSkills(params.projectPath)).find((item) => item.name === match[1])
+      : undefined;
+    void session.send(params.text, params.images, params.files, skill);
     return { sessionKey: session.key };
   }
 
@@ -292,6 +352,14 @@ export class CodexAgent implements AgentProvider {
   }
 
   private onNotification(method: string, params: Record<string, unknown>) {
+    if (method === "skills/changed") {
+      this.skills.clear();
+      for (const session of this.sessions.values()) {
+        void this.listCommands(session.projectPath, session.key, session.threadId)
+          .then((commands) => this.events.commands(session.key, commands));
+      }
+      return;
+    }
     if (method === "thread/name/updated" || method === "thread/started" || method === "thread/archived") {
       this.invalidate();
     }

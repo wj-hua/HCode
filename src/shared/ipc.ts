@@ -18,12 +18,15 @@ import type {
   SessionSummary,
   Settings,
   SettingsPatch,
+  SlashCommandOption,
+  SlashCommandsEvent,
 } from "./types.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
   "agent:status": [[], AgentStatus[]];
   "agent:models": [[agent: AgentKind], ModelOption[]];
+  "agent:commands": [[agent: AgentKind, projectPath: string, sessionKey?: string, sessionId?: string], SlashCommandOption[]];
   /** 各 CLI 的订阅额度；force 时忽略主进程缓存。 */
   "quota:list": [[force?: boolean], AgentQuota[]];
   "projects:list": [[], Project[]];
@@ -63,6 +66,7 @@ export interface EventMap {
   "sessions:indexChanged": { projectPaths: string[] };
   "chat:rows": ChatRowsEvent;
   "chat:state": ChatStateEvent;
+  "chat:commands": SlashCommandsEvent;
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
@@ -82,6 +86,7 @@ export interface HCodeBridge {
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "agent:status",
   "agent:models",
+  "agent:commands",
   "quota:list",
   "projects:list",
   "projects:add",
@@ -118,6 +123,7 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "sessions:indexChanged",
   "chat:rows",
   "chat:state",
+  "chat:commands",
   "permission:requested",
   "permission:resolved",
   "window:fullscreen",

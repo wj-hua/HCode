@@ -13,11 +13,13 @@ import type {
   RowOp,
   SessionLoadResult,
   SessionSummary,
+  SlashCommandOption,
 } from "../../shared/types.js";
 
 export interface AgentEvents {
   rows(sessionKey: string, ops: RowOp[]): void;
   state(event: ChatStateEvent): void;
+  commands(sessionKey: string, commands: SlashCommandOption[]): void;
   permission(event: PermissionRequestEvent): void;
   permissionResolved(event: PermissionResolvedEvent): void;
   indexChanged(projectPaths: string[]): void;
@@ -29,6 +31,7 @@ export interface AgentProvider {
   readonly kind: AgentKind;
   getStatus(refresh?: boolean): Promise<AgentStatus>;
   listModels(): Promise<ModelOption[]>;
+  listCommands?(projectPath: string, sessionKey?: string, sessionId?: string): Promise<SlashCommandOption[]>;
   /** 订阅额度（5 小时 / 每周）；不支持的 CLI 不实现。 */
   getQuota?(): Promise<AgentQuota>;
   /** 全部历史会话（按更新时间倒序）。 */

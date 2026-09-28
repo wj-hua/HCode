@@ -86,6 +86,7 @@ async function bootstrap() {
       syncSleepBlocker();
       send("chat:state", event);
     },
+    commands: (sessionKey, commands) => send("chat:commands", { sessionKey, commands }),
     permission: (event) => {
       send("permission:requested", event);
       if (mainWindow && !mainWindow.isFocused()) app.dock?.bounce("informational");
@@ -110,6 +111,9 @@ async function bootstrap() {
 
   handle("agent:status", () => agents.statuses(true));
   handle("agent:models", (agent) => agents.get(agent).listModels());
+  handle("agent:commands", (agent, projectPath, sessionKey, sessionId) =>
+    agents.get(agent).listCommands?.(projectPath, sessionKey, sessionId) ?? Promise.resolve([]),
+  );
   handle("quota:list", (force) => quota!.list(force));
 
   handle("projects:list", async () => buildProjects(await agents.allSessions(), store));

@@ -113,8 +113,13 @@ function userInputParts(content: unknown): { text: string; attachments: UserAtta
       const image = localImageAttachment(part.path);
       if (image) attachments.push(image);
       else parts.push(`[图片 ${part.path}]`);
-    } else if (part.type === "mention" || part.type === "skill") {
+    } else if (part.type === "mention") {
       if (typeof part.name === "string") parts.push(`@${part.name}`);
+    } else if (part.type === "skill" && typeof part.name === "string") {
+      const marker = `$${part.name}`;
+      const alreadyInText = content.some((item) =>
+        isRecord(item) && item.type === "text" && typeof item.text === "string" && item.text.includes(marker));
+      if (!alreadyInText) parts.push(marker);
     }
   }
   return { text: parts.join("\n"), attachments };
@@ -399,6 +404,20 @@ export class CodexRowProjector extends RowProjectorBase {
           marker: { type: "compact", origin: "auto", status: "success" },
         };
         this.put(row);
+        return;
+      }
+      case "exitedReviewMode": {
+        const text = typeof item.review === "string" ? item.review : "";
+        if (text.trim()) {
+          const row: AssistantTextRow = {
+            ...this.base(at),
+            kind: "assistantText",
+            text,
+            state: "complete",
+            assistantResponseId: item.id,
+          };
+          this.put(row);
+        }
         return;
       }
       default:

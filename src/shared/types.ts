@@ -18,6 +18,21 @@ export interface ModelOption {
   efforts?: string[];
 }
 
+export interface SlashCommandOption {
+  /** 不含前导 / 的命令名。 */
+  name: string;
+  description: string;
+  argumentHint?: string;
+  aliases?: string[];
+  /** Codex 技能在界面用 / 补全，发送时转换为 app-server 的 skill 输入项。 */
+  kind?: "skill";
+}
+
+export interface SlashCommandsEvent {
+  sessionKey: string;
+  commands: SlashCommandOption[];
+}
+
 export interface AgentStatus {
   kind: AgentKind;
   found: boolean;
