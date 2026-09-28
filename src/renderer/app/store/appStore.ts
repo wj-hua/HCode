@@ -9,6 +9,7 @@ import type {
   ChatUsage,
   ConversationRow,
   FileInput,
+  GitTurnDiff,
   ImageInput,
   NotificationEvent,
   PermissionDecision,
@@ -55,6 +56,8 @@ export interface Conversation {
   /** Claude 实际使用的模型 id（来自 init）。 */
   activeModel?: string;
   usage?: ChatUsage;
+  /** undefined = 尚无本轮记录；null = 正在收集本轮改动。 */
+  turnDiff?: GitTurnDiff | null;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
   queue: QueuedMessage[];
@@ -269,6 +272,10 @@ export const useAppStore = create<AppState>((set, get) => {
         ...(event.state === "error" ? { queuePaused: "error" as const } : {}),
       });
       if (wasBusy && event.state === "idle") drainQueue(conv.viewId);
+    });
+    hcode.on("git:turnDiff", ({ sessionKey, diff }) => {
+      const conv = findBySessionKey(sessionKey);
+      if (conv) patchConversation(conv.viewId, { turnDiff: diff });
     });
     hcode.on("permission:requested", (event) => {
       const conv = findBySessionKey(event.sessionKey);

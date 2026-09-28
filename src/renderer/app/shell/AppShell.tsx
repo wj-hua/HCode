@@ -1,8 +1,9 @@
 // 应用外壳：结构与样式参照 ZCode WorkspaceShellLayout（侧栏 + 带 4px 留白的圆角主面板）。
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { ConversationView } from "../conversation/ConversationView";
+import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
@@ -14,6 +15,7 @@ const SIDEBAR_WIDTH = 272;
 export function AppShell() {
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
+  const [diffViewId, setDiffViewId] = useState<string | null>(null);
   useGlobalShortcuts();
 
   return (
@@ -33,9 +35,18 @@ export function AppShell() {
         <div className={cn("flex min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
           <div className="app-drag h-1 w-full" />
           <section className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
-            <Header conversation={conversation} />
+            <Header
+              conversation={conversation}
+              diffOpen={!!conversation && diffViewId === conversation.viewId}
+              onToggleDiff={() => setDiffViewId(diffViewId === conversation?.viewId ? null : conversation?.viewId ?? null)}
+            />
             {conversation ? (
-              <ConversationView key={conversation.viewId} conversation={conversation} />
+              <>
+                <ConversationView key={conversation.viewId} conversation={conversation} />
+                {diffViewId === conversation.viewId ? (
+                  <TurnDiffPanel conversation={conversation} onClose={() => setDiffViewId(null)} />
+                ) : null}
+              </>
             ) : (
               <EmptyState />
             )}

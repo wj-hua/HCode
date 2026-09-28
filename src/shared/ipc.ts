@@ -8,6 +8,7 @@ import type {
   ChatSendParams,
   ChatStateEvent,
   GitBranches,
+  GitTurnDiff,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -46,6 +47,7 @@ export interface InvokeMap {
   "permission:respond": [[interactionId: string, decision: PermissionDecision], void];
   "git:branches": [[cwd: string], GitBranches | null];
   "git:switchBranch": [[cwd: string, branch: string], void];
+  "git:isRepository": [[cwd: string], boolean];
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "fs:listProjectFiles": [[cwd: string, query: string], string[]];
@@ -71,6 +73,7 @@ export interface EventMap {
   "chat:rows": ChatRowsEvent;
   "chat:state": ChatStateEvent;
   "chat:commands": SlashCommandsEvent;
+  "git:turnDiff": { sessionKey: string; diff: GitTurnDiff | null };
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
@@ -109,6 +112,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "permission:respond",
   "git:branches",
   "git:switchBranch",
+  "git:isRepository",
   "fs:readText",
   "fs:stat",
   "fs:listProjectFiles",
@@ -130,6 +134,7 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "chat:rows",
   "chat:state",
   "chat:commands",
+  "git:turnDiff",
   "permission:requested",
   "permission:resolved",
   "window:fullscreen",

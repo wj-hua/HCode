@@ -12,7 +12,7 @@ import { StepAgent } from "./agents/step/stepAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
-import { listBranches, switchBranch } from "./git.js";
+import { beginGitTurn, finishGitTurn, isGitRepository, listBranches, switchBranch, type GitTurnSnapshot } from "./git.js";
 import { buildProjects } from "./projects.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { QuotaService } from "./quotaService.js";
@@ -67,6 +67,19 @@ async function bootstrap() {
 
   // 有会话在运行且开关打开时阻止系统休眠
   const runningSessions = new Set<string>();
+  const activeGitTurns = new Set<string>();
+  const gitTurns = new Map<string, GitTurnSnapshot>();
+  const turnGenerations = new Map<string, number>();
+  const finishTurn = (sessionKey: string) => {
+    const turn = gitTurns.get(sessionKey);
+    if (!turn) return;
+    gitTurns.delete(sessionKey);
+    const generation = turnGenerations.get(sessionKey);
+    void finishGitTurn(turn).then(
+      (diff) => { if (turnGenerations.get(sessionKey) === generation) send("git:turnDiff", { sessionKey, diff }); },
+      (error) => { if (turnGenerations.get(sessionKey) === generation) send("git:turnDiff", { sessionKey, diff: { files: [], error: error instanceof Error ? error.message : String(error) } }); },
+    );
+  };
   let sleepBlockerId: number | null = null;
   const syncSleepBlocker = () => {
     const shouldBlock = store.settings.preventSleepWhileRunning && runningSessions.size > 0;
@@ -81,8 +94,12 @@ async function bootstrap() {
   const events: AgentEvents = {
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
     state: (event) => {
+      const wasActive = activeGitTurns.has(event.sessionKey);
       if (event.state === "running") runningSessions.add(event.sessionKey);
       else runningSessions.delete(event.sessionKey);
+      if (event.state === "running" || event.state === "awaitingApproval") activeGitTurns.add(event.sessionKey);
+      else activeGitTurns.delete(event.sessionKey);
+      if (wasActive && (event.state === "idle" || event.state === "error")) finishTurn(event.sessionKey);
       syncSleepBlocker();
       send("chat:state", event);
     },
@@ -166,18 +183,36 @@ async function bootstrap() {
       if (!info.isFile()) throw new Error(`附件不是文件：${file.name}`);
       return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
     }));
-    return agents.send({ ...params, files });
+    // 在 CLI 有机会修改文件前记录基线；Git 不可用时仍照常发送消息。
+    const turn = await beginGitTurn(params.projectPath, buildAgentEnv()).catch(() => null);
+    if (turn) {
+      turnGenerations.set(params.sessionKey, (turnGenerations.get(params.sessionKey) ?? 0) + 1);
+      gitTurns.set(params.sessionKey, turn);
+      send("git:turnDiff", { sessionKey: params.sessionKey, diff: null });
+    }
+    try {
+      return await agents.send({ ...params, files });
+    } catch (error) {
+      finishTurn(params.sessionKey);
+      throw error;
+    }
   });
   handle("chat:interrupt", async (sessionKey) => {
     await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
   });
   handle("chat:setPermissionMode", (sessionKey, mode) => requireSession(sessionKey).setPermissionMode(sessionKey, mode));
   handle("chat:setModel", (sessionKey, model) => requireSession(sessionKey).setModel(sessionKey, model));
-  handle("chat:close", (sessionKey) => agents.bySessionKey(sessionKey)?.closeSession(sessionKey));
+  handle("chat:close", (sessionKey) => {
+    gitTurns.delete(sessionKey);
+    turnGenerations.delete(sessionKey);
+    activeGitTurns.delete(sessionKey);
+    return agents.bySessionKey(sessionKey)?.closeSession(sessionKey);
+  });
   handle("permission:respond", (interactionId, decision) => agents.respondPermission(interactionId, decision));
 
   handle("git:branches", (cwd) => listBranches(cwd, buildAgentEnv()));
   handle("git:switchBranch", (cwd, branch) => switchBranch(cwd, buildAgentEnv(), branch));
+  handle("git:isRepository", (cwd) => isGitRepository(cwd, buildAgentEnv()));
 
   handle("fs:readText", async (path, maxBytes = 2 * 1024 * 1024) => {
     try {

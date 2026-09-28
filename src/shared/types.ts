@@ -70,6 +70,23 @@ export interface GitBranches {
   branches: string[];
 }
 
+export interface GitTurnFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  additions: number;
+  deletions: number;
+  patch: string | null;
+  /** 大文件或二进制文件只列出，不传输内容。 */
+  previewUnavailable?: boolean;
+}
+
+export interface GitTurnDiff {
+  /** Git 仓库根目录；文件路径均相对于此目录。 */
+  root?: string;
+  files: GitTurnFile[];
+  error?: string;
+}
+
 export interface SessionRef {
   agent: AgentKind;
   id: string;
