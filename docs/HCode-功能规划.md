@@ -12,7 +12,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P0 | F2 | 运行中排队发送（已完成） | 全部 |
 | P0 | F3 | 删除 / 归档会话（已完成） | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件（已完成） | 全部 |
-| P0 | F5 | `/` 斜杠命令补全 | Claude 优先 |
+| P0 | F5 | `/` 斜杠命令补全（Claude、Codex 已完成） | Claude、Codex |
 | P1 | F6 | 上下文用量与本轮花费 | Claude、Codex 优先 |
 | P1 | F7 | 本轮改动 diff 面板 | 全部（基于 git） |
 | P1 | F8 | 从某条消息分叉 / 回退 | Claude 优先 |
@@ -87,7 +87,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 - Codex：app-server `skills/list` 获取当前项目启用的技能；`/compact` 调用 `thread/compact/start`，`/review` 调用 `review/start`，技能转换为 `turn/start` 的 skill 输入项。监听 `skills/changed` 刷新目录。其他终端专有命令不加入补全。
 - 输入框以 `/` 开头时弹出命令列表，显示名称与说明；支持键盘和鼠标选择，填入后由用户发送。
 
-**验收**：Claude 会话输入 `/` 能看到 `/compact`、项目自定义命令与 skills；选择后正常执行。
+**验收**：Claude 会话输入 `/` 能看到 `/compact`、项目自定义命令与 skills；Codex 会话能看到 `/review`、当前项目启用的 skills，已有会话还能看到 `/compact`。选择命令后可正常执行。
 
 ---
 
