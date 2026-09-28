@@ -13,6 +13,7 @@ import {
   NOTIFICATION_SOUND_OPTIONS,
   playNotificationSound,
 } from "../notificationSound";
+import { ExtensionsSection } from "./ExtensionsSection";
 
 function Segmented<T extends string>({
   value,
@@ -201,17 +202,22 @@ export function SettingsDialog() {
   const setOpen = useAppStore((state) => state.setSettingsOpen);
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
+  const [tab, setTab] = useState<"general" | "extensions">("general");
 
   const update = (patch: SettingsPatch) => void updateSettings(patch);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
+      <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl min-w-0 grid-cols-[minmax(0,1fr)] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
-          <DialogDescription>HCode 的外观与各 CLI 的默认行为</DialogDescription>
+          <DialogDescription>HCode 的外观、CLI 和扩展配置</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col divide-y divide-border/60">
+        <div className="flex gap-1 border-b border-border pb-2">
+          <Button variant={tab === "general" ? "secondary" : "ghost"} size="sm" onClick={() => setTab("general")}>常规</Button>
+          <Button variant={tab === "extensions" ? "secondary" : "ghost"} size="sm" onClick={() => setTab("extensions")}>MCP / Skills</Button>
+        </div>
+        {tab === "extensions" ? <ExtensionsSection open={open} /> : <div className="flex flex-col divide-y divide-border/60">
           <Row label="主题">
             <Segmented
               value={settings.theme}
@@ -264,7 +270,7 @@ export function SettingsDialog() {
           {AGENT_KINDS.map((kind) => (
             <AgentSection key={kind} kind={kind} />
           ))}
-        </div>
+        </div>}
       </DialogContent>
     </Dialog>
   );

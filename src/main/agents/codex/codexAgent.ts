@@ -13,6 +13,8 @@ import type {
   SessionLoadResult,
   SessionSummary,
   SlashCommandOption,
+  SkillEntry,
+  McpEntry,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { codexQuota, quotaError, quotaUnavailable } from "../quota.js";
@@ -154,6 +156,56 @@ export class CodexAgent implements AgentProvider {
       });
     this.skills.set(projectPath, loading);
     return loading;
+  }
+
+  async listManagedSkills(projectPath: string): Promise<SkillEntry[]> {
+    const result = await this.client.call<{ data: { skills: (CodexSkill & { scope?: string })[] }[] }>("skills/list", {
+      cwds: [projectPath], forceReload: true,
+    });
+    return (result.data[0]?.skills ?? []).map((skill) => ({
+      name: skill.name,
+      description: skill.interface?.shortDescription || skill.description,
+      path: skill.path,
+      scope: skill.scope ?? "user",
+      enabled: skill.enabled,
+      canToggle: true,
+    }));
+  }
+
+  async setSkillEnabled(path: string, enabled: boolean): Promise<void> {
+    await this.client.call("skills/config/write", { path, enabled });
+    this.skills.clear();
+  }
+
+  async listManagedMcp(projectPath: string): Promise<McpEntry[]> {
+    const result = await this.client.call<{
+      config: { mcp_servers?: Record<string, { enabled?: boolean; url?: string }> };
+      layers: { name: { type: string }; config: { mcp_servers?: Record<string, unknown> } }[] | null;
+    }>("config/read", { cwd: projectPath, includeLayers: true });
+    const projectNames = new Set((result.layers ?? [])
+      .filter((layer) => layer.name.type === "project")
+      .flatMap((layer) => Object.keys(layer.config?.mcp_servers ?? {})));
+    return Object.entries(result.config.mcp_servers ?? {}).map(([name, config]) => {
+      const project = projectNames.has(name);
+      const enabled = config.enabled !== false;
+      return {
+        name,
+        scope: project ? "project" : "user",
+        status: enabled ? "已配置" : "已停用",
+        enabled,
+        canToggle: !project && /^[\w-]+$/.test(name),
+        canRemove: !project,
+        detail: config.url ? "HTTP" : "stdio",
+      };
+    });
+  }
+
+  async setMcpEnabled(name: string, enabled: boolean): Promise<void> {
+    if (!/^[\w-]+$/.test(name)) throw new Error("此 MCP 名称暂不支持切换，请在配置文件中修改");
+    await this.client.call("config/value/write", {
+      keyPath: `mcp_servers.${name}.enabled`, value: enabled, mergeStrategy: "upsert",
+    });
+    await this.client.call("config/mcpServer/reload", {}).catch(() => {});
   }
 
   async listCommands(projectPath: string, sessionKey?: string, sessionId?: string): Promise<SlashCommandOption[]> {

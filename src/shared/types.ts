@@ -41,6 +41,43 @@ export interface AgentStatus {
   error?: string;
 }
 
+export type ExtensionAgent = "claude" | "codex";
+
+export interface McpEntry {
+  name: string;
+  scope: string;
+  status: string;
+  enabled: boolean;
+  canToggle: boolean;
+  canRemove: boolean;
+  detail?: string;
+}
+
+export interface SkillEntry {
+  name: string;
+  description: string;
+  path: string;
+  scope: string;
+  enabled: boolean;
+  canToggle: boolean;
+}
+
+export interface ExtensionsSnapshot {
+  mcp: McpEntry[];
+  skills: SkillEntry[];
+}
+
+export interface McpAddParams {
+  agent: ExtensionAgent;
+  projectPath: string;
+  name: string;
+  scope: "user" | "project" | "local";
+  transport: "http" | "stdio";
+  url?: string;
+  command?: string;
+  args?: string[];
+}
+
 export interface Project {
   /** 项目绝对路径（即 CLI 的 cwd），作为唯一键。 */
   path: string;

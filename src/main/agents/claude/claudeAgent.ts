@@ -96,6 +96,33 @@ export class ClaudeAgent implements AgentProvider {
     }
   }
 
+  async listMcpStatus(projectPath: string): Promise<{
+    name: string; status: string; scope?: string; source?: string; error?: string;
+  }[]> {
+    const status = await this.getStatus();
+    if (!status.found || !status.path) return [];
+    const abort = new AbortController();
+    const activeQuery = query({
+      prompt: idleInput(abort.signal),
+      options: {
+        cwd: projectPath,
+        pathToClaudeCodeExecutable: status.path,
+        env: this.getEnv(),
+        abortController: abort,
+        settingSources: ["user", "project", "local"],
+        persistSession: false,
+      },
+    });
+    const timer = setTimeout(() => abort.abort(), COMMANDS_TIMEOUT_MS);
+    try {
+      return await activeQuery.mcpServerStatus();
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+      activeQuery.close();
+    }
+  }
+
   /** 起一个空闲的 SDK 进程读 /usage 的额度数据，不发消息、不消耗 token。 */
   async getQuota(): Promise<AgentQuota> {
     const status = await this.getStatus();

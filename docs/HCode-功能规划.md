@@ -22,7 +22,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P2 | F12 | 新版本检查 | — |
 | P2 | F13 | 同一问题多 CLI 并行对比 | 全部 |
 | P2 | F14 | 导出会话为 Markdown | 全部 |
-| P2 | F15 | MCP / Skills 管理 | Claude 优先 |
+| P2 | F15 | MCP / Skills 管理（已完成） | Claude、Codex |
 
 ---
 
@@ -159,7 +159,7 @@ dmg 未签名，不做自动安装。启动时（每天一次）请求 GitHub Re
 会话菜单加“导出”，把 `ConversationRow` 转为 Markdown（用户消息、回复、工具调用摘要），用 `dialog.showSaveDialog` 保存或复制到剪贴板。
 
 ### F15 MCP / Skills 管理
-设置页新增页签，列出 Claude 的 MCP 服务器状态（SDK `mcpServerStatus()`）与 skills，可启用 / 停用；其他 CLI 读取各自配置文件只读展示。参考 `vendor/zcode-shared` 的 `mcp.ts`、`skills-types.ts`。
+已完成：设置页新增 MCP / Skills 页签，按项目切换 Claude Code / Codex。Claude 通过 SDK 读取 MCP 状态，通过原生 CLI 添加、删除服务器；项目 `.mcp.json` 服务器可在本机设置启用或停用。扫描用户、项目及插件技能；用户和项目技能通过 `skillOverrides` 按项目切换，插件技能只读。Codex 通过 app-server 读取生效配置和技能、切换用户范围 MCP 及技能，通过原生 CLI 添加、删除用户范围 MCP；项目范围 MCP 展示为只读（当前 app-server 只允许写用户配置）。
 
 ---
 

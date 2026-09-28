@@ -21,6 +21,9 @@ import type {
   SettingsPatch,
   SlashCommandOption,
   SlashCommandsEvent,
+  ExtensionAgent,
+  ExtensionsSnapshot,
+  McpAddParams,
 } from "./types.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
@@ -28,6 +31,11 @@ export interface InvokeMap {
   "agent:status": [[], AgentStatus[]];
   "agent:models": [[agent: AgentKind], ModelOption[]];
   "agent:commands": [[agent: AgentKind, projectPath: string, sessionKey?: string, sessionId?: string], SlashCommandOption[]];
+  "extensions:list": [[agent: ExtensionAgent, projectPath: string], ExtensionsSnapshot];
+  "extensions:setMcpEnabled": [[agent: ExtensionAgent, projectPath: string, name: string, enabled: boolean], void];
+  "extensions:addMcp": [[params: McpAddParams], void];
+  "extensions:removeMcp": [[agent: ExtensionAgent, projectPath: string, name: string, scope: string], void];
+  "extensions:setSkillEnabled": [[agent: ExtensionAgent, projectPath: string, path: string, name: string, enabled: boolean], void];
   /** 各 CLI 的订阅额度；force 时忽略主进程缓存。 */
   "quota:list": [[force?: boolean], AgentQuota[]];
   "projects:list": [[], Project[]];
@@ -94,6 +102,11 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "agent:status",
   "agent:models",
   "agent:commands",
+  "extensions:list",
+  "extensions:setMcpEnabled",
+  "extensions:addMcp",
+  "extensions:removeMcp",
+  "extensions:setSkillEnabled",
   "quota:list",
   "projects:list",
   "projects:add",

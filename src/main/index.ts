@@ -18,6 +18,7 @@ import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/lo
 import { QuotaService } from "./quotaService.js";
 import { createMainWindow } from "./window.js";
 import { listProjectFiles } from "./projectFiles.js";
+import { ExtensionsService } from "./extensions.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -112,14 +113,17 @@ async function bootstrap() {
     indexChanged: (projectPaths) => send("sessions:indexChanged", { projectPaths }),
     quotaStale: (agent) => quota?.markStale(agent),
   };
+  const claude = new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude);
+  const codex = new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion());
   const agents = new AgentRegistry({
-    claude: new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude),
-    codex: new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion()),
+    claude,
+    codex,
     step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
     pi: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.pi, PI_VARIANT),
   });
   quota = new QuotaService(agents, buildAgentEnv, (snapshot) => send("quota:updated", snapshot));
+  const extensions = new ExtensionsService(claude, codex, buildAgentEnv);
   const requireSession = (sessionKey: string) => {
     const provider = agents.bySessionKey(sessionKey);
     if (!provider) throw new Error("会话不存在或已关闭");
@@ -131,6 +135,11 @@ async function bootstrap() {
   handle("agent:commands", (agent, projectPath, sessionKey, sessionId) =>
     agents.get(agent).listCommands?.(projectPath, sessionKey, sessionId) ?? Promise.resolve([]),
   );
+  handle("extensions:list", (agent, projectPath) => extensions.list(agent, projectPath));
+  handle("extensions:setMcpEnabled", (agent, projectPath, name, enabled) => extensions.setMcpEnabled(agent, projectPath, name, enabled));
+  handle("extensions:addMcp", (params) => extensions.addMcp(params));
+  handle("extensions:removeMcp", (agent, projectPath, name, scope) => extensions.removeMcp(agent, projectPath, name, scope));
+  handle("extensions:setSkillEnabled", (agent, projectPath, path, name, enabled) => extensions.setSkillEnabled(agent, projectPath, path, name, enabled));
   handle("quota:list", (force) => quota!.list(force));
 
   handle("projects:list", async () => buildProjects(await agents.allSessions(), store));
