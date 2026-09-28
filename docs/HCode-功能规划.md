@@ -1,8 +1,8 @@
-# HCode 功能规划（待办需求）
+# HCode 功能规划与进度
 
 ## 背景
 v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流式对话、审批、附件、订阅额度、运行时防休眠。
-本文整理下一步可加的功能，按“使用频率高、改动小”排序。每项注明现状、做法、可复用的代码和验收标准。
+本文记录已完成的功能和后续计划，按“使用频率高、改动小”排序。每项注明当前进度、实现方式或计划，以及验收标准。
 
 实现原则：优先复用 `src/renderer/zcode/` 里已复制但尚未接入的 ZCode 组件；优先用 Electron / Node 自带能力，不引入新依赖。
 
@@ -13,7 +13,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P0 | F3 | 删除 / 归档会话（已完成） | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件（已完成） | 全部 |
 | P0 | F5 | `/` 斜杠命令补全（Claude、Codex 已完成） | Claude、Codex |
-| P1 | F6 | 上下文用量与本轮花费（Claude、Codex 已完成） | Claude、Codex 优先 |
+| P1 | F6 | 上下文用量与本轮花费（Claude 已完成；Codex 用量已完成） | Claude、Codex |
 | P1 | F7 | 本轮改动 diff 面板 | 全部（基于 git） |
 | P1 | F8 | 从某条消息分叉 / 回退 | Claude 优先 |
 | P1 | F9 | 会话全文搜索 | 全部 |
@@ -97,16 +97,14 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 ## P1
 
 ### F6 上下文用量与本轮花费
-**现状**：Claude 与 Codex 已显示单会话上下文占用和本轮 Token；Claude 还显示本轮美元估算花费。其他 CLI 暂无可靠数据时隐藏。
+**进度**：Claude 已显示上下文占用、本轮输入 / 输出 Token 和美元估算花费；Codex 已显示上下文占用与本轮 Token。Codex 的用量通知没有美元费用，StepCode / pi / agy 目前没有接入可靠的会话用量数据，界面不显示缺失的数值。
 
-**做法**
-- Claude：`result` 消息的 `usage`、`total_cost_usd`；上下文占用用 `Query.getContextUsage()`。
-- Codex：app-server 的 token 用量通知（接入前核实事件名）。
-- StepCode / pi / agy：有则显示，无则隐藏。
-- `ChatStateEvent` 增加 `usage?: { contextUsedPercent?, inputTokens?, outputTokens?, costUsd? }`。
-- 输入框工具栏显示上下文占用环形图，悬停看明细；复用 `zcode/chat-input-toolbar/contextUsage.tsx`。
+**实现**
+- Claude：每轮 `result.usage` 提供 Token；`total_cost_usd` 是累计估算费用，以相邻结果的差值计算本轮费用；`Query.getContextUsage({ detail: "summary" })` 提供上下文已用量和窗口容量。续聊旧会话时若拿不到之前的费用基线，第一轮费用隐藏。
+- Codex：使用 app-server 的 `thread/tokenUsage/updated` 通知。相邻 `total` 用量的差值累计本轮 Token，首次通知用 `last`；最近一次 `last` 的输入、输出 Token 与 `modelContextWindow` 用于估算上下文占用。
+- `ChatStateEvent.usage` 把用量传到会话状态。输入框工具栏的 `UsageIndicator` 复用 ZCode 的 Context 环形图和悬停面板；占用达到 75% / 90% 时分别变为警示色 / 危险色。
 
-**验收**：Claude 会话每轮结束后更新占用百分比与花费；接近上限时颜色变化提示。
+**范围**：只显示当前打开会话收到的实时用量；打开历史会话后，要等下一轮返回用量才会显示。费用是 CLI 的估算值，不是账单金额。
 
 ### F7 本轮改动 diff 面板
 **做法**
@@ -166,8 +164,7 @@ dmg 未签名，不做自动安装。启动时（每天一次）请求 GitHub Re
 
 ---
 
-## 建议实施顺序
-1. F1 + F3 + F2：每天都用，改动集中在主进程事件与输入框。
-2. F4 + F5：输入效率，复用 ZCode 已有组件。
-3. F6 + F7：可观察性。
-4. 其余按需。
+## 后续建议顺序
+1. F7：本轮改动 diff 面板。
+2. F8 + F9：分叉 / 回退与会话全文搜索。
+3. F10–F15：其余按需实施。
