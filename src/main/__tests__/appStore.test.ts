@@ -78,4 +78,15 @@ describe("AppStore.updateSettings", () => {
     expect(settings.defaultModels.claude).toBe("sonnet");
     expect(settings).not.toHaveProperty("claudePath");
   });
+
+  it("旧内置语音迁移到潇，并补上开始执行的自定义音效配置", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    writeFileSync(
+      join(dir, "settings.json"),
+      JSON.stringify({ notificationSound: "xiaoyi", customSounds: { done: "/done.mp3" } }),
+    );
+    const { settings } = new AppStore(dir);
+    expect(settings.notificationSound).toBe("xiao");
+    expect(settings.customSounds).toEqual({ ...DEFAULT_SETTINGS.customSounds, done: "/done.mp3" });
+  });
 });

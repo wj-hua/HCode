@@ -283,10 +283,10 @@ export interface AgentQuota {
 }
 
 /** 触发通知的事件，每种事件各有一条提示音。 */
-export type NotificationEvent = "done" | "error" | "approval";
+export type NotificationEvent = "start" | "done" | "error" | "approval";
 
-/** system：系统默认提示音；xiaoyi / xiaoxiao / xiao：内置语音；custom：用户选的音频文件；none：静音。 */
-export type NotificationSound = "system" | "xiaoyi" | "xiaoxiao" | "xiao" | "custom" | "none";
+/** system：系统默认提示音；xiao：内置语音；custom：用户选的音频文件；none：静音。 */
+export type NotificationSound = "system" | "xiao" | "custom" | "none";
 
 export interface Settings {
   theme: "system" | "light" | "dark";
@@ -301,7 +301,7 @@ export interface Settings {
   defaultEfforts: Record<AgentKind, string>;
   /** 有会话正在运行时阻止电脑休眠（显示器仍可关闭）。 */
   preventSleepWhileRunning: boolean;
-  /** HCode 不在前台时，任务完成 / 出错 / 等待审批发系统通知。 */
+  /** 任务开始、完成、出错或等待审批时通知；后台发送系统通知。 */
   notifyOnFinish: boolean;
   notificationSound: NotificationSound;
   /** notificationSound 为 custom 时各事件的音频文件路径；空串 = 用系统提示音。 */
@@ -327,5 +327,5 @@ export const DEFAULT_SETTINGS: Settings = {
   preventSleepWhileRunning: true,
   notifyOnFinish: true,
   notificationSound: "system",
-  customSounds: { done: "", error: "", approval: "" },
+  customSounds: { start: "", done: "", error: "", approval: "" },
 };

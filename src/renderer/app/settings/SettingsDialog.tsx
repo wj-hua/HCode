@@ -142,8 +142,6 @@ function NotificationSoundSection() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const sound = settings.notificationSound;
-  const preview = () => void playNotificationSound(settings, "done");
-
   const pickCustom = async (event: NotificationEvent) => {
     const path = await hcode.invoke("app:pickAudio");
     if (path) await updateSettings({ customSounds: { ...settings.customSounds, [event]: path } });
@@ -151,20 +149,22 @@ function NotificationSoundSection() {
 
   return (
     <div className="flex flex-col">
-      <Row label="通知提示音" hint="内置语音：晓伊、晓晓、潇">
-        <div className="flex items-center gap-2">
-          <Segmented
-            value={sound}
-            options={NOTIFICATION_SOUND_OPTIONS}
-            onChange={(notificationSound) => void updateSettings({ notificationSound })}
-          />
-          {isBuiltinSound(sound) ? (
-            <Button variant="outline" size="lg" onClick={preview}>
-              试听
-            </Button>
-          ) : null}
-        </div>
+      <Row label="通知提示音" hint="内置语音：潇">
+        <Segmented
+          value={sound}
+          options={NOTIFICATION_SOUND_OPTIONS}
+          onChange={(notificationSound) => void updateSettings({ notificationSound })}
+        />
       </Row>
+      {isBuiltinSound(sound)
+        ? NOTIFICATION_EVENTS.map(({ value: event, label }) => (
+            <Row key={event} label={label}>
+              <Button variant="outline" size="lg" onClick={() => void playNotificationSound(settings, event)}>
+                试听
+              </Button>
+            </Row>
+          ))
+        : null}
       {sound === "custom"
         ? NOTIFICATION_EVENTS.map(({ value: event, label }) => {
             const path = settings.customSounds[event];
@@ -256,7 +256,7 @@ export function SettingsDialog() {
               onChange={(value) => update({ preventSleepWhileRunning: value === "on" })}
             />
           </Row>
-          <Row label="系统通知" hint="HCode 不在前台时，任务完成、出错或等待审批会发通知">
+          <Row label="系统通知" hint="HCode 不在前台时，任务开始、完成、出错或等待审批会发通知">
             <Segmented
               value={settings.notifyOnFinish ? "on" : "off"}
               options={[

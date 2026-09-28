@@ -46,6 +46,10 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     defaultEfforts: pick(raw.defaultEfforts, DEFAULT_SETTINGS.defaultEfforts),
     customSounds: pick(raw.customSounds, DEFAULT_SETTINGS.customSounds),
   };
+  // 旧版内置语音已移除，沿用用户选择内置语音的意图。
+  if (raw.notificationSound === "xiaoyi" || raw.notificationSound === "xiaoxiao") {
+    settings.notificationSound = "xiao";
+  }
   if (typeof raw.claudePath === "string" && raw.claudePath) settings.agentPaths.claude = raw.claudePath;
   if (typeof raw.defaultPermissionMode === "string") {
     settings.defaultPermissionModes.claude = raw.defaultPermissionMode;

@@ -1,12 +1,7 @@
 // 通知提示音：内置语音随前端资源打包，自定义文件经主进程读取后播放。
 import type { NotificationEvent, NotificationSound, Settings } from "@hcode/shared/types";
 import { hcode } from "./bridge";
-import xiaoyiDone from "./sounds/xiaoyi-done.mp3";
-import xiaoyiError from "./sounds/xiaoyi-error.mp3";
-import xiaoyiApproval from "./sounds/xiaoyi-approval.mp3";
-import xiaoxiaoDone from "./sounds/xiaoxiao-done.mp3";
-import xiaoxiaoError from "./sounds/xiaoxiao-error.mp3";
-import xiaoxiaoApproval from "./sounds/xiaoxiao-approval.mp3";
+import xiaoStart from "./sounds/xiao-start.mp3";
 import xiaoDone from "./sounds/xiao-done.mp3";
 import xiaoError from "./sounds/xiao-error.mp3";
 import xiaoApproval from "./sounds/xiao-approval.mp3";
@@ -14,23 +9,20 @@ import xiaoApproval from "./sounds/xiao-approval.mp3";
 type BuiltinSound = Exclude<NotificationSound, "system" | "custom" | "none">;
 
 const BUILTIN_SOUNDS: Record<BuiltinSound, Record<NotificationEvent, string>> = {
-  xiaoyi: { done: xiaoyiDone, error: xiaoyiError, approval: xiaoyiApproval },
-  xiaoxiao: { done: xiaoxiaoDone, error: xiaoxiaoError, approval: xiaoxiaoApproval },
-  xiao: { done: xiaoDone, error: xiaoError, approval: xiaoApproval },
+  xiao: { start: xiaoStart, done: xiaoDone, error: xiaoError, approval: xiaoApproval },
 };
 
 export const isBuiltinSound = (sound: NotificationSound): sound is BuiltinSound => sound in BUILTIN_SOUNDS;
 
 export const NOTIFICATION_SOUND_OPTIONS: { value: NotificationSound; label: string }[] = [
   { value: "system", label: "系统" },
-  { value: "xiaoyi", label: "晓伊" },
-  { value: "xiaoxiao", label: "晓晓" },
   { value: "xiao", label: "潇" },
   { value: "custom", label: "自定义" },
   { value: "none", label: "静音" },
 ];
 
 export const NOTIFICATION_EVENTS: { value: NotificationEvent; label: string }[] = [
+  { value: "start", label: "开始执行" },
   { value: "done", label: "任务完成" },
   { value: "error", label: "运行出错" },
   { value: "approval", label: "等待审批" },

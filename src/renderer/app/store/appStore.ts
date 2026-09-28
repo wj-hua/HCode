@@ -128,6 +128,7 @@ export function modelEfforts(models: readonly ModelOption[], model: string): str
 }
 
 const NOTIFY_STATUS: Record<NotificationEvent, string> = {
+  start: "开始执行",
   done: "任务已完成",
   error: "运行出错",
   approval: "等待审批",
@@ -201,10 +202,14 @@ export const useAppStore = create<AppState>((set, get) => {
     return activeViewId ? conversations[activeViewId] : undefined;
   };
 
-  /** 窗口不在前台时发系统通知并播放提示音，点击后回到 HCode 并切到该会话。 */
+  /** 开始执行时在前台只播放提示音；后台发系统通知，点击后回到该会话。 */
   const notify = async (conv: Conversation, event: NotificationEvent, body: string) => {
     const { settings } = get();
-    if (!settings.notifyOnFinish || document.hasFocus()) return;
+    if (!settings.notifyOnFinish) return;
+    if (document.hasFocus()) {
+      if (event === "start") void playNotificationSound(settings, event);
+      return;
+    }
     const summary = conv.sessionId
       ? get().sessions[conv.projectPath]?.find((item) => item.id === conv.sessionId)
       : undefined;
@@ -257,6 +262,7 @@ export const useAppStore = create<AppState>((set, get) => {
         ...(conv.model ? { model: conv.model } : {}),
         ...(effort ? { effort } : {}),
       });
+      void notify(conv, "start", "任务正在执行");
       return true;
     } catch (error) {
       const message = errorMessage(error);

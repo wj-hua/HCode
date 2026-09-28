@@ -28,17 +28,17 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 
 ## P0
 
-### F1 任务完成 / 出错系统通知
+### F1 任务状态系统通知
 **现状**：只有审批请求且窗口未聚焦时 Dock 跳动（`src/main/index.ts` 的 `events.permission`）；一轮跑完或出错没有提醒。
 
 **做法**（已实现）
-- 渲染进程 `appStore` 收到 `chat:state` 时，会话由 `running` / `awaitingApproval` 变为 `idle` / `error`，
-  且 `document.hasFocus()` 为 false，用 Web `Notification` 发通知；等待审批（`permission:requested`）同样通知，主进程的 Dock 跳动保留。
-- 标题为“CLI 名 + 状态”，正文为会话标题（没有则项目名）+ 最后一条回复首行 / 错误信息。
+- 渲染进程 `appStore` 在消息发送成功时触发开始执行提示；收到 `chat:state` 时，会话由 `running` / `awaitingApproval` 变为 `idle` / `error`，
+  或收到等待审批事件（`permission:requested`）时，也触发对应提示。窗口未聚焦时用 Web `Notification` 发通知，主进程的 Dock 跳动保留。
+- 标题为“CLI 名 + 状态”，正文为会话标题（没有则项目名）+ 对应的任务状态、最后一条回复首行或错误信息。
 - 点击通知：切到该会话，并调用新增的 `app:focusWindow` 恢复、聚焦主窗口。
-- 设置里加开关 `notifyOnFinish`（默认开）。
-- 提示音 `notificationSound`：系统（默认）/ 内置语音晓伊、晓晓、潇 / 自定义 / 静音。内置语音在
-  `src/renderer/app/sounds/`，按完成、出错、等待审批各一条；自定义可为三种事件分别选音频文件（`app:pickAudio`），
+- 设置里加开关 `notifyOnFinish`（默认开）；开始执行时前台只播放所选提示音，后台还发送系统通知。
+- 提示音 `notificationSound`：系统（默认）/ 内置语音潇 / 自定义 / 静音。内置语音在
+  `src/renderer/app/sounds/`，按开始执行、完成、出错、等待审批各一条；自定义可为四种事件分别选音频文件（`app:pickAudio`），
   由主进程 `fs:readAudio` 读出后在渲染进程播放，未选或读取失败的事件回退到系统提示音。播放 HCode 自己的提示音时通知设为 `silent`。
 
 **验收**：切到其他应用后，任务结束弹出通知；点击回到 HCode 并定位到该会话；关闭开关后不再通知。
