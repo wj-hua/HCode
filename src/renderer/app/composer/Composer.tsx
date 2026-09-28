@@ -18,6 +18,7 @@ import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
+import { drafts, fileDrafts, imageDrafts } from "./drafts";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { hcode } from "../bridge";
@@ -59,10 +60,6 @@ const COMPOSER_INPUT_SELECTOR = "[data-composer-input]";
 /** Radix 的选项值不能为空串，「默认模型」用占位值代替。 */
 const DEFAULT_MODEL_VALUE = "__default__";
 
-// 切换会话时保留各自未发送的草稿
-const drafts = new Map<string, string>();
-const imageDrafts = new Map<string, ImageInput[]>();
-const fileDrafts = new Map<string, FileInput[]>();
 
 // 三个 CLI 的模型都支持的图片格式；5MB 是 Claude API 的单图上限
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];

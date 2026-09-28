@@ -9,6 +9,7 @@ import type {
   ChatUsage,
   ConversationRow,
   FileInput,
+  ForkMode,
   GitTurnDiff,
   ImageInput,
   NotificationEvent,
@@ -26,6 +27,7 @@ import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
 import { playNotificationSound } from "../notificationSound";
 import { applyRowOps } from "../rows";
+import { drafts, fileDrafts, imageDrafts } from "../composer/drafts";
 import { useUiStore } from "./uiStore";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
@@ -113,6 +115,8 @@ interface AppState {
   renameSession(summary: SessionSummary, title: string): Promise<void>;
   /** 删除会话（Codex 为归档），并关闭已打开的对话视图。 */
   deleteSession(summary: SessionSummary): Promise<void>;
+  /** 从当前会话的某条用户消息分叉出新会话并打开；回退时把这条消息放回新会话的输入框。 */
+  forkFromMessage(rowId: number, mode: ForkMode): Promise<void>;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
   setSettingsOpen(open: boolean): void;
@@ -578,6 +582,46 @@ export const useAppStore = create<AppState>((set, get) => {
         });
       }
       await get().loadSessions(summary.projectPath);
+    },
+
+    async forkFromMessage(rowId, mode) {
+      const conv = activeConversation();
+      if (!conv?.sessionId || !AGENTS[conv.agent].fork) return;
+      const users = conv.rows.filter((row) => row.kind === "userInput");
+      const turnIndex = users.findIndex((row) => row.rowId === rowId);
+      const row = users[turnIndex];
+      if (!row) return;
+      let summary: SessionSummary | null;
+      try {
+        summary = await hcode.invoke("sessions:fork", {
+          ref: { agent: conv.agent, id: conv.sessionId, projectPath: conv.projectPath },
+          turnIndex,
+          turnCount: users.length,
+          mode,
+        });
+      } catch (error) {
+        toast(`分叉失败：${errorMessage(error)}`, { variant: "warning" });
+        return;
+      }
+      // 回退到第一条消息之前没有可保留的内容，直接开新会话
+      if (!summary) get().newChat(conv.projectPath, conv.agent);
+      const viewId = summary?.id ?? get().activeViewId;
+      if (mode === "rewind" && viewId) {
+        // 在新视图的输入框挂载前写入草稿
+        const attachments = row.attachments ?? [];
+        drafts.set(viewId, row.text);
+        imageDrafts.set(viewId, attachments.flatMap((item) => {
+          const match = /^data:([^;,]+);base64,(.*)$/.exec(item.ref);
+          return match ? [{ mimeType: match[1]!, data: match[2]!, name: item.fileName }] : [];
+        }));
+        fileDrafts.set(viewId, attachments
+          .filter((item) => item.ref.startsWith("/"))
+          .map((item) => ({ path: item.ref, name: item.fileName, mimeType: item.mime, size: item.bytes })));
+      }
+      if (summary) {
+        await get().openSession(summary);
+        void get().loadSessions(conv.projectPath);
+      }
     },
 
     async updateSettings(patch) {

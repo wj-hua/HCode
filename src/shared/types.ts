@@ -130,6 +130,18 @@ export interface SessionRef {
   projectPath: string;
 }
 
+/** fork：保留到这条消息所在轮（含回复）；rewind：只保留这条消息之前的内容，消息退回输入框。 */
+export type ForkMode = "fork" | "rewind";
+
+export interface ForkParams {
+  ref: SessionRef;
+  /** 第几条用户消息（从 0 开始）。 */
+  turnIndex: number;
+  /** 界面上的用户消息总数，用于核对会话记录没有变化。 */
+  turnCount: number;
+  mode: ForkMode;
+}
+
 export interface SessionLoadResult {
   summary: SessionSummary | null;
   rows: ConversationRow[];

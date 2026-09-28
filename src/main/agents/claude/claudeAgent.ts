@@ -7,6 +7,7 @@ import type {
   AgentQuota,
   AgentStatus,
   ChatSendParams,
+  ForkParams,
   ModelOption,
   PermissionDecision,
   PermissionMode,
@@ -169,6 +170,13 @@ export class ClaudeAgent implements AgentProvider {
 
   deleteSession(id: string, projectPath: string): Promise<void> {
     return this.history.delete(id, projectPath);
+  }
+
+  forkSession(params: ForkParams): Promise<SessionSummary | null> {
+    if ([...this.sessions.values()].some((session) => session.sessionId === params.ref.id && session.isBusy)) {
+      throw new Error("会话正在运行，请等本轮结束后再分叉");
+    }
+    return this.history.fork(params);
   }
 
   async resumeCommand(sessionId: string): Promise<string[]> {

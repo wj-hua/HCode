@@ -4,6 +4,7 @@ import { basename, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, powerSaveBlocker, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
+import { AGENTS } from "../shared/agents.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
@@ -183,6 +184,11 @@ async function bootstrap() {
   handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
   handle("sessions:delete", (ref) => agents.get(ref.agent).deleteSession(ref.id, ref.projectPath));
+  handle("sessions:fork", (params) => {
+    const provider = agents.get(params.ref.agent);
+    if (!provider.forkSession) throw new Error(`${AGENTS[params.ref.agent].name} 不支持分叉会话`);
+    return provider.forkSession(params);
+  });
 
   handle("chat:send", async (params) => {
     const files = await Promise.all((params.files ?? []).map(async (file) => {

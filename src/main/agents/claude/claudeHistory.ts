@@ -4,12 +4,13 @@ import { watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  forkSession,
   getSessionMessages,
   listSessions,
   renameSession,
   type SDKSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { SessionLoadResult, SessionSummary } from "../../../shared/types.js";
+import type { ForkParams, SessionLoadResult, SessionSummary } from "../../../shared/types.js";
 import { trashPaths } from "../../util/trash.js";
 import { projectHistory, type ClaudeRecord } from "./rowProjector.js";
 
@@ -127,6 +128,34 @@ export class ClaudeHistory {
   async rename(sessionId: string, projectPath: string, title: string): Promise<void> {
     await renameSession(sessionId, title, { dir: projectPath });
     this.invalidate([projectPath]);
+  }
+
+  /**
+   * 用 SDK 的 forkSession 复制记录到新会话（原会话不变）。截断点是某条记录的 uuid：
+   * fork 取该轮最后一条记录，rewind 取上一轮最后一条记录。
+   */
+  async fork({ ref, turnIndex, turnCount, mode }: ForkParams): Promise<SessionSummary | null> {
+    const records = await this.loadRecords(ref.id, ref.projectPath);
+    // 历史投影里真实用户消息的 turnId 就是开启该轮的记录 uuid
+    const starts = projectHistory(records).snapshot()
+      .filter((row) => row.kind === "userInput")
+      .map((row) => records.findIndex((record) => record.uuid === row.turnId));
+    const start = starts[turnIndex];
+    if (starts.length !== turnCount || start === undefined || start < 0) {
+      throw new Error("会话记录与界面不一致，请重新打开会话后再试");
+    }
+    // 回退到第一条消息之前：没有要保留的对话
+    if (mode === "rewind" && turnIndex === 0) return null;
+    const end = mode === "rewind" ? start - 1 : (starts[turnIndex + 1] ?? records.length) - 1;
+    const upToMessageId = records[end]?.uuid;
+    if (!upToMessageId) throw new Error("找不到分叉位置");
+    const title = `分叉：${(await this.find(ref.id))?.title ?? "未命名会话"}`;
+    const { sessionId } = await forkSession(ref.id, { dir: ref.projectPath, upToMessageId, title });
+    this.invalidate([ref.projectPath]);
+    const now = Date.now();
+    return (await this.find(sessionId)) ?? {
+      id: sessionId, agent: "claude", projectPath: ref.projectPath, title, createdAt: now, updatedAt: now,
+    };
   }
 
   /** 与 SDK 的 deleteSession 删除的内容相同（<id>.jsonl 与子 agent 目录 <id>/），但移到废纸篓以便恢复。 */

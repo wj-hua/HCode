@@ -7,6 +7,7 @@ import type {
   AgentQuota,
   AgentStatus,
   ChatSendParams,
+  ForkParams,
   ModelOption,
   PermissionDecision,
   PermissionMode,
@@ -317,6 +318,43 @@ export class CodexAgent implements AgentProvider {
   async deleteSession(id: string, projectPath: string): Promise<void> {
     await this.client.call("thread/archive", { threadId: id });
     this.invalidate([projectPath]);
+  }
+
+  /**
+   * thread/fork 带 lastTurnId（含该轮）复制到新线程，原线程不变。
+   * 新线程在发出第一条消息前不会出现在 thread/list 里。
+   */
+  async forkSession({ ref, turnIndex, turnCount, mode }: ForkParams): Promise<SessionSummary | null> {
+    if ([...this.sessions.values()].some((session) => session.threadId === ref.id && session.isBusy)) {
+      throw new Error("会话正在运行，请等本轮结束后再分叉");
+    }
+    const turns = await this.loadTurns(ref.id);
+    // 历史投影里用户消息的 turnId 就是 codex 的 turn id
+    const starts = projectCodexTurns(turns).snapshot()
+      .filter((row) => row.kind === "userInput")
+      .map((row) => turns.findIndex((turn) => turn.id === row.turnId));
+    const start = starts[turnIndex];
+    if (starts.length !== turnCount || start === undefined || start < 0) {
+      throw new Error("会话记录与界面不一致，请重新打开会话后再试");
+    }
+    if (mode === "rewind" && turnIndex === 0) return null;
+    // 同一轮可能有多条用户消息（运行中追加），分叉时取到下一轮之前
+    const next = starts.find((value) => value > start) ?? turns.length;
+    const last = mode === "rewind" ? start - 1 : next - 1;
+    const lastTurnId = turns[last]?.id;
+    if (!lastTurnId) throw new Error("找不到分叉位置");
+    const { thread } = await this.client.call<{ thread: CodexThread }>("thread/fork", {
+      threadId: ref.id,
+      lastTurnId,
+      excludeTurns: true,
+    });
+    const title = `分叉：${(await this.listSessions()).find((item) => item.id === ref.id)?.title ?? "未命名会话"}`;
+    await this.client.call("thread/name/set", { threadId: thread.id, name: title }).catch(() => undefined);
+    // 发送时由 CodexSession 重新 thread/resume
+    await this.client.call("thread/unsubscribe", { threadId: thread.id }).catch(() => undefined);
+    this.invalidate([ref.projectPath]);
+    const summary = toSummary({ ...thread, name: title });
+    return summary ?? { id: thread.id, agent: "codex", projectPath: ref.projectPath, title, createdAt: Date.now(), updatedAt: Date.now() };
   }
 
   async resumeCommand(sessionId: string): Promise<string[]> {

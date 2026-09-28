@@ -1,7 +1,7 @@
 // 对话时间线：按轮（turnId）分组渲染 ZCode v4 行。
 // 用户气泡 / 助手正文 / 思考块 / 工具卡片分别复用 ZCode 的组件（见各 import）。
-import { LoaderIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { GitBranchIcon, LoaderIcon, Undo2Icon } from "lucide-react";
+import { memo, useMemo, useState } from "react";
 import type {
   AssistantTextRow,
   ConversationRow,
@@ -10,7 +10,9 @@ import type {
   TurnHeaderRow,
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import type { PermissionRequestEvent } from "@hcode/shared/types";
+import type { ForkMode, PermissionRequestEvent } from "@hcode/shared/types";
+import { Button } from "@/components/ui/button.js";
+import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { MessageResponse } from "@/components/ai-elements/message.js";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning.js";
 import { ToolCallBlock } from "@/ToolCallBlocks.js";
@@ -21,6 +23,7 @@ import { hcode } from "../bridge";
 import { formatDuration } from "../format";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
+import { useAppStore } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
 import { PermissionCard } from "./PermissionCard";
 
@@ -53,11 +56,14 @@ export function Timeline({
   workspacePath,
   permissions,
   running,
+  canFork,
 }: {
   rows: readonly ConversationRow[];
   workspacePath: string;
   permissions: Readonly<Record<string, PermissionRequestEvent>>;
   running: boolean;
+  /** 用户消息悬停时显示分叉 / 回退按钮。 */
+  canFork: boolean;
 }) {
   const turns = useMemo(() => groupTurns(rows), [rows]);
   return (
@@ -70,6 +76,7 @@ export function Timeline({
           permissions={permissions}
           isLast={index === turns.length - 1}
           running={running}
+          canFork={canFork}
         />
       ))}
     </div>
@@ -82,12 +89,14 @@ function TurnView({
   permissions,
   isLast,
   running,
+  canFork,
 }: {
   turn: Turn;
   workspacePath: string;
   permissions: Readonly<Record<string, PermissionRequestEvent>>;
   isLast: boolean;
   running: boolean;
+  canFork: boolean;
 }) {
   const header = turn.header;
   const turnRunning = header?.state === "running" && isLast && running;
@@ -104,7 +113,7 @@ function TurnView({
   return (
     <div className="flex flex-col gap-3">
       {turn.rows.map((row) => (
-        <RowView key={row.rowId} row={row} workspacePath={workspacePath} permissions={permissions} />
+        <RowView key={row.rowId} row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} />
       ))}
       {showThinking ? (
         <div className="flex items-center gap-2 text-ui-base text-foreground-subtle">
@@ -146,14 +155,16 @@ const RowView = memo(function RowView({
   row,
   workspacePath,
   permissions,
+  canFork,
 }: {
   row: ConversationRow;
   workspacePath: string;
   permissions: Readonly<Record<string, PermissionRequestEvent>>;
+  canFork: boolean;
 }) {
   switch (row.kind) {
     case "userInput":
-      return <UserBubble row={row} />;
+      return <UserBubble row={row} canFork={canFork} />;
     case "assistantText":
       return <AssistantText row={row} />;
     case "reasoning":
@@ -178,11 +189,42 @@ const RowView = memo(function RowView({
   }
 });
 
-function UserBubble({ row }: { row: UserInputRow }) {
+const FORK_ACTIONS: { mode: ForkMode; label: string; hint: string; icon: typeof GitBranchIcon }[] = [
+  { mode: "fork", label: "从这里分叉", hint: "新会话保留到这条消息及其回复，原会话不变", icon: GitBranchIcon },
+  { mode: "rewind", label: "回退到这里", hint: "新会话只保留这条消息之前的内容，并把它放回输入框重新编辑；原会话不变，文件改动不会撤销", icon: Undo2Icon },
+];
+
+function ForkActions({ rowId }: { rowId: number }) {
+  const forkFromMessage = useAppStore((state) => state.forkFromMessage);
+  const [pending, setPending] = useState(false);
+  return (
+    <div className="flex gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
+      {FORK_ACTIONS.map(({ mode, label, hint, icon: Icon }) => (
+        <ControlHintTooltip key={mode} title={label} description={hint}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={label}
+            disabled={pending}
+            onClick={() => {
+              setPending(true);
+              void forkFromMessage(rowId, mode).finally(() => setPending(false));
+            }}
+          >
+            <Icon />
+          </Button>
+        </ControlHintTooltip>
+      ))}
+    </div>
+  );
+}
+
+function UserBubble({ row, canFork }: { row: UserInputRow; canFork: boolean }) {
   const images = (row.attachments ?? []).filter((attachment) => attachment.ref.startsWith("data:image/")).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
   const files = (row.attachments ?? []).filter((attachment) => !attachment.ref.startsWith("data:image/")).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
   return (
-    <div className="flex flex-col items-end gap-2">
+    <div className="group/user flex flex-col items-end gap-2">
       <ImageAttachments images={images} className="justify-end" />
       <FileAttachments files={files} className="justify-end" />
       {row.text.trim() ? (
@@ -192,6 +234,7 @@ function UserBubble({ row }: { row: UserInputRow }) {
           </ConversationUserInputBody>
         </div>
       ) : null}
+      {canFork ? <ForkActions rowId={row.rowId} /> : null}
     </div>
   );
 }

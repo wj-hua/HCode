@@ -5,6 +5,7 @@ import type {
   AgentStatus,
   ChatSendParams,
   ChatStateEvent,
+  ForkParams,
   ModelOption,
   PermissionDecision,
   PermissionMode,
@@ -40,6 +41,8 @@ export interface AgentProvider {
   renameSession(id: string, projectPath: string, title: string): Promise<void>;
   /** 删除会话（Codex 为归档）；会话文件移到废纸篓。调用前 HCode 里的活动会话需已关闭。 */
   deleteSession(id: string, projectPath: string): Promise<void>;
+  /** 从某条用户消息分叉出新会话，原会话不变；回退到第一条消息之前时返回 null。 */
+  forkSession?(params: ForkParams): Promise<SessionSummary | null>;
   /** 在终端里继续该会话的命令行（不含 cd）。 */
   resumeCommand(sessionId: string): Promise<string[]>;
   send(params: ChatSendParams): Promise<{ sessionKey: string }>;

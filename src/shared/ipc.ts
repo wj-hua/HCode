@@ -23,6 +23,7 @@ import type {
   SlashCommandsEvent,
   ExtensionAgent,
   ExtensionsSnapshot,
+  ForkParams,
   McpAddParams,
 } from "./types.js";
 
@@ -47,6 +48,8 @@ export interface InvokeMap {
   "sessions:load": [[ref: SessionRef], SessionLoadResult];
   "sessions:rename": [[ref: SessionRef, title: string], void];
   "sessions:delete": [[ref: SessionRef], void];
+  /** 分叉出新会话；回退到第一条消息之前时没有可保留的内容，返回 null。 */
+  "sessions:fork": [[params: ForkParams], SessionSummary | null];
   "chat:send": [[params: ChatSendParams], { sessionKey: string }];
   "chat:interrupt": [[sessionKey: string], void];
   "chat:setPermissionMode": [[sessionKey: string, mode: PermissionMode], void];
@@ -117,6 +120,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "sessions:load",
   "sessions:rename",
   "sessions:delete",
+  "sessions:fork",
   "chat:send",
   "chat:interrupt",
   "chat:setPermissionMode",

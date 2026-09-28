@@ -69,6 +69,7 @@ export function ConversationView({ conversation }: { conversation: Conversation 
               workspacePath={conversation.projectPath}
               permissions={permissions}
               running={conversation.runState === "running"}
+              canFork={Boolean(AGENTS[conversation.agent].fork && conversation.sessionId) && !running}
             />
           )}
         </div>

@@ -17,6 +17,8 @@ export interface AgentDescriptor {
   permissionModes: PermissionModeOption[];
   /** 内置模型选项；codex / step / agy / pi 还会在运行时拉取完整列表。 */
   models: ModelOption[];
+  /** 支持从某条消息分叉 / 回退。 */
+  fork?: boolean;
 }
 
 /** Claude Code 的 effort 档位；模型不支持的档位由 CLI 自动降级。 */
@@ -45,6 +47,7 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
       { value: "sonnet", label: "Sonnet", efforts: CLAUDE_EFFORTS },
       { value: "haiku", label: "Haiku" },
     ],
+    fork: true,
   },
   codex: {
     kind: "codex",
@@ -68,6 +71,7 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
       },
     ],
     models: [{ value: "", label: "默认模型" }],
+    fork: true,
   },
   step: {
     kind: "step",
