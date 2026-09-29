@@ -2,7 +2,7 @@
 
 > 本文记录 v1 的原始方案。当前版本的项目列表仅显示手动添加的文件夹；各 CLI 的会话只用于统计这些项目并展示其历史。现状以 [README](../README.md) 和 `src/main/projects.ts` 为准。
 
-> 本计划批准后执行的第一个动作：把本文件原样保存为 `/Users/hwj/my/mac/code/hcode/docs/HCode-v1-方案.md`（同时 `git init` hcode 目录）。之后按照下文“实施阶段”开发。
+> 本计划批准后执行的第一个动作：把本文件保存为 `docs/HCode-v1-方案.md`（同时初始化 HCode 的 Git 仓库）。之后按照下文“实施阶段”开发。
 
 
 ## 0. 实施状态（2026-09-23）
@@ -29,7 +29,7 @@ v1 已按本方案实现并实测通过：历史浏览、新建会话、续聊�
 
 ## 1. 背景与目标
 
-**背景**：本机装了 5 个编程 CLI（claude、codex、pi、agy、step），它们都只有终端界面。会话历史分散在各自的目录里，不方便浏览和续聊。ZCode 的桌面版界面好用，对话卡片清晰，而且源码就在 `/Users/hwj/my/mac/code/ZCode`（ZCode v3.14，Apache-2.0）。
+**背景**：本机装了 5 个编程 CLI（claude、codex、pi、agy、step），它们都只有终端界面。会话历史分散在各自的目录里，不方便浏览和续聊。ZCode 的桌面版界面好用，对话卡片清晰，而且本地有其源码（ZCode v3.14，Apache-2.0）。
 
 **目标**：做一个 macOS 桌面 app，名字叫 **HCode**，界面和对话卡片都复刻 ZCode。整体规划支持 5 个 CLI；**v1 只接 Claude Code**，但架构要给另外 4 个留好扩展点。
 
@@ -156,7 +156,7 @@ hcode/
 
 ## 5. ZCode 代码复用清单
 
-下面的路径都相对于 `/Users/hwj/my/mac/code/ZCode/packages/`。
+下面的路径都相对于 ZCode 源码的 `packages/` 目录。
 
 ### 5.1 原样复制（只改 import 路径）
 | 来源 | 用途 |
