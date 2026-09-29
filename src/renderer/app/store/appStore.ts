@@ -89,6 +89,8 @@ interface AppState {
   sidebarCollapsed: boolean;
   settingsOpen: boolean;
   fullscreen: boolean;
+  /** 编辑重发：待写入某个会话输入框的内容，输入框挂载后取走。 */
+  composerPrefill: { viewId: string; text: string; images: ImageInput[]; files: FileInput[] } | null;
 
   init(): Promise<void>;
   refreshProjects(): Promise<void>;
@@ -128,6 +130,10 @@ interface AppState {
   deleteSession(summary: SessionSummary): Promise<void>;
   /** 从当前会话的某条用户消息分叉出新会话并打开；回退时把这条消息放回新会话的输入框。 */
   forkFromMessage(rowId: number, mode: ForkMode): Promise<void>;
+  /** 把某条用户消息原样再发一次（同一会话，作为新一轮）。 */
+  retryMessage(rowId: number): Promise<void>;
+  /** 把某条用户消息放回当前会话的输入框，修改后作为新消息发送。 */
+  editMessage(rowId: number): void;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
   setSettingsOpen(open: boolean): void;
@@ -203,6 +209,19 @@ function withLiveSessions(
       conv.projectPath === projectPath && Boolean(conv.sessionId) && !ids.has(conv.sessionId!))
     .map(liveSummary);
   return live.length ? [...live, ...list].sort((a, b) => b.updatedAt - a.updatedAt) : list;
+}
+
+/** 用户消息的附件转回输入框格式：内联图片 → ImageInput，本地路径 → FileInput。 */
+function rowAttachments(row: Extract<ConversationRow, { kind: "userInput" }>): { images: ImageInput[]; files: FileInput[] } {
+  const attachments = row.attachments ?? [];
+  const images = attachments.flatMap((item) => {
+    const match = /^data:([^;,]+);base64,(.*)$/.exec(item.ref);
+    return match ? [{ mimeType: match[1]!, data: match[2]!, name: item.fileName }] : [];
+  });
+  const files = attachments
+    .filter((item) => item.ref.startsWith("/"))
+    .map((item) => ({ path: item.ref, name: item.fileName, mimeType: item.mime, size: item.bytes }));
+  return { images, files };
 }
 
 let draftSeq = 0;
@@ -424,6 +443,7 @@ export const useAppStore = create<AppState>((set, get) => {
     sidebarCollapsed: false,
     settingsOpen: false,
     fullscreen: false,
+    composerPrefill: null,
 
     async init() {
       subscribeEvents();
@@ -738,20 +758,31 @@ export const useAppStore = create<AppState>((set, get) => {
       const viewId = summary?.id ?? get().activeViewId;
       if (mode === "rewind" && viewId) {
         // 在新视图的输入框挂载前写入草稿
-        const attachments = row.attachments ?? [];
+        const { images, files } = rowAttachments(row);
         drafts.set(viewId, row.text);
-        imageDrafts.set(viewId, attachments.flatMap((item) => {
-          const match = /^data:([^;,]+);base64,(.*)$/.exec(item.ref);
-          return match ? [{ mimeType: match[1]!, data: match[2]!, name: item.fileName }] : [];
-        }));
-        fileDrafts.set(viewId, attachments
-          .filter((item) => item.ref.startsWith("/"))
-          .map((item) => ({ path: item.ref, name: item.fileName, mimeType: item.mime, size: item.bytes })));
+        imageDrafts.set(viewId, images);
+        fileDrafts.set(viewId, files);
       }
       if (summary) {
         await get().openSession(summary);
         void get().loadSessions(conv.projectPath);
       }
+    },
+
+    async retryMessage(rowId) {
+      const conv = activeConversation();
+      const row = conv?.rows.find((item) => item.rowId === rowId);
+      if (!conv || row?.kind !== "userInput" || conv.runState === "running" || conv.runState === "awaitingApproval") return;
+      const { images, files } = rowAttachments(row);
+      await sendConversation(conv.viewId, row.text, images, files);
+    },
+
+    editMessage(rowId) {
+      const conv = activeConversation();
+      const row = conv?.rows.find((item) => item.rowId === rowId);
+      if (!conv || row?.kind !== "userInput") return;
+      const { images, files } = rowAttachments(row);
+      set({ composerPrefill: { viewId: conv.viewId, text: row.text, images, files } });
     },
 
     async updateSettings(patch) {

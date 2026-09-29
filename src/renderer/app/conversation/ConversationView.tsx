@@ -88,6 +88,7 @@ export function ConversationView({
               permissions={permissions}
               running={conversation.runState === "running"}
               canFork={Boolean(AGENTS[conversation.agent].fork && conversation.sessionId) && !running}
+              canResend={!running && !column && !conversation.compareId}
               highlightedRowId={searchTarget?.rowId ?? null}
             />
           )}

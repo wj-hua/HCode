@@ -1,6 +1,6 @@
 // 对话时间线：按轮（turnId）分组渲染 ZCode v4 行。
 // 用户气泡 / 助手正文 / 思考块 / 工具卡片分别复用 ZCode 的组件（见各 import）。
-import { GitBranchIcon, LoaderIcon, Undo2Icon } from "lucide-react";
+import { CopyIcon, GitBranchIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import type {
   AssistantTextRow,
@@ -12,6 +12,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import type { ForkMode, PermissionRequestEvent } from "@hcode/shared/types";
 import { Button } from "@/components/ui/button.js";
+import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { MessageResponse } from "@/components/ai-elements/message.js";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning.js";
@@ -58,6 +59,7 @@ export function Timeline({
   permissions,
   running,
   canFork,
+  canResend,
   highlightedRowId,
 }: {
   rows: readonly ConversationRow[];
@@ -66,9 +68,12 @@ export function Timeline({
   running: boolean;
   /** 用户消息悬停时显示分叉 / 回退按钮。 */
   canFork: boolean;
+  /** 用户消息悬停时显示编辑重发 / 重试按钮。 */
+  canResend: boolean;
   highlightedRowId: number | null;
 }) {
   const turns = useMemo(() => groupTurns(rows), [rows]);
+  const lastUserRowId = useMemo(() => rows.findLast((row) => row.kind === "userInput")?.rowId ?? null, [rows]);
   return (
     <div className="flex flex-col gap-6">
       {turns.map((turn, index) => (
@@ -80,6 +85,8 @@ export function Timeline({
           isLast={index === turns.length - 1}
           running={running}
           canFork={canFork}
+          canResend={canResend}
+          lastUserRowId={lastUserRowId}
           highlightedRowId={highlightedRowId}
         />
       ))}
@@ -94,6 +101,8 @@ function TurnView({
   isLast,
   running,
   canFork,
+  canResend,
+  lastUserRowId,
   highlightedRowId,
 }: {
   turn: Turn;
@@ -102,6 +111,8 @@ function TurnView({
   isLast: boolean;
   running: boolean;
   canFork: boolean;
+  canResend: boolean;
+  lastUserRowId: number | null;
   highlightedRowId: number | null;
 }) {
   const header = turn.header;
@@ -120,7 +131,7 @@ function TurnView({
     <div className="flex flex-col gap-3">
       {turn.rows.map((row) => (
         <div key={row.rowId} data-search-row-id={row.rowId} className={row.rowId === highlightedRowId ? "rounded-lg ring-2 ring-primary/50" : undefined}>
-          <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} />
+          <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} />
         </div>
       ))}
       {showThinking ? (
@@ -164,15 +175,19 @@ const RowView = memo(function RowView({
   workspacePath,
   permissions,
   canFork,
+  canResend,
+  isLastUser,
 }: {
   row: ConversationRow;
   workspacePath: string;
   permissions: Readonly<Record<string, PermissionRequestEvent>>;
   canFork: boolean;
+  canResend: boolean;
+  isLastUser: boolean;
 }) {
   switch (row.kind) {
     case "userInput":
-      return <UserBubble row={row} canFork={canFork} />;
+      return <UserBubble row={row} canFork={canFork} canResend={canResend} isLastUser={isLastUser} />;
     case "assistantText":
       return <AssistantText row={row} />;
     case "reasoning":
@@ -202,33 +217,65 @@ const FORK_ACTIONS: { mode: ForkMode; label: string; hint: string; icon: typeof 
   { mode: "rewind", label: "回退到这里", hint: "新会话只保留这条消息之前的内容，并把它放回输入框重新编辑；原会话不变，文件改动不会撤销", icon: Undo2Icon },
 ];
 
-function ForkActions({ rowId }: { rowId: number }) {
+const copyText = (text: string) => {
+  void hcode.invoke("app:copyText", text).then(() => toast("已复制"));
+};
+
+function ActionButton({ label, hint, icon: Icon, disabled, onClick }: {
+  label: string;
+  hint?: string;
+  icon: typeof GitBranchIcon;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <ControlHintTooltip title={label} {...(hint ? { description: hint } : {})}>
+      <Button type="button" variant="ghost" size="icon-sm" aria-label={label} disabled={disabled} onClick={onClick}>
+        <Icon />
+      </Button>
+    </ControlHintTooltip>
+  );
+}
+
+function MessageActions({ row, canFork, canResend, isLastUser }: {
+  row: UserInputRow;
+  canFork: boolean;
+  canResend: boolean;
+  isLastUser: boolean;
+}) {
   const forkFromMessage = useAppStore((state) => state.forkFromMessage);
+  const retryMessage = useAppStore((state) => state.retryMessage);
+  const editMessage = useAppStore((state) => state.editMessage);
   const [pending, setPending] = useState(false);
   return (
     <div className="flex gap-0.5 opacity-0 transition-opacity group-hover/user:opacity-100 focus-within:opacity-100">
-      {FORK_ACTIONS.map(({ mode, label, hint, icon: Icon }) => (
-        <ControlHintTooltip key={mode} title={label} description={hint}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={label}
-            disabled={pending}
-            onClick={() => {
-              setPending(true);
-              void forkFromMessage(rowId, mode).finally(() => setPending(false));
-            }}
-          >
-            <Icon />
-          </Button>
-        </ControlHintTooltip>
-      ))}
+      {row.text.trim() ? <ActionButton label="复制" icon={CopyIcon} onClick={() => copyText(row.text)} /> : null}
+      {canResend ? (
+        <ActionButton label="编辑后重发" hint="把这条消息放回输入框修改，作为新消息发送；原对话保留" icon={PencilIcon} onClick={() => editMessage(row.rowId)} />
+      ) : null}
+      {canResend && isLastUser ? (
+        <ActionButton label="重试" hint="原样再发送一次这条消息" icon={RotateCcwIcon} onClick={() => void retryMessage(row.rowId)} />
+      ) : null}
+      {canFork
+        ? FORK_ACTIONS.map(({ mode, label, hint, icon }) => (
+            <ActionButton
+              key={mode}
+              label={label}
+              hint={hint}
+              icon={icon}
+              disabled={pending}
+              onClick={() => {
+                setPending(true);
+                void forkFromMessage(row.rowId, mode).finally(() => setPending(false));
+              }}
+            />
+          ))
+        : null}
     </div>
   );
 }
 
-function UserBubble({ row, canFork }: { row: UserInputRow; canFork: boolean }) {
+function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow; canFork: boolean; canResend: boolean; isLastUser: boolean }) {
   const images = (row.attachments ?? []).filter((attachment) => attachment.ref.startsWith("data:image/")).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
   const files = (row.attachments ?? []).filter((attachment) => !attachment.ref.startsWith("data:image/")).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
   return (
@@ -242,7 +289,7 @@ function UserBubble({ row, canFork }: { row: UserInputRow; canFork: boolean }) {
           </ConversationUserInputBody>
         </div>
       ) : null}
-      {canFork ? <ForkActions rowId={row.rowId} /> : null}
+      <MessageActions row={row} canFork={canFork} canResend={canResend} isLastUser={isLastUser} />
     </div>
   );
 }
@@ -259,7 +306,7 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
     );
   }
   return (
-    <div className="w-full text-ui-base">
+    <div className="group/assistant w-full text-ui-base">
       <MessageResponse
         streaming={row.state === "streaming"}
         forceCodeWrap={isOfficeMode}
@@ -270,6 +317,11 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
       >
         {row.text}
       </MessageResponse>
+      {row.state !== "streaming" && row.text.trim() ? (
+        <div className="mt-1 flex opacity-0 transition-opacity group-hover/assistant:opacity-100 focus-within:opacity-100">
+          <ActionButton label="复制" icon={CopyIcon} onClick={() => copyText(row.text)} />
+        </div>
+      ) : null}
     </div>
   );
 }

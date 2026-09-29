@@ -268,6 +268,18 @@ export function Composer({
     if (persistedKey) saveDraft(persistedKey, text, files);
   }, [persistedKey, text, files]);
 
+  // 编辑重发：消息被放回输入框
+  const prefill = useAppStore((state) => state.composerPrefill);
+  useEffect(() => {
+    if (!prefill || prefill.viewId !== conversation.viewId) return;
+    setText(prefill.text);
+    setImages(prefill.images);
+    setFiles(prefill.files);
+    setCaret(prefill.text.length);
+    useAppStore.setState({ composerPrefill: null });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [prefill, conversation.viewId]);
+
   /** 本地文件只传路径；剪贴板文件没有路径时暂存到 HCode 数据目录。 */
   const addFiles = async (selected: readonly File[]) => {
     if (selected.length === 0) return;
