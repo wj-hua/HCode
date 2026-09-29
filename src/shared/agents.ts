@@ -15,7 +15,7 @@ export interface AgentDescriptor {
   name: string;
   command: string;
   permissionModes: PermissionModeOption[];
-  /** 内置模型选项；codex / step / agy / pi 还会在运行时拉取完整列表。 */
+  /** 内置模型选项；各 CLI 还会在运行时拉取完整列表。 */
   models: ModelOption[];
   /** 支持从某条消息分叉 / 回退。 */
   fork?: boolean;

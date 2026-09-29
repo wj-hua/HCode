@@ -35,6 +35,7 @@ export class ClaudeAgent implements AgentProvider {
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly interactionOwner = new Map<string, string>();
   private status: AgentStatus | null = null;
+  private models: ModelOption[] | null = null;
 
   constructor(
     private readonly events: AgentEvents,
@@ -53,8 +54,44 @@ export class ClaudeAgent implements AgentProvider {
     return this.status;
   }
 
+  /** 从 SDK 拉取当前账号可用的完整模型列表（含具体版本）；失败时退回内置别名。 */
   async listModels(): Promise<ModelOption[]> {
-    return AGENTS.claude.models;
+    if (this.models) return this.models;
+    const status = await this.getStatus();
+    if (!status.found || !status.path) return AGENTS.claude.models;
+    const abort = new AbortController();
+    const activeQuery = query({
+      prompt: idleInput(abort.signal),
+      options: {
+        cwd: homedir(),
+        pathToClaudeCodeExecutable: status.path,
+        env: this.getEnv(),
+        abortController: abort,
+        settingSources: ["user"],
+        settings: { disableAllHooks: true },
+        strictMcpConfig: true,
+        persistSession: false,
+      },
+    });
+    const timer = setTimeout(() => abort.abort(), COMMANDS_TIMEOUT_MS);
+    try {
+      const models = await activeQuery.supportedModels();
+      if (models.length === 0) return AGENTS.claude.models;
+      this.models = models.map((model) => ({
+        // SDK 用 "default" 表示默认模型，这里沿用空串 = 不传 --model
+        value: model.value === "default" ? "" : model.value,
+        label: model.value === "default" ? AGENTS.claude.models[0]!.label : model.displayName || model.value,
+        description: model.description,
+        ...(model.supportedEffortLevels?.length ? { efforts: model.supportedEffortLevels } : {}),
+      }));
+    } catch {
+      return AGENTS.claude.models;
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+      activeQuery.close();
+    }
+    return this.models;
   }
 
   async listCommands(projectPath: string, sessionKey?: string, sessionId?: string): Promise<SlashCommandOption[]> {
