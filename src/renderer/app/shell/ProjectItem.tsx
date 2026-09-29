@@ -105,6 +105,16 @@ export function ProjectItem({
   const newChat = useAppStore((state) => state.newChat);
   const setProjectPinned = useAppStore((state) => state.setProjectPinned);
   const removeProject = useAppStore((state) => state.removeProject);
+  // 项目收起时，用小圆点提示其中有未查看的完成 / 出错会话
+  const unread = useAppStore((state) => {
+    let found: "done" | "error" | undefined;
+    for (const conv of Object.values(state.conversations)) {
+      if (conv.projectPath !== project.path || !conv.unread) continue;
+      if (conv.unread === "error") return "error";
+      found = "done";
+    }
+    return found;
+  });
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
@@ -168,6 +178,9 @@ export function ProjectItem({
                 </span>
                 <div className="min-w-0 truncate text-ui-base text-foreground-subtle">{project.name}</div>
                 {project.pinned ? <PinIcon className="size-3 shrink-0 text-foreground-subtlest" /> : null}
+                {!isOpen && unread ? (
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", unread === "error" ? "bg-destructive" : "bg-primary")} />
+                ) : null}
               </div>
 
               {showActions ? (

@@ -53,6 +53,8 @@ export interface Conversation {
   runState: ChatRunState;
   /** 当前轮开始运行的时间；空闲或出错时为 undefined。 */
   runStartedAt?: number;
+  /** 后台完成 / 出错后还没查看：会话在侧边栏显示未读点，看过后清除。 */
+  unread?: "done" | "error";
   error?: string;
   permissionMode: PermissionMode;
   /** 用户选择的模型（空串 = CLI 默认）。 */
@@ -131,6 +133,8 @@ interface AppState {
   /** 关闭当前视图；会话记录仍保留在项目列表中。 */
   closeActiveView(): Promise<void>;
   activateView(viewId: string): void;
+  /** 窗口聚焦时，把当前查看的会话（含对比组）标为已读。 */
+  markViewed(): void;
 }
 
 /** 模型支持的思考强度档位；模型列表还没拉到或模型不支持时为空。 */
@@ -345,6 +349,10 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!conv) return;
       const wasBusy = conv.runState === "running" || conv.runState === "awaitingApproval";
       const willContinue = conv.queue.length > 0 && !conv.queuePaused;
+      const finished = wasBusy && (event.state === "error" || (event.state === "idle" && !willContinue));
+      // 正在查看（窗口聚焦且是当前视图或同一对比组）时不算未读
+      const active = get().activeViewId ? get().conversations[get().activeViewId!] : undefined;
+      const viewed = document.hasFocus() && !!active && (active.viewId === conv.viewId || (!!conv.compareId && active.compareId === conv.compareId));
       if (wasBusy && event.state === "error") {
         void notify(conv, "error", event.error ?? "未知错误");
       } else if (wasBusy && event.state === "idle" && !willContinue) {
@@ -359,6 +367,8 @@ export const useAppStore = create<AppState>((set, get) => {
         ...(event.model ? { activeModel: event.model } : {}),
         ...(event.usage ? { usage: event.usage } : {}),
         ...(event.state === "error" ? { queuePaused: "error" as const } : {}),
+        ...(finished && !viewed ? { unread: event.state === "error" ? ("error" as const) : ("done" as const) } : {}),
+        ...(event.state === "running" ? { unread: undefined } : {}),
       });
       // 新会话拿到 id 时立即出现在侧栏，不等 CLI 写索引
       if (event.sessionId && !conv.sessionId) {
@@ -790,6 +800,22 @@ export const useAppStore = create<AppState>((set, get) => {
 
     activateView(viewId) {
       if (get().conversations[viewId]) set({ activeViewId: viewId });
+    },
+
+    markViewed() {
+      const { activeViewId, conversations } = get();
+      const active = activeViewId ? conversations[activeViewId] : undefined;
+      if (!active) return;
+      const stale = Object.values(conversations).filter(
+        (conv) => conv.unread && (conv.viewId === active.viewId || (!!active.compareId && conv.compareId === active.compareId)),
+      );
+      if (stale.length === 0) return;
+      set((state) => ({
+        conversations: {
+          ...state.conversations,
+          ...Object.fromEntries(stale.map((conv) => [conv.viewId, { ...state.conversations[conv.viewId]!, unread: undefined }])),
+        },
+      }));
     },
   };
 });

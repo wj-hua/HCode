@@ -40,6 +40,17 @@ export function AppShell() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
   useGlobalShortcuts(openSearch, openQuickSwitch);
+  // 切到有未读标记的会话、或窗口重新聚焦时清除未读
+  const activeViewId = conversation?.viewId;
+  const activeUnread = conversation?.unread;
+  useEffect(() => {
+    const markViewed = () => {
+      if (document.hasFocus()) useAppStore.getState().markViewed();
+    };
+    markViewed();
+    window.addEventListener("focus", markViewed);
+    return () => window.removeEventListener("focus", markViewed);
+  }, [activeViewId, activeUnread]);
 
   return (
     <DesktopWindowFrame title="HCode" isDesktop isMacDesktop>

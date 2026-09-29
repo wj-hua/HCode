@@ -91,6 +91,11 @@ export function SessionItem({ session }: { session: SessionSummary }) {
                 <LoaderIcon className="size-4 animate-spin text-foreground-subtle" />
               ) : indicator === "approval" ? (
                 <span className="h-1.5 w-1.5 rounded-full bg-warning" title="等待审批" />
+              ) : conversation?.unread ? (
+                <span
+                  className={cn("h-1.5 w-1.5 rounded-full", conversation.unread === "error" ? "bg-destructive" : "bg-primary")}
+                  title={conversation.unread === "error" ? "运行出错，未查看" : "已完成，未查看"}
+                />
               ) : session.activeInTerminal ? (
                 <span title="正在终端中运行">
                   <SquareTerminalIcon className="size-3.5 text-foreground-subtlest" />
