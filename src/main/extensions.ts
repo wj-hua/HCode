@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import type { ExtensionAgent, ExtensionsSnapshot, McpAddParams, McpEntry, SkillEntry } from "../shared/types.js";
 import type { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import type { CodexAgent } from "./agents/codex/codexAgent.js";
+import { skillName } from "./util/skillFrontmatter.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -58,12 +59,6 @@ async function ignoreClaudeLocalSettings(projectPath: string): Promise<void> {
   } catch {
     // 非 Git 目录或仓库只读时，设置本身仍可保存。
   }
-}
-
-function skillName(content: string, fallback: string): { name: string; description: string } {
-  const frontmatter = /^---\s*\n([\s\S]*?)\n---/.exec(content)?.[1] ?? "";
-  const field = (key: string) => new RegExp(`^${key}:\\s*(.+)$`, "m").exec(frontmatter)?.[1]?.trim().replace(/^['"]|['"]$/g, "");
-  return { name: field("name") || fallback, description: field("description") || "" };
 }
 
 async function claudeSkills(projectPath: string): Promise<SkillEntry[]> {

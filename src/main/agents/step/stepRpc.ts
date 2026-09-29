@@ -97,13 +97,13 @@ export class StepRpcProcess extends EventEmitter {
   }
 
   /** 发送命令并等待对应的 response（按 id 关联）。 */
-  request<T = unknown>(type: string, params: JsonRecord = {}): Promise<T> {
+  request<T = unknown>(type: string, params: JsonRecord = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     if (this.exited) return Promise.reject(new Error(`${this.command} 进程未运行`));
     const id = `hcode-${this.nextId++}`;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error(`${this.command} 请求超时：${type}`));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => {
           clearTimeout(timer);

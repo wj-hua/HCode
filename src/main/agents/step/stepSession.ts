@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import type {
   ChatRunState,
   ChatStateEvent,
+  ChatUsage,
   FileInput,
   ImageInput,
   PermissionDecision,
@@ -22,6 +23,17 @@ import { StepRpcProcess, type StepLaunch } from "./stepRpc.js";
 import { activeBranch, StepRowProjector, type StepEntry, type StepMessage } from "./stepProjector.js";
 
 const FLUSH_INTERVAL_MS = 16;
+/** 手动压缩要调用模型生成摘要，比普通请求久。 */
+const COMPACT_TIMEOUT_MS = 10 * 60_000;
+
+/** get_session_stats 里与用量相关的部分；Token 与花费是整个会话的累计值。 */
+interface StatsSnapshot {
+  input: number;
+  output: number;
+  cost: number;
+  contextTokens?: number;
+  contextWindow?: number;
+}
 
 export interface StepSessionHost {
   resolveLaunch(cwd: string, args: string[]): Promise<StepLaunch>;
@@ -60,6 +72,9 @@ export class StepSession {
   private launchedWith = "";
   private state: ChatRunState = "idle";
   private error: string | undefined;
+  private usage: ChatUsage | undefined;
+  /** 本轮开始时的累计用量，本轮用量 = 结束时的累计值 - 它。 */
+  private statsBaseline: StatsSnapshot | undefined;
   private readonly pending = new Map<string, PendingUi>();
   /** “本会话总是允许”过的工具（危险命令除外）。 */
   private readonly allowedTools = new Set<string>();
@@ -103,11 +118,27 @@ export class StepSession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
+    // 只保留上下文占用，本轮的 Token 与花费等结束后重新计算
+    this.usage = this.usage?.contextWindowTokens ? {
+      contextUsedTokens: this.usage.contextUsedTokens,
+      contextWindowTokens: this.usage.contextWindowTokens,
+      contextUsedPercent: this.usage.contextUsedPercent,
+    } : undefined;
     this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
     this.setState("running");
     try {
       const rpc = await this.ensureProcess();
+      this.statsBaseline ??= await this.readStats(rpc);
+      // 压缩不是模型对话：/compact 走 compact 命令，压缩标记由 compaction_end 事件生成
+      const compact = /^\/compact(?:\s+([\s\S]*))?$/i.exec(text.trim());
+      if (compact) {
+        if (images.length || files.length) throw new Error("/compact 不能附带文件或图片");
+        const instructions = compact[1]?.trim();
+        await rpc.request("compact", instructions ? { customInstructions: instructions } : {}, COMPACT_TIMEOUT_MS);
+        await this.settle(Date.now());
+        return;
+      }
       await rpc.request("prompt", {
         message: withFileReferences(this.variant.kind === "pi" ? text : await withProjectFilePaths(text, this.projectPath), files),
         ...(images.length
@@ -185,7 +216,7 @@ export class StepSession {
         this.handleUiRequest(event);
         return;
       case "agent_settled":
-        this.settle(now);
+        void this.settle(now);
         return;
       default:
         return;
@@ -193,12 +224,65 @@ export class StepSession {
     this.scheduleFlush();
   }
 
-  private settle(at: number) {
+  private async settle(at: number) {
+    await this.refreshUsage();
     this.projector.closeTurn(at, this.error ? "failed" : undefined);
     this.cancelAllPending();
     this.flushNow();
     this.setState(this.error ? "error" : "idle");
     this.host.onSettled(this);
+  }
+
+  // ───────────────────────── 用量 ─────────────────────────
+
+  private async readStats(rpc: StepRpcProcess): Promise<StatsSnapshot | undefined> {
+    try {
+      const data = await rpc.request<JsonRecord>("get_session_stats");
+      const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+      const tokens = isRecord(data.tokens) ? data.tokens : {};
+      const context = isRecord(data.contextUsage) ? data.contextUsage : {};
+      return {
+        input: number(tokens.input) + number(tokens.cacheRead) + number(tokens.cacheWrite),
+        output: number(tokens.output),
+        cost: number(data.cost),
+        // 压缩后到下一次回复前，contextUsage 的 tokens 为 null
+        ...(number(context.tokens) > 0 && number(context.contextWindow) > 0
+          ? { contextTokens: number(context.tokens), contextWindow: number(context.contextWindow) }
+          : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 一轮结束时读取累计用量，与本轮开始时的基线相减得到本轮 Token 和花费。 */
+  private async refreshUsage() {
+    const rpc = this.process;
+    if (!rpc?.running) return;
+    const stats = await this.readStats(rpc);
+    if (!stats) return;
+    const base = this.statsBaseline ?? stats;
+    const cost = stats.cost - base.cost;
+    this.statsBaseline = stats;
+    const previous = this.usage;
+    this.usage = {
+      inputTokens: Math.max(0, stats.input - base.input),
+      outputTokens: Math.max(0, stats.output - base.output),
+      ...(cost > 0 ? { costUsd: cost } : {}),
+      ...(stats.contextTokens && stats.contextWindow
+        ? {
+            contextUsedTokens: stats.contextTokens,
+            contextWindowTokens: stats.contextWindow,
+            contextUsedPercent: (stats.contextTokens / stats.contextWindow) * 100,
+          }
+        : previous?.contextWindowTokens
+          ? {
+              contextUsedTokens: previous.contextUsedTokens,
+              contextWindowTokens: previous.contextWindowTokens,
+              contextUsedPercent: previous.contextUsedPercent,
+            }
+          : {}),
+    };
   }
 
   // ───────────────────────── 审批与提问 ─────────────────────────
@@ -375,6 +459,7 @@ export class StepSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
+      ...(this.usage ? { usage: this.usage } : {}),
     });
   }
 

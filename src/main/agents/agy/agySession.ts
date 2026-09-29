@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type {
   ChatRunState,
   ChatStateEvent,
+  ChatUsage,
   FileInput,
   ImageInput,
   PermissionMode,
@@ -128,6 +129,9 @@ export class AgySession {
   /** agy 实际使用的模型（init 事件返回）。 */
   private reportedModel: string | undefined;
 
+  private usage: ChatUsage | undefined;
+  /** 上一次 result 里的累计用量（整个 conversation 累计，跨进程重启也连续），用来相减得到本轮用量。 */
+  private lastTotals: { input: number; output: number } | undefined;
   private readonly projector = new AgyRowProjector();
   private process: AgyProcess | null = null;
   private starting: Promise<AgyProcess> | null = null;
@@ -168,6 +172,7 @@ export class AgySession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
+    this.usage = undefined;
     this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
     this.setState("running");
@@ -277,8 +282,28 @@ export class AgySession {
         this.projector.notice(`以下操作需要确认，无头模式下已被自动拒绝：\n${lines.join("\n")}`, now);
       }
       if (this.error) this.projector.notice(`Antigravity 出错：${this.error}`, now, true);
+      this.recordUsage(result);
       this.settle(now);
     }
+  }
+
+  /**
+   * result.usage 是整个 conversation 的累计值（不是本轮）：本轮 = 与上一次 result 的差。
+   * 没有上一次记录时（打开历史会话后的第一轮），只有 num_turns 为 1 才能确定累计值就是本轮。
+   * agy 不报告上下文窗口和费用，所以只显示 Token；输出 Token 已包含思考 Token，输入包含缓存命中。
+   */
+  private recordUsage(result: JsonRecord) {
+    const usage = isRecord(result.usage) ? result.usage : null;
+    if (!usage) return;
+    const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+    const totals = { input: number(usage.input_tokens) + number(usage.cache_read_tokens), output: number(usage.output_tokens) };
+    const previous = this.lastTotals;
+    this.lastTotals = totals;
+    if (!previous && result.num_turns !== 1) return;
+    const turn = previous && totals.input >= previous.input && totals.output >= previous.output
+      ? { input: totals.input - previous.input, output: totals.output - previous.output }
+      : totals;
+    this.usage = { inputTokens: turn.input, outputTokens: turn.output };
   }
 
   private settle(at: number) {
@@ -340,6 +365,7 @@ export class AgySession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
+      ...(this.usage ? { usage: this.usage } : {}),
     });
   }
 

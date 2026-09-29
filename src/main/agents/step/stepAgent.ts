@@ -13,6 +13,7 @@ import type {
   PermissionMode,
   SessionLoadResult,
   SessionSummary,
+  SlashCommandOption,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { trashPaths } from "../../util/trash.js";
@@ -29,6 +30,9 @@ function approvalMode(mode: PermissionMode): string {
   if (mode === "bypass") return "auto";
   return "confirm";
 }
+
+/** 项目命令目录的缓存时长；每次弹出补全都起一个临时进程太重。 */
+const COMMAND_CACHE_MS = 60_000;
 
 interface PiModel {
   provider: string;
@@ -138,6 +142,7 @@ export class StepAgent implements AgentProvider {
   private cache: SessionSummary[] | null = null;
   private loading: Promise<SessionSummary[]> | null = null;
   private generation = 0;
+  private readonly commandCache = new Map<string, { at: number; commands: SlashCommandOption[] }>();
   private watcher: FSWatcher | null = null;
   private debounce: ReturnType<typeof setTimeout> | null = null;
 
@@ -198,6 +203,36 @@ export class StepAgent implements AgentProvider {
       return AGENTS[this.kind].models;
     }
     return this.models;
+  }
+
+  /**
+   * `/` 补全：`/compact`（已有会话时）+ get_commands 里的提示词模板和技能。
+   * 扩展命令（/theme、/exit 等）是终端界面专用，通过 RPC 执行没有意义，不列出。
+   */
+  async listCommands(projectPath: string, sessionKey?: string, sessionId?: string): Promise<SlashCommandOption[]> {
+    const builtins: SlashCommandOption[] =
+      sessionId || (sessionKey && this.sessions.has(sessionKey))
+        ? [{ name: "compact", description: "压缩当前会话的上下文", argumentHint: "额外要求（可选）" }]
+        : [];
+    const cached = this.commandCache.get(projectPath);
+    if (cached && Date.now() - cached.at < COMMAND_CACHE_MS) return [...builtins, ...cached.commands];
+    let commands: SlashCommandOption[] = [];
+    try {
+      const { commands: list } = await this.withTempProcess(projectPath, ["--no-session"], (rpc) =>
+        rpc.request<{ commands: unknown[] }>("get_commands"),
+      );
+      commands = list
+        .filter(isRecord)
+        .filter((item) => (item.source === "prompt" || item.source === "skill") && typeof item.name === "string" && item.name !== "compact")
+        .map((item) => ({
+          name: String(item.name),
+          description: typeof item.description === "string" ? item.description : "",
+        }));
+      this.commandCache.set(projectPath, { at: Date.now(), commands });
+    } catch {
+      // 拿不到时只显示内置命令
+    }
+    return [...builtins, ...commands];
   }
 
   // ───────────────────────── 历史 ─────────────────────────

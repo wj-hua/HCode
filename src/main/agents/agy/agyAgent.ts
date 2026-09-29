@@ -22,12 +22,14 @@ import type {
   PermissionMode,
   SessionLoadResult,
   SessionSummary,
+  SlashCommandOption,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { trashPaths } from "../../util/trash.js";
 import { agyQuota, quotaError } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider } from "../types.js";
+import { skillName } from "../../util/skillFrontmatter.js";
 import { projectAgyHistory, userRequestText, type AgyStep } from "./agyProjector.js";
 import { AGY_DATA_DIR, AgySession, type AgyLaunch } from "./agySession.js";
 
@@ -192,6 +194,25 @@ export class AgyAgent implements AgentProvider {
     const status = await this.getStatus();
     if (!status.found || !status.path) throw new Error("未找到 agy 命令，请在设置中指定路径");
     return { path: status.path, env: this.getEnv(), cwd, args };
+  }
+
+  /**
+   * `/` 补全：agy 没有列出命令的接口，这里扫描 `.agents/skills/<名称>/SKILL.md`（用户目录和项目目录，
+   * 同名时项目优先），无头模式下 `/<名称>` 会展开为该技能。插件技能和 skills.json 里自定义的路径不在其中。
+   */
+  async listCommands(projectPath: string): Promise<SlashCommandOption[]> {
+    const commands = new Map<string, SlashCommandOption>();
+    for (const root of [join(homedir(), ".agents", "skills"), join(projectPath, ".agents", "skills")]) {
+      const dirs = await readdir(root, { withFileTypes: true }).catch(() => []);
+      for (const dir of dirs) {
+        if (!dir.isDirectory() && !dir.isSymbolicLink()) continue;
+        const content = await readFile(join(root, dir.name, "SKILL.md"), "utf8").catch(() => null);
+        if (content === null) continue;
+        const { name, description } = skillName(content.slice(0, 8192), dir.name);
+        commands.set(name, { name, description, argumentHint: "任务描述" });
+      }
+    }
+    return [...commands.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /** `agy models` 每行是 “id<TAB>名称”。 */
