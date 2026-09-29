@@ -23,6 +23,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P2 | F13 | 同一问题多 CLI 并行对比（已完成） | 全部 |
 | P2 | F14 | 导出会话为 Markdown（已完成） | 全部 |
 | P2 | F15 | MCP / Skills 管理（已完成） | Claude、Codex |
+| P1 | F16 | 展示正在执行中的任务 | 全部 |
 
 ---
 
@@ -171,6 +172,19 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 
 ### F15 MCP / Skills 管理
 已完成：设置页新增 MCP / Skills 页签，按项目切换 Claude Code / Codex。Claude 通过 SDK 读取 MCP 状态，通过原生 CLI 添加、删除服务器；项目 `.mcp.json` 服务器可在本机设置启用或停用。扫描用户、项目及插件技能；用户和项目技能通过 `skillOverrides` 按项目切换，插件技能只读。Codex 通过 app-server 读取生效配置和技能、切换用户范围 MCP 及技能，通过原生 CLI 添加、删除用户范围 MCP；项目范围 MCP 展示为只读（当前 app-server 只允许写用户配置）。
+
+### F16 展示正在执行中的任务
+**现状**：只有侧边栏每个会话前有旋转图标（`SessionItem.tsx`，`runState` 为 `running` / `awaitingApproval`）。项目折叠或会话不在列表里时看不到，也无法一眼看出全部项目里有几个任务在跑、跑了多久、谁在等审批。
+
+**做法**：
+- 侧边栏顶部（项目列表上方）新增“运行中”区块，汇总 `appStore.conversations` 中 `runState` 为 `running` / `awaitingApproval` 的会话，没有时隐藏。
+- 每行显示：CLI 图标（`AgentBadge`）、会话标题（没有则项目名）、状态（运行中 / 等待审批）、已运行时长（取当前轮开始时间计时）。
+- 点击跳转到该会话（复用 `openSession`）；等待审批的排在最前并用 `bg-warning` 提示。
+- 对比组（`compareId`）的多个会话合并为一行，显示 “N 个 CLI 运行中”。
+- 终端里正在运行的会话（`activeInTerminal`）单独用终端图标标出，不计入 HCode 任务数。
+- 只读取现有渲染进程状态，不新增 IPC，也不引入依赖。
+
+**验收**：同时在两个项目各启动一个任务，折叠项目后仍能在“运行中”看到两项；任务结束后该行消失；审批请求出现时该行置顶并变色。
 
 ---
 
