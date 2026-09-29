@@ -288,9 +288,17 @@ export type NotificationEvent = "start" | "done" | "error" | "approval";
 /** system：系统默认提示音；xiao：内置语音；custom：用户选的音频文件；none：静音。 */
 export type NotificationSound = "system" | "xiao" | "custom" | "none";
 
+export type InterfaceMode = "coding" | "office";
+
+export function normalizeInterfaceMode(value: unknown): InterfaceMode {
+  return value === "office" ? "office" : "coding";
+}
+
 export interface Settings {
   theme: "system" | "light" | "dark";
   locale: "zh-CN" | "en-US";
+  /** 编程模式展示命令和改动细节；办公模式侧重摘要与结果。 */
+  interfaceMode: InterfaceMode;
   /** 新建会话默认使用的 CLI。 */
   defaultAgent: AgentKind;
   /** 各 CLI 可执行文件路径；空串 = 自动查找。 */
@@ -319,6 +327,7 @@ export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey>> & {
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   locale: "zh-CN",
+  interfaceMode: "coding",
   defaultAgent: "claude",
   agentPaths: { claude: "", codex: "", step: "", agy: "", pi: "" },
   defaultPermissionModes: { claude: "default", codex: "on-request", step: "ask", agy: "default", pi: "default" },

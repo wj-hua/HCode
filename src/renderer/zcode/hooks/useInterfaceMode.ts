@@ -1,4 +1,6 @@
-// HCode shim：替换 ZCode 原文件（原实现依赖 ZCode 的 services/store 层）。
+// HCode shim：界面模式以 HCode 持久化设置为唯一状态源。
+import { useAppStore } from "@app/store/appStore";
+
 export function useIsOfficeMode(): boolean {
-  return false;
+  return useAppStore((state) => state.settings.interfaceMode === "office");
 }

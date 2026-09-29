@@ -239,6 +239,16 @@ export function SettingsDialog() {
               onChange={(locale) => update({ locale })}
             />
           </Row>
+          <Row label="界面模式" hint="办公模式侧重操作摘要；编程模式显示命令、输出和代码改动详情">
+            <Segmented
+              value={settings.interfaceMode}
+              options={[
+                { value: "coding", label: "编程模式" },
+                { value: "office", label: "办公模式" },
+              ]}
+              onChange={(interfaceMode) => update({ interfaceMode })}
+            />
+          </Row>
           <Row label="新会话默认 CLI">
             <Segmented
               value={settings.defaultAgent}

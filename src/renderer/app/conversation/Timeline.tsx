@@ -25,6 +25,7 @@ import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { useAppStore } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
+import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { PermissionCard } from "./PermissionCard";
 
 interface Turn {
@@ -249,6 +250,7 @@ function UserBubble({ row, canFork }: { row: UserInputRow; canFork: boolean }) {
 function AssistantText({ row }: { row: AssistantTextRow }) {
   const theme = useUiStore((state) => state.theme);
   const codePreviewSettings = useUiStore((state) => state.codePreviewSettings);
+  const isOfficeMode = useIsOfficeMode();
   if (row.state === "failed") {
     return (
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui-base whitespace-pre-wrap text-destructive">
@@ -260,6 +262,7 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
     <div className="w-full text-ui-base">
       <MessageResponse
         streaming={row.state === "streaming"}
+        forceCodeWrap={isOfficeMode}
         streamingAnimationKey={String(row.rowId)}
         theme={theme}
         codePreviewSettings={codePreviewSettings}

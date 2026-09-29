@@ -14,16 +14,21 @@ import { SessionSearchDialog } from "./SessionSearchDialog";
 import { QuickSwitchDialog } from "./QuickSwitchDialog";
 import type { SessionSearchResult } from "@hcode/shared/types";
 import { APP_SHORTCUTS, type AppCommand } from "@hcode/shared/shortcuts";
+import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
 const SIDEBAR_WIDTH = 272;
 
 export function AppShell() {
+  const isOfficeMode = useIsOfficeMode();
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
   const [diffViewId, setDiffViewId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ id: string; rowId: number | null; key: number } | null>(null);
+  useEffect(() => {
+    if (isOfficeMode) setDiffViewId(null);
+  }, [isOfficeMode]);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
   useGlobalShortcuts(openSearch, openQuickSwitch);
@@ -47,13 +52,13 @@ export function AppShell() {
           <section className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
             <Header
               conversation={conversation}
-              diffOpen={!!conversation && diffViewId === conversation.viewId}
+              diffOpen={!isOfficeMode && !!conversation && diffViewId === conversation.viewId}
               onToggleDiff={() => setDiffViewId(diffViewId === conversation?.viewId ? null : conversation?.viewId ?? null)}
             />
             {conversation ? (
               <>
                 <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
-                {diffViewId === conversation.viewId ? (
+                {!isOfficeMode && diffViewId === conversation.viewId ? (
                   <TurnDiffPanel conversation={conversation} onClose={() => setDiffViewId(null)} />
                 ) : null}
               </>

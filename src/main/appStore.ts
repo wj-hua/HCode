@@ -1,7 +1,7 @@
 // HCode 自己的少量持久化数据：设置、用户手动添加/置顶的项目。对话内容不在这里。
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_SETTINGS, type Settings, type SettingsPatch } from "../shared/types.js";
+import { DEFAULT_SETTINGS, normalizeInterfaceMode, type Settings, type SettingsPatch } from "../shared/types.js";
 
 interface ProjectPrefs {
   pinned: string[];
@@ -40,6 +40,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
   const settings: Settings = {
     ...DEFAULT_SETTINGS,
     ...(raw as Partial<Settings>),
+    interfaceMode: normalizeInterfaceMode(raw.interfaceMode),
     agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
     defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),
     defaultModels: pick(raw.defaultModels, DEFAULT_SETTINGS.defaultModels),
@@ -75,6 +76,7 @@ export function mergeSettings(current: Settings, patch: SettingsPatch): Settings
   const { agentPaths, defaultPermissionModes, defaultModels, defaultEfforts, ...rest } = patch;
   return {
     ...mergeDefined(current, rest),
+    interfaceMode: patch.interfaceMode === undefined ? current.interfaceMode : normalizeInterfaceMode(patch.interfaceMode),
     agentPaths: mergeDefined(current.agentPaths, agentPaths),
     defaultPermissionModes: mergeDefined(current.defaultPermissionModes, defaultPermissionModes),
     defaultModels: mergeDefined(current.defaultModels, defaultModels),

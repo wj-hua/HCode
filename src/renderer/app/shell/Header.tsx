@@ -9,8 +9,10 @@ import { AgentBadge } from "../AgentBadge";
 import { hcode } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore, type Conversation } from "../store/appStore";
+import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
 export function Header({ conversation, diffOpen, onToggleDiff }: { conversation: Conversation | undefined; diffOpen: boolean; onToggleDiff: () => void }) {
+  const isOfficeMode = useIsOfficeMode();
   const [gitProject, setGitProject] = useState<string | null>(null);
   useEffect(() => {
     const projectPath = conversation?.projectPath;
@@ -74,7 +76,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
       )}
       {conversation ? (
         <div className="app-no-drag flex shrink-0 items-center gap-0.5">
-          {gitProject === conversation.projectPath ? (
+          {!isOfficeMode && gitProject === conversation.projectPath ? (
             <ControlHintTooltip title="查看本轮改动" side="bottom">
               <Button
                 variant={diffOpen ? "secondary" : "ghost"}
@@ -99,25 +101,27 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
               <FolderIcon />
             </Button>
           </ControlHintTooltip>
-          <ControlHintTooltip
-            title={conversation.sessionId ? "在终端中继续此会话" : "在终端中打开项目"}
-            side="bottom"
-          >
-            <Button
-              variant="ghost"
-              size="icon-md"
-              className="text-foreground-subtle"
-              onClick={() =>
-                void hcode.invoke(
-                  "app:openInTerminal",
-                  conversation.projectPath,
-                  conversation.sessionId ? { agent: conversation.agent, id: conversation.sessionId } : undefined,
-                )
-              }
+          {!isOfficeMode ? (
+            <ControlHintTooltip
+              title={conversation.sessionId ? "在终端中继续此会话" : "在终端中打开项目"}
+              side="bottom"
             >
-              <SquareTerminalIcon />
-            </Button>
-          </ControlHintTooltip>
+              <Button
+                variant="ghost"
+                size="icon-md"
+                className="text-foreground-subtle"
+                onClick={() =>
+                  void hcode.invoke(
+                    "app:openInTerminal",
+                    conversation.projectPath,
+                    conversation.sessionId ? { agent: conversation.agent, id: conversation.sessionId } : undefined,
+                  )
+                }
+              >
+                <SquareTerminalIcon />
+              </Button>
+            </ControlHintTooltip>
+          ) : null}
         </div>
       ) : null}
     </header>

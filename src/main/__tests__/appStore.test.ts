@@ -89,4 +89,14 @@ describe("AppStore.updateSettings", () => {
     expect(settings.notificationSound).toBe("xiao");
     expect(settings.customSounds).toEqual({ ...DEFAULT_SETTINGS.customSounds, done: "/done.mp3" });
   });
+
+  it("界面模式切换后持久化，旧设置默认编程模式", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    const store = new AppStore(dir);
+    expect(store.settings.interfaceMode).toBe("coding");
+    store.updateSettings({ interfaceMode: "office" });
+    expect(new AppStore(dir).settings.interfaceMode).toBe("office");
+    store.updateSettings({ interfaceMode: "coding" });
+    expect(new AppStore(dir).settings.interfaceMode).toBe("coding");
+  });
 });
