@@ -65,6 +65,8 @@ export interface Conversation {
   queue: QueuedMessage[];
   /** 队列暂停原因：用户停止或本轮出错后不再自动发送，等用户点「继续」。 */
   queuePaused?: "stopped" | "error";
+  /** 多 CLI 对比：同一组会话共用同一个 id，界面并排显示。 */
+  compareId?: string;
 }
 
 interface AppState {
@@ -96,6 +98,10 @@ interface AppState {
   setDraftProject(projectPath: string): void;
   loadModels(agent: AgentKind): Promise<void>;
   send(text: string, images?: ImageInput[], files?: FileInput[]): Promise<boolean>;
+  /** 草稿会话与 agents 中的其他 CLI 组成对比组，同一消息同时发给每个 CLI。 */
+  startCompare(agents: AgentKind[], text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
+  /** 把消息发给当前会话所在对比组的每个 CLI；正在运行的加入其队列。 */
+  sendGroup(text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
   /** 运行中把消息加入当前会话的队列。 */
   enqueue(text: string, images: ImageInput[], files: FileInput[]): void;
   removeQueued(id: string): void;
@@ -203,6 +209,34 @@ export const useAppStore = create<AppState>((set, get) => {
   const activeConversation = (): Conversation | undefined => {
     const { activeViewId, conversations } = get();
     return activeViewId ? conversations[activeViewId] : undefined;
+  };
+
+  const draftConversation = (viewId: string, projectPath: string, agent: AgentKind): Conversation => {
+    const { settings } = get();
+    return {
+      viewId,
+      agent,
+      projectPath,
+      rows: [],
+      loading: false,
+      runState: "idle",
+      permissionMode: settings.defaultPermissionModes[agent],
+      model: settings.defaultModels[agent],
+      effort: settings.defaultEfforts[agent],
+      queue: [],
+    };
+  };
+
+  /** 当前会话所在的对比组（没有对比组时只有它自己）。 */
+  const groupOf = (conv: Conversation): Conversation[] =>
+    conv.compareId
+      ? Object.values(get().conversations).filter((item) => item.compareId === conv.compareId)
+      : [conv];
+
+  const enqueueConversation = (viewId: string, text: string, images: ImageInput[], files: FileInput[]) => {
+    const conv = get().conversations[viewId];
+    if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return;
+    patchConversation(viewId, { queue: [...conv.queue, { id: crypto.randomUUID(), text, images, files }] });
   };
 
   /** 开始执行时在前台只播放提示音；后台发系统通知，点击后回到该会话。 */
@@ -454,7 +488,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const agent = agentOverride ?? settings.defaultAgent;
       // 同一项目已有空白草稿时直接复用
       const draft = Object.values(conversations).find(
-        (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId,
+        (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId && !conv.compareId,
       );
       if (draft) {
         set({ activeViewId: draft.viewId });
@@ -463,21 +497,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const viewId = `draft-${Date.now()}-${++draftSeq}`;
       set((state) => ({
-        conversations: {
-          ...state.conversations,
-          [viewId]: {
-            viewId,
-            agent,
-            projectPath,
-            rows: [],
-            loading: false,
-            runState: "idle",
-            permissionMode: settings.defaultPermissionModes[agent],
-            model: settings.defaultModels[agent],
-            effort: settings.defaultEfforts[agent],
-            queue: [],
-          },
-        },
+        conversations: { ...state.conversations, [viewId]: draftConversation(viewId, projectPath, agent) },
         activeViewId: viewId,
       }));
     },
@@ -519,12 +539,43 @@ export const useAppStore = create<AppState>((set, get) => {
       return activeViewId ? sendConversation(activeViewId, text, images, files) : false;
     },
 
+    async startCompare(agents, text, images, files) {
+      const base = activeConversation();
+      if (!base || base.sessionKey || base.sessionId) return false;
+      const compareId = crypto.randomUUID();
+      const siblings = agents
+        .filter((agent, index) => agent !== base.agent && agents.indexOf(agent) === index)
+        .map((agent) => ({ ...draftConversation(`draft-${Date.now()}-${++draftSeq}`, base.projectPath, agent), compareId }));
+      set((state) => ({
+        conversations: {
+          ...state.conversations,
+          [base.viewId]: { ...state.conversations[base.viewId]!, compareId },
+          ...Object.fromEntries(siblings.map((conv) => [conv.viewId, conv])),
+        },
+      }));
+      for (const conv of siblings) void get().loadModels(conv.agent);
+      const results = await Promise.all(
+        [base.viewId, ...siblings.map((conv) => conv.viewId)].map((viewId) => sendConversation(viewId, text, images, files)),
+      );
+      return results.some(Boolean);
+    },
+
+    async sendGroup(text, images, files) {
+      const active = activeConversation();
+      if (!active) return false;
+      const results = await Promise.all(groupOf(active).map(async (conv) => {
+        if (conv.runState === "running" || conv.runState === "awaitingApproval") {
+          enqueueConversation(conv.viewId, text, images, files);
+          return true;
+        }
+        return sendConversation(conv.viewId, text, images, files);
+      }));
+      return results.some(Boolean);
+    },
+
     enqueue(text, images, files) {
       const conv = activeConversation();
-      if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return;
-      patchConversation(conv.viewId, {
-        queue: [...conv.queue, { id: crypto.randomUUID(), text, images, files }],
-      });
+      if (conv) enqueueConversation(conv.viewId, text, images, files);
     },
 
     removeQueued(id) {
@@ -540,11 +591,14 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async interrupt() {
-      const conv = activeConversation();
-      if (!conv?.sessionKey) return;
-      // 用户主动停止后保留队列但不自动发送
-      patchConversation(conv.viewId, { queuePaused: "stopped" });
-      await hcode.invoke("chat:interrupt", conv.sessionKey);
+      const active = activeConversation();
+      if (!active) return;
+      // 用户主动停止后保留队列但不自动发送；对比组里的会话一起停止
+      await Promise.all(groupOf(active).map(async (conv) => {
+        if (!conv.sessionKey) return;
+        patchConversation(conv.viewId, { queuePaused: "stopped" });
+        await hcode.invoke("chat:interrupt", conv.sessionKey);
+      }));
     },
 
     async setPermissionMode(mode) {

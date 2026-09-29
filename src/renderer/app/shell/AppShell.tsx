@@ -1,7 +1,9 @@
 // 应用外壳：结构与样式参照 ZCode WorkspaceShellLayout（侧栏 + 带 4px 留白的圆角主面板）。
 import { useCallback, useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/components/lib/utils.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
+import { CompareView } from "../conversation/CompareView";
 import { ConversationView } from "../conversation/ConversationView";
 import { hcode } from "../bridge";
 import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
@@ -22,6 +24,12 @@ export function AppShell() {
   const isOfficeMode = useIsOfficeMode();
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
+  const compareMembers = useAppStore(
+    useShallow((state) => {
+      const id = conversation?.compareId;
+      return id ? Object.values(state.conversations).filter((conv) => conv.compareId === id) : [];
+    }),
+  );
   const [diffViewId, setDiffViewId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
@@ -57,7 +65,11 @@ export function AppShell() {
             />
             {conversation ? (
               <>
-                <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
+                {compareMembers.length > 1 ? (
+                  <CompareView members={compareMembers} active={conversation} />
+                ) : (
+                  <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
+                )}
                 {!isOfficeMode && diffViewId === conversation.viewId ? (
                   <TurnDiffPanel conversation={conversation} onClose={() => setDiffViewId(null)} />
                 ) : null}

@@ -1,6 +1,7 @@
 import { ArrowDownIcon, LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
+import { cn } from "@/components/lib/utils.js";
 import { Composer } from "../composer/Composer";
 import { AGENTS } from "@hcode/shared/agents";
 import { useAppStore, type Conversation } from "../store/appStore";
@@ -8,7 +9,16 @@ import { Timeline } from "./Timeline";
 
 const STICK_THRESHOLD_PX = 80;
 
-export function ConversationView({ conversation, searchTarget }: { conversation: Conversation; searchTarget: { rowId: number | null; key: number } | null }) {
+export function ConversationView({
+  conversation,
+  searchTarget,
+  column = false,
+}: {
+  conversation: Conversation;
+  searchTarget: { rowId: number | null; key: number } | null;
+  /** 对比分栏中的一列：不带输入框，由对比视图共用底部输入框。 */
+  column?: boolean;
+}) {
   const permissions = useAppStore((state) => state.permissions);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -56,7 +66,7 @@ export function ConversationView({ conversation, searchTarget }: { conversation:
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-        <div ref={contentRef} className="mx-auto flex w-full max-w-3xl flex-col px-6 pt-6 pb-10">
+        <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
           {conversation.loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">
               <LoaderIcon className="size-4 animate-spin" />
@@ -87,7 +97,7 @@ export function ConversationView({ conversation, searchTarget }: { conversation:
         <Button
           variant="outline"
           size="icon-md"
-          className="absolute bottom-40 left-1/2 -translate-x-1/2 rounded-full bg-background shadow-md"
+          className={cn("absolute left-1/2 -translate-x-1/2 rounded-full bg-background shadow-md", column ? "bottom-4" : "bottom-40")}
           onClick={() => {
             stickRef.current = true;
             scrollToBottom("smooth");
@@ -96,16 +106,18 @@ export function ConversationView({ conversation, searchTarget }: { conversation:
           <ArrowDownIcon />
         </Button>
       ) : null}
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-6 pb-4">
-        <Composer
-          key={conversation.viewId}
-          conversation={conversation}
-          onSubmitted={() => {
-            stickRef.current = true;
-            scrollToBottom();
-          }}
-        />
-      </div>
+      {column ? null : (
+        <div className="mx-auto w-full max-w-3xl shrink-0 px-6 pb-4">
+          <Composer
+            key={conversation.viewId}
+            conversation={conversation}
+            onSubmitted={() => {
+              stickRef.current = true;
+              scrollToBottom();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   ClipboardListIcon,
+  Columns2Icon,
   FilePenLineIcon,
   EyeIcon,
   PlusIcon,
@@ -13,7 +14,7 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ZCodeConfigOption } from "@zcode/shared";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
-import type { FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
+import type { AgentKind, FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
 import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
@@ -25,6 +26,7 @@ import { hcode } from "../bridge";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -110,6 +112,8 @@ export function Composer({
   onSubmitted: () => void;
 }) {
   const send = useAppStore((state) => state.send);
+  const sendGroup = useAppStore((state) => state.sendGroup);
+  const startCompare = useAppStore((state) => state.startCompare);
   const interrupt = useAppStore((state) => state.interrupt);
   const enqueue = useAppStore((state) => state.enqueue);
   const removeQueued = useAppStore((state) => state.removeQueued);
@@ -121,6 +125,9 @@ export function Composer({
   const agentStatuses = useAppStore((state) => state.agentStatuses);
   const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
+  // 草稿会话勾选的其他 CLI：发送时与当前 CLI 组成对比组
+  const [compareAgents, setCompareAgents] = useState<AgentKind[]>([]);
+  const extraAgents = compareAgents.filter((kind) => kind !== conversation.agent);
   const [text, setText] = useState(() => drafts.get(conversation.viewId) ?? "");
   const [images, setImages] = useState<ImageInput[]>(() => imageDrafts.get(conversation.viewId) ?? []);
   const [files, setFiles] = useState<FileInput[]>(() => fileDrafts.get(conversation.viewId) ?? []);
@@ -319,7 +326,7 @@ export function Composer({
 
   const submit = () => {
     if (!canSend || conversation.loading || adding || submitting) return;
-    if (running) {
+    if (running && !conversation.compareId) {
       // 运行中先排队，本轮结束后自动发送
       enqueue(text, images, files);
       rememberPrompt(text);
@@ -329,8 +336,14 @@ export function Composer({
       return;
     }
     setSubmitting(true);
-    void send(text, images, files).then((sent) => {
+    const sending = conversation.compareId
+      ? sendGroup(text, images, files)
+      : isDraft && extraAgents.length > 0
+        ? startCompare(extraAgents, text, images, files)
+        : send(text, images, files);
+    void sending.then((sent) => {
       if (!sent) return;
+      setCompareAgents([]);
       rememberPrompt(text);
       setText((current) => current === text ? "" : current);
       setImages((current) => current === images ? [] : current);
@@ -503,7 +516,7 @@ export function Composer({
             }
           }
         }}
-        placeholder={running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
+        placeholder={conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
       {showSlashResults ? (
@@ -612,6 +625,45 @@ export function Composer({
                       );
                     })}
                   </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            {isDraft ? (
+              <DropdownMenu>
+                <ControlHintTooltip title="同一问题同时发给多个 CLI，分栏对比">
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={cn("h-7 gap-1 rounded-lg px-2 text-ui-base", extraAgents.length > 0 && "text-brand hover:text-brand")}
+                    >
+                      <Columns2Icon className="size-4" />
+                      {extraAgents.length > 0 ? `对比 +${extraAgents.length}` : "对比"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                </ControlHintTooltip>
+                <DropdownMenuContent side="top" align="start" sideOffset={4} className="w-64" onCloseAutoFocus={restoreInputFocus}>
+                  <DropdownMenuLabel>同时发给（多个 CLI 会同时操作同一目录）</DropdownMenuLabel>
+                  {AGENT_KINDS.filter((kind) => kind !== conversation.agent).map((kind) => {
+                    const status = agentStatuses?.find((item) => item.kind === kind);
+                    const missing = status !== undefined && !status.found;
+                    return (
+                      <DropdownMenuCheckboxItem
+                        key={kind}
+                        checked={extraAgents.includes(kind)}
+                        disabled={missing}
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={(checked) =>
+                          setCompareAgents((current) => checked ? [...current, kind] : current.filter((item) => item !== kind))}
+                        className="min-h-8 gap-2"
+                      >
+                        <AgentBadge agent={kind} />
+                        <span className="flex-1">{AGENTS[kind].name}</span>
+                        {missing ? <span className="text-ui-sm text-foreground-subtlest">未安装</span> : null}
+                      </DropdownMenuCheckboxItem>
+                    );
+                  })}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}

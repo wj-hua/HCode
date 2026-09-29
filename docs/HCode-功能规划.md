@@ -20,7 +20,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P1 | F10 | 更多快捷键（已完成） | — |
 | P2 | F11 | macOS 原生菜单栏（已完成） | — |
 | P2 | F12 | 新版本检查 | — |
-| P2 | F13 | 同一问题多 CLI 并行对比 | 全部 |
+| P2 | F13 | 同一问题多 CLI 并行对比（已完成） | 全部 |
 | P2 | F14 | 导出会话为 Markdown（已完成） | 全部 |
 | P2 | F15 | MCP / Skills 管理（已完成） | Claude、Codex |
 
@@ -163,6 +163,8 @@ dmg 未签名，不做自动安装。启动时（每天一次）请求 GitHub Re
 
 ### F13 同一问题多 CLI 并行对比
 新建会话时可多选 CLI，同一消息同时发给多个 CLI，结果分栏显示。每个 CLI 仍是独立会话，只是界面并排展示。HCode 多 CLI 的独有能力。
+
+已完成：草稿会话输入框工具条新增“对比”下拉，勾选其他 CLI 后发送，`startCompare` 为每个 CLI 建一个同项目的独立会话，共用 `compareId`，同时发送。`CompareView` 把同组会话分栏显示（每列是不带输入框的 `ConversationView`），底部共用一个输入框：发送走 `sendGroup`（空闲的立即发送，运行中的进入各自队列），停止会中断整组；点击某一列使其成为当前会话，工具条里的模型、权限模式作用于该列。注意各 CLI 在同一目录工作，同时改文件可能互相覆盖，需要时可把权限模式设为只读 / 计划。
 
 ### F14 导出会话为 Markdown
 已完成：侧边栏会话右键菜单新增“导出为 Markdown…”和“复制为 Markdown”。`src/renderer/app/exportMarkdown.ts` 把 `ConversationRow` 转为 Markdown（用户消息与回复完整保留，工具调用只留一行摘要，思考过程和工具输出不导出）；保存走新增的 `app:saveText`（`dialog.showSaveDialog`），复制走 `app:copyText`。已打开的会话用界面上的行，未打开的通过 `sessions:load` 读取。
