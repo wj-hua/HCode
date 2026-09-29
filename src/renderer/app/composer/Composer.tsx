@@ -20,6 +20,7 @@ import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
 import { drafts, fileDrafts, imageDrafts } from "./drafts";
+import { draftKey, loadDraft, saveDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { hcode } from "../bridge";
@@ -128,9 +129,11 @@ export function Composer({
   // 草稿会话勾选的其他 CLI：发送时与当前 CLI 组成对比组
   const [compareAgents, setCompareAgents] = useState<AgentKind[]>([]);
   const extraAgents = compareAgents.filter((kind) => kind !== conversation.agent);
-  const [text, setText] = useState(() => drafts.get(conversation.viewId) ?? "");
+  const persistedKey = draftKey(conversation);
+  // 内存里的草稿优先；重启后从 localStorage 恢复
+  const [text, setText] = useState(() => drafts.get(conversation.viewId) ?? loadDraft(persistedKey).text);
   const [images, setImages] = useState<ImageInput[]>(() => imageDrafts.get(conversation.viewId) ?? []);
-  const [files, setFiles] = useState<FileInput[]>(() => fileDrafts.get(conversation.viewId) ?? []);
+  const [files, setFiles] = useState<FileInput[]>(() => fileDrafts.get(conversation.viewId) ?? loadDraft(persistedKey).files);
   const [adding, setAdding] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [caret, setCaret] = useState(() => text.length);
@@ -256,6 +259,14 @@ export function Composer({
   useEffect(() => {
     fileDrafts.set(conversation.viewId, files);
   }, [conversation.viewId, files]);
+
+  // 存储 key 变化（草稿发送后有了会话 id、或切换项目）时清掉旧 key
+  const previousKey = useRef(persistedKey);
+  useEffect(() => {
+    if (previousKey.current && previousKey.current !== persistedKey) saveDraft(previousKey.current, "", []);
+    previousKey.current = persistedKey;
+    if (persistedKey) saveDraft(persistedKey, text, files);
+  }, [persistedKey, text, files]);
 
   /** 本地文件只传路径；剪贴板文件没有路径时暂存到 HCode 数据目录。 */
   const addFiles = async (selected: readonly File[]) => {

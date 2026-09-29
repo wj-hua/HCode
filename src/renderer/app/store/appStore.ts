@@ -28,6 +28,7 @@ import { hcode } from "../bridge";
 import { playNotificationSound } from "../notificationSound";
 import { applyRowOps } from "../rows";
 import { drafts, fileDrafts, imageDrafts } from "../composer/drafts";
+import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
@@ -472,6 +473,8 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const { settings } = get();
       const viewId = summary.id;
+      // 重启前排队没发出去的消息：恢复后暂停，等用户点「继续」
+      const queue = loadQueue(summary.id);
       const conv: Conversation = {
         viewId,
         agent: summary.agent,
@@ -484,7 +487,8 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: settings.defaultPermissionModes[summary.agent],
         model: settings.defaultModels[summary.agent],
         effort: settings.defaultEfforts[summary.agent],
-        queue: [],
+        queue,
+        ...(queue.length ? { queuePaused: "stopped" as const } : {}),
       };
       set((state) => ({
         conversations: { ...state.conversations, [viewId]: conv },
@@ -697,6 +701,7 @@ export const useAppStore = create<AppState>((set, get) => {
         toast(`删除失败：${errorMessage(error)}`, { variant: "warning" });
         return;
       }
+      discardPersisted(conv ?? { sessionId: summary.id, projectPath: summary.projectPath });
       if (conv) {
         set((state) => {
           const { [conv.viewId]: _removed, ...rest } = state.conversations;
@@ -781,6 +786,7 @@ export const useAppStore = create<AppState>((set, get) => {
           return;
         }
       }
+      discardPersisted(conv);
       drafts.delete(activeViewId);
       imageDrafts.delete(activeViewId);
       fileDrafts.delete(activeViewId);
@@ -818,6 +824,16 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
     },
   };
+});
+
+// 排队消息变化时写入 localStorage；按数组引用判断，流式输出时几乎没有开销
+const savedQueues = new Map<string, QueuedMessage[]>();
+useAppStore.subscribe((state) => {
+  for (const conv of Object.values(state.conversations)) {
+    if (!conv.sessionId || conv.compareId || savedQueues.get(conv.viewId) === conv.queue) continue;
+    savedQueues.set(conv.viewId, conv.queue);
+    saveQueue(conv.sessionId, conv.queue);
+  }
 });
 
 export function useActiveConversation(): Conversation | undefined {
