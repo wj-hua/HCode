@@ -1,7 +1,7 @@
 {
   "name": "hcode",
   "productName": "HCode",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "private": true,
   "description": "Desktop workbench for coding-agent CLIs (Claude Code, Codex, StepCode, Antigravity), UI based on ZCode.",
   "license": "Apache-2.0",

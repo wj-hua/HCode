@@ -21,7 +21,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P2 | F11 | macOS 原生菜单栏（已完成） | — |
 | P2 | F12 | 新版本检查 | — |
 | P2 | F13 | 同一问题多 CLI 并行对比 | 全部 |
-| P2 | F14 | 导出会话为 Markdown | 全部 |
+| P2 | F14 | 导出会话为 Markdown（已完成） | 全部 |
 | P2 | F15 | MCP / Skills 管理（已完成） | Claude、Codex |
 
 ---
@@ -165,7 +165,7 @@ dmg 未签名，不做自动安装。启动时（每天一次）请求 GitHub Re
 新建会话时可多选 CLI，同一消息同时发给多个 CLI，结果分栏显示。每个 CLI 仍是独立会话，只是界面并排展示。HCode 多 CLI 的独有能力。
 
 ### F14 导出会话为 Markdown
-会话菜单加“导出”，把 `ConversationRow` 转为 Markdown（用户消息、回复、工具调用摘要），用 `dialog.showSaveDialog` 保存或复制到剪贴板。
+已完成：侧边栏会话右键菜单新增“导出为 Markdown…”和“复制为 Markdown”。`src/renderer/app/exportMarkdown.ts` 把 `ConversationRow` 转为 Markdown（用户消息与回复完整保留，工具调用只留一行摘要，思考过程和工具输出不导出）；保存走新增的 `app:saveText`（`dialog.showSaveDialog`），复制走 `app:copyText`。已打开的会话用界面上的行，未打开的通过 `sessions:load` 读取。
 
 ### F15 MCP / Skills 管理
 已完成：设置页新增 MCP / Skills 页签，按项目切换 Claude Code / Codex。Claude 通过 SDK 读取 MCP 状态，通过原生 CLI 添加、删除服务器；项目 `.mcp.json` 服务器可在本机设置启用或停用。扫描用户、项目及插件技能；用户和项目技能通过 `skillOverrides` 按项目切换，插件技能只读。Codex 通过 app-server 读取生效配置和技能、切换用户范围 MCP 及技能，通过原生 CLI 添加、删除用户范围 MCP；项目范围 MCP 展示为只读（当前 app-server 只允许写用户配置）。

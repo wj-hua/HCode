@@ -21,9 +21,11 @@ import {
 import { cn } from "@/components/lib/utils.js";
 import { TaskTitleOverflowText } from "@/components/TaskTitleOverflowText.js";
 import { AgentBadge } from "../AgentBadge";
+import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
+import { conversationToMarkdown, markdownFileName } from "../exportMarkdown";
 import { formatCompactRelativeTime } from "../format";
-import { useAppStore } from "../store/appStore";
+import { errorMessage, useAppStore } from "../store/appStore";
 
 export function SessionItem({ session }: { session: SessionSummary }) {
   const openSession = useAppStore((state) => state.openSession);
@@ -44,6 +46,25 @@ export function SessionItem({ session }: { session: SessionSummary }) {
   // Codex 只能归档；运行中（HCode 或终端里）的会话不能删除，否则 CLI 会继续写会话文件
   const deleteLabel = session.agent === "codex" ? "归档" : "删除";
   const deleteDisabled = indicator !== null || session.activeInTerminal === true;
+
+  // 已打开的会话直接用界面上的行，否则从 CLI 的会话文件读取
+  const exportMarkdown = async (mode: "save" | "copy") => {
+    try {
+      const rows = conversation?.rows.length
+        ? conversation.rows
+        : (await hcode.invoke("sessions:load", { agent: session.agent, id: session.id, projectPath: session.projectPath })).rows;
+      const markdown = conversationToMarkdown(session, rows);
+      if (mode === "copy") {
+        await hcode.invoke("app:copyText", markdown);
+        toast("已复制为 Markdown");
+      } else {
+        const path = await hcode.invoke("app:saveText", markdownFileName(session.title), markdown);
+        if (path) toast("已导出 Markdown");
+      }
+    } catch (error) {
+      toast(`导出失败：${errorMessage(error)}`, { variant: "warning" });
+    }
+  };
 
   return (
     <>
@@ -109,6 +130,8 @@ export function SessionItem({ session }: { session: SessionSummary }) {
           <ContextMenuItem onSelect={() => void hcode.invoke("app:copyText", session.id)}>
             复制会话 ID
           </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void exportMarkdown("save")}>导出为 Markdown…</ContextMenuItem>
+          <ContextMenuItem onSelect={() => void exportMarkdown("copy")}>复制为 Markdown</ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
             onSelect={() => void hcode.invoke("app:openInTerminal", session.projectPath, { agent: session.agent, id: session.id })}

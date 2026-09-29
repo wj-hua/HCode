@@ -295,6 +295,15 @@ async function bootstrap() {
     });
   });
   handle("app:copyText", (text) => clipboard.writeText(text));
+  handle("app:saveText", async (defaultName, text) => {
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      defaultPath: join(app.getPath("downloads"), defaultName),
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await writeFile(result.filePath, text, "utf8");
+    return result.filePath;
+  });
   handle("app:focusWindow", () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (mainWindow.isMinimized()) mainWindow.restore();

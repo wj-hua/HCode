@@ -75,6 +75,8 @@ export interface InvokeMap {
   "app:openExternal": [[url: string], void];
   "app:openInTerminal": [[cwd: string, session?: { agent: AgentKind; id: string }], void];
   "app:copyText": [[text: string], void];
+  /** 弹出保存框写入文本文件，返回保存路径；取消返回 null。 */
+  "app:saveText": [[defaultName: string, text: string], string | null];
   /** 显示并聚焦主窗口（点击系统通知时用）。 */
   "app:focusWindow": [[], void];
   "settings:get": [[], Settings];
@@ -146,6 +148,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "app:openExternal",
   "app:openInTerminal",
   "app:copyText",
+  "app:saveText",
   "app:focusWindow",
   "settings:get",
   "settings:set",
