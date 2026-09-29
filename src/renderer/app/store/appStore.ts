@@ -120,6 +120,9 @@ interface AppState {
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
   setSettingsOpen(open: boolean): void;
+  /** 关闭当前视图；会话记录仍保留在项目列表中。 */
+  closeActiveView(): Promise<void>;
+  activateView(viewId: string): void;
 }
 
 /** 模型支持的思考强度档位；模型列表还没拉到或模型不支持时为空。 */
@@ -686,6 +689,44 @@ export const useAppStore = create<AppState>((set, get) => {
 
     setSettingsOpen(open) {
       set({ settingsOpen: open });
+    },
+
+    async closeActiveView() {
+      const { activeViewId, conversations } = get();
+      if (!activeViewId) return;
+      const conv = conversations[activeViewId];
+      if (!conv) return;
+      if (conv.runState === "running" || conv.runState === "awaitingApproval") {
+        toast("任务运行中，请先停止任务再关闭会话", { variant: "warning" });
+        return;
+      }
+      if (conv.sessionKey) {
+        try {
+          await hcode.invoke("chat:close", conv.sessionKey);
+        } catch (error) {
+          toast(`关闭会话失败：${errorMessage(error)}`, { variant: "warning" });
+          return;
+        }
+      }
+      drafts.delete(activeViewId);
+      imageDrafts.delete(activeViewId);
+      fileDrafts.delete(activeViewId);
+      set((state) => {
+        if (!state.conversations[activeViewId]) return state;
+        const viewIds = Object.keys(state.conversations);
+        const index = viewIds.indexOf(activeViewId);
+        const { [activeViewId]: _removed, ...rest } = state.conversations;
+        return {
+          conversations: rest,
+          activeViewId: state.activeViewId === activeViewId
+            ? viewIds[index - 1] ?? viewIds[index + 1] ?? null
+            : state.activeViewId,
+        };
+      });
+    },
+
+    activateView(viewId) {
+      if (get().conversations[viewId]) set({ activeViewId: viewId });
     },
   };
 });

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { ConversationView } from "../conversation/ConversationView";
+import { hcode } from "../bridge";
 import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
@@ -10,7 +11,9 @@ import { EmptyState } from "./EmptyState";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { SessionSearchDialog } from "./SessionSearchDialog";
+import { QuickSwitchDialog } from "./QuickSwitchDialog";
 import type { SessionSearchResult } from "@hcode/shared/types";
+import { APP_SHORTCUTS, type AppCommand } from "@hcode/shared/shortcuts";
 
 const SIDEBAR_WIDTH = 272;
 
@@ -19,9 +22,11 @@ export function AppShell() {
   const conversation = useActiveConversation();
   const [diffViewId, setDiffViewId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ id: string; rowId: number | null; key: number } | null>(null);
   const openSearch = useCallback(() => setSearchOpen(true), []);
-  useGlobalShortcuts(openSearch);
+  const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
+  useGlobalShortcuts(openSearch, openQuickSwitch);
 
   return (
     <DesktopWindowFrame title="HCode" isDesktop isMacDesktop>
@@ -59,6 +64,7 @@ export function AppShell() {
         </div>
       </div>
       <SettingsDialog />
+      <QuickSwitchDialog open={quickSwitchOpen} onOpenChange={setQuickSwitchOpen} />
       <SessionSearchDialog
         open={searchOpen}
         onOpenChange={setSearchOpen}
@@ -71,29 +77,78 @@ export function AppShell() {
   );
 }
 
-function useGlobalShortcuts(openSearch: () => void) {
+function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void) {
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.metaKey) return;
+    const runCommand = (command: AppCommand, index?: number): boolean => {
       const state = useAppStore.getState();
-      if ((event.key.toLowerCase() === "k" || event.key.toLowerCase() === "f") && !event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        openSearch();
-      } else if (event.key === ",") {
-        event.preventDefault();
-        state.setSettingsOpen(true);
-      } else if (event.key.toLowerCase() === "n" && !event.shiftKey) {
-        event.preventDefault();
-        const active = state.activeViewId ? state.conversations[state.activeViewId] : undefined;
-        const projectPath = active?.projectPath ?? state.projects[0]?.path;
-        if (projectPath) state.newChat(projectPath);
-        else void state.addProject();
-      } else if (event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        state.setSidebarCollapsed(!state.sidebarCollapsed);
+      switch (command) {
+        case "settings":
+          state.setSettingsOpen(true);
+          return true;
+        case "newChat": {
+          const active = state.activeViewId ? state.conversations[state.activeViewId] : undefined;
+          const projectPath = active?.projectPath ?? state.projects[0]?.path;
+          if (projectPath) state.newChat(projectPath);
+          else void state.addProject();
+          return true;
+        }
+        case "openProject":
+          void state.addProject();
+          return true;
+        case "closeView":
+          if (!state.activeViewId) return false;
+          void state.closeActiveView();
+          return true;
+        case "toggleSidebar":
+          state.setSidebarCollapsed(!state.sidebarCollapsed);
+          return true;
+        case "quickSwitch":
+          openQuickSwitch();
+          return true;
+        case "search":
+          openSearch();
+          return true;
+        case "switchView": {
+          const viewId = Object.keys(state.conversations)[index ?? -1];
+          if (!viewId) return false;
+          state.activateView(viewId);
+          return true;
+        }
+        case "focusComposer": {
+          const input = document.querySelector<HTMLTextAreaElement>("[data-composer-input]");
+          if (!input) return false;
+          input.focus();
+          return true;
+        }
+        case "copyLastReply": {
+          const active = state.activeViewId ? state.conversations[state.activeViewId] : undefined;
+          const rows = active?.rows ?? [];
+          const lastAssistant = rows.findLast((row) => row.kind === "assistantText" && row.text.trim());
+          if (lastAssistant?.kind !== "assistantText") return false;
+          const text = rows.filter((row) => row.kind === "assistantText" && row.turnId === lastAssistant.turnId && row.text.trim())
+            .map((row) => row.kind === "assistantText" ? row.text.trim() : "")
+            .join("\n\n");
+          void hcode.invoke("app:copyText", text);
+          return true;
+        }
       }
     };
+    const onKeyDown = (event: KeyboardEvent) => {
+      // macOS 快捷键由原生菜单分发，避免菜单和页面各执行一次。
+      if (hcode.platform === "darwin") return;
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
+      const shortcut = APP_SHORTCUTS.find((entry) => entry.key === event.key.toLowerCase() && !!entry.shift === event.shiftKey);
+      if (shortcut && runCommand(shortcut.command, shortcut.index)) event.preventDefault();
+    };
+    const offMenuCommand = hcode.on("app:menuCommand", ({ command, index, fromAccelerator }) => {
+      if (fromAccelerator && document.activeElement instanceof Element && document.activeElement.closest('[role="dialog"]')) return;
+      runCommand(command, index);
+    });
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openSearch]);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      offMenuCommand();
+    };
+  }, [openSearch, openQuickSwitch]);
 }

@@ -27,6 +27,7 @@ import type {
   ForkParams,
   McpAddParams,
 } from "./types.js";
+import type { AppCommand } from "./shortcuts.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
@@ -82,6 +83,7 @@ export interface InvokeMap {
 
 /** 主进程 → 渲染进程事件 */
 export interface EventMap {
+  "app:menuCommand": { command: AppCommand; index?: number; fromAccelerator?: boolean };
   "sessions:indexChanged": { projectPaths: string[] };
   "chat:rows": ChatRowsEvent;
   "chat:state": ChatStateEvent;
@@ -150,6 +152,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
+  "app:menuCommand",
   "sessions:indexChanged",
   "chat:rows",
   "chat:state",

@@ -21,6 +21,7 @@ import { createMainWindow } from "./window.js";
 import { listProjectFiles } from "./projectFiles.js";
 import { ExtensionsService } from "./extensions.js";
 import { searchSessions } from "./sessionSearch.js";
+import { installApplicationMenu } from "./menu.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -321,6 +322,7 @@ async function bootstrap() {
   });
 
   agents.startWatching();
+  if (process.platform === "darwin") installApplicationMenu(() => mainWindow);
   mainWindow = createMainWindow(store);
 
   app.on("activate", () => {

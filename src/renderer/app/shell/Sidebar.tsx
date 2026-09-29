@@ -135,7 +135,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
               <XIcon className="size-3.5" />
             </button>
           ) : null}
-          <button type="button" onClick={onOpenSearch} className="shrink-0 text-ui-xs text-foreground-subtle hover:text-foreground" title="搜索会话全文（⌘K）">全文</button>
+          <button type="button" onClick={onOpenSearch} className="shrink-0 text-ui-xs text-foreground-subtle hover:text-foreground" title="搜索会话全文（⌘F）">全文</button>
         </div>
       </div>
 

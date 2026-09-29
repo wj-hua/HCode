@@ -25,6 +25,8 @@ pnpm dist         # 打包 release/HCode-<版本>-arm64.dmg（本地未签名）
 
 开发调试：`HCODE_CDP_PORT=9229 pnpm dev` 开启远程调试端口；`HCODE_DEBUG=1` 打印 claude 子进程 stderr。
 
+常用快捷键：⌘K 快速切换项目或会话，⌘F 搜索会话全文，⌘1–9 切换已打开的会话，⌘W 关闭当前会话视图，⌘L 聚焦输入框，⌘⇧C 复制最后一条回复；⌘N 新建会话，⌘B 切换侧边栏，⌘, 打开设置。
+
 未签名的 dmg 首次打开如被拦截：右键 HCode.app →「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/HCode.app`。
 
 ## 多 CLI 兼容方式
