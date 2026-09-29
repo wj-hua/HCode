@@ -51,6 +51,8 @@ export interface Conversation {
   loading: boolean;
   loadError?: string;
   runState: ChatRunState;
+  /** 当前轮开始运行的时间；空闲或出错时为 undefined。 */
+  runStartedAt?: number;
   error?: string;
   permissionMode: PermissionMode;
   /** 用户选择的模型（空串 = CLI 默认）。 */
@@ -160,11 +162,16 @@ function lastAssistantText(rows: readonly ConversationRow[]): string {
   return "";
 }
 
-/** 已打开会话的占位摘要：标题取首条用户消息。 */
-function liveSummary(conv: Conversation & { sessionId: string }): SessionSummary {
+/** 会话标题：已有标题优先，否则取首条用户消息的首行。 */
+export function conversationTitle(conv: Conversation): string {
   const first = conv.rows.find((row) => row.kind === "userInput");
   const line = first?.kind === "userInput" ? first.text.split("\n").map((item) => item.trim()).find(Boolean) : undefined;
-  const title = conv.title ?? line ?? "新会话";
+  return conv.title ?? line ?? "新会话";
+}
+
+/** 已打开会话的占位摘要：标题取首条用户消息。 */
+function liveSummary(conv: Conversation & { sessionId: string }): SessionSummary {
+  const title = conversationTitle(conv);
   const now = Date.now();
   return {
     id: conv.sessionId,
@@ -277,6 +284,7 @@ export const useAppStore = create<AppState>((set, get) => {
     patchConversation(conv.viewId, {
       sessionKey,
       runState: "running",
+      runStartedAt: conv.runStartedAt ?? Date.now(),
       error: undefined,
       usage: conv.usage ? {
         contextUsedTokens: conv.usage.contextUsedTokens,
@@ -344,6 +352,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       patchConversation(conv.viewId, {
         runState: event.state,
+        runStartedAt: event.state === "running" || event.state === "awaitingApproval" ? conv.runStartedAt ?? Date.now() : undefined,
         error: event.error,
         permissionMode: event.permissionMode,
         ...(event.sessionId ? { sessionId: event.sessionId } : {}),

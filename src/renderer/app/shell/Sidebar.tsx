@@ -33,6 +33,7 @@ import { workspaceVerticalListSortingStrategy } from "@/lib/workspaceSidebarDrag
 import { useAppStore } from "../store/appStore";
 import { SortableProjectItem } from "./ProjectItem";
 import { QuotaIndicator } from "./QuotaIndicator";
+import { RunningTasks } from "./RunningTasks";
 
 const SECTION_CHEVRON_CLASS =
   "size-3.5 shrink-0 opacity-0 transition-opacity group-hover/purpose-section:opacity-100 group-focus-within/purpose-section:opacity-100";
@@ -142,6 +143,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
       {/* 项目分区：照 ZCode WorkspacePurposeSection，标题可折叠，操作按钮悬停时出现。 */}
       <ScrollFadeViewport style={{ overflowAnchor: "none" }}>
         <div className="flex min-h-0 flex-col gap-3 px-2">
+          <RunningTasks />
           <section aria-label="项目" className="group/purpose-section relative">
             <Collapsible open={sectionOpen} onOpenChange={setSectionOpen}>
               <div className="flex h-7 min-w-0 items-center">
