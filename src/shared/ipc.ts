@@ -9,6 +9,8 @@ import type {
   ChatStateEvent,
   GitBranches,
   GitTurnDiff,
+  GitTurnRecord,
+  GitTurnPreview,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -66,6 +68,7 @@ export interface InvokeMap {
   "git:commit": [[sessionKey: string, files: string[], message: string], void];
   "git:revertFile": [[sessionKey: string, file: string], void];
   "git:refreshTurnDiff": [[sessionKey: string], void];
+  "git:previewTurn": [[cwd: string, record: GitTurnRecord], GitTurnPreview];
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "fs:listProjectFiles": [[cwd: string, query: string], string[]];
@@ -94,7 +97,7 @@ export interface EventMap {
   "chat:rows": ChatRowsEvent;
   "chat:state": ChatStateEvent;
   "chat:commands": SlashCommandsEvent;
-  "git:turnDiff": { sessionKey: string; diff: GitTurnDiff | null };
+  "git:turnDiff": { sessionKey: string; diff: GitTurnDiff | null; turnId?: string };
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
@@ -145,6 +148,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "git:commit",
   "git:revertFile",
   "git:refreshTurnDiff",
+  "git:previewTurn",
   "fs:readText",
   "fs:stat",
   "fs:listProjectFiles",

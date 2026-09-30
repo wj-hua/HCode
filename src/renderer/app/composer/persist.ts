@@ -11,7 +11,7 @@ export function draftKey(conv: Pick<Conversation, "sessionId" | "projectPath" | 
   return conv.sessionId ? `s:${conv.sessionId}` : `p:${conv.projectPath}`;
 }
 
-function write(key: string, value: unknown | null) {
+export function writePersisted(key: string, value: unknown | null) {
   try {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, JSON.stringify(value));
@@ -20,7 +20,7 @@ function write(key: string, value: unknown | null) {
   }
 }
 
-function read<T>(key: string): T | null {
+export function readPersisted<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : null;
@@ -30,16 +30,16 @@ function read<T>(key: string): T | null {
 }
 
 export function loadDraft(key: string | null): { text: string; files: FileInput[] } {
-  const saved = key ? read<{ text?: string; files?: FileInput[] }>(DRAFT_PREFIX + key) : null;
+  const saved = key ? readPersisted<{ text?: string; files?: FileInput[] }>(DRAFT_PREFIX + key) : null;
   return { text: saved?.text ?? "", files: saved?.files ?? [] };
 }
 
 export function saveDraft(key: string, text: string, files: readonly FileInput[]) {
-  write(DRAFT_PREFIX + key, text || files.length ? { text, files } : null);
+  writePersisted(DRAFT_PREFIX + key, text || files.length ? { text, files } : null);
 }
 
 export function loadQueue(sessionId: string): QueuedMessage[] {
-  const saved = read<QueuedMessage[]>(QUEUE_PREFIX + sessionId);
+  const saved = readPersisted<QueuedMessage[]>(QUEUE_PREFIX + sessionId);
   return Array.isArray(saved) ? saved.map((item) => ({ ...item, images: [], files: item.files ?? [] })) : [];
 }
 
@@ -47,12 +47,12 @@ export function saveQueue(sessionId: string, queue: readonly QueuedMessage[]) {
   const items = queue
     .map((item) => ({ ...item, images: [] }))
     .filter((item) => item.text.trim() || item.files.length > 0);
-  write(QUEUE_PREFIX + sessionId, items.length ? items : null);
+  writePersisted(QUEUE_PREFIX + sessionId, items.length ? items : null);
 }
 
 /** 会话被关闭或删除时丢弃它的草稿和队列。 */
 export function discardPersisted(conv: Pick<Conversation, "sessionId" | "projectPath" | "compareId">) {
   const key = draftKey(conv);
-  if (key) write(DRAFT_PREFIX + key, null);
-  if (conv.sessionId) write(QUEUE_PREFIX + conv.sessionId, null);
+  if (key) writePersisted(DRAFT_PREFIX + key, null);
+  if (conv.sessionId) writePersisted(QUEUE_PREFIX + conv.sessionId, null);
 }

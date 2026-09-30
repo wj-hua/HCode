@@ -125,6 +125,9 @@ export interface GitTurnFile {
   previewUnavailable?: boolean;
   /** 没有可安全恢复的发送前内容时，禁用撤销并说明原因。 */
   revertUnavailable?: string;
+  /** 内容指纹用于判断重建预览与当时是否一致；不保存文件正文。 */
+  beforeHash?: string | null;
+  afterHash?: string | null;
 }
 
 export interface GitTurnDiff {
@@ -132,6 +135,24 @@ export interface GitTurnDiff {
   root?: string;
   files: GitTurnFile[];
   error?: string;
+  id?: string;
+  head?: string | null;
+  recordedAt?: number;
+  prompt?: string;
+}
+
+/** 持久化的轮次摘要，不包含文件正文、patch 或可写的 Git 快照。 */
+export interface GitTurnRecord {
+  id: string;
+  root: string;
+  head: string | null;
+  recordedAt: number;
+  prompt: string;
+  files: Pick<GitTurnFile, "path" | "status" | "additions" | "deletions" | "beforeHash" | "afterHash" | "previewUnavailable">[];
+}
+
+export interface GitTurnPreview {
+  files: { path: string; patch: string | null; changed: boolean; baselineChanged: boolean }[];
 }
 
 export interface SessionRef {

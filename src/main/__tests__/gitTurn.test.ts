@@ -3,7 +3,8 @@ import { chmod, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { beginGitTurn, commitFiles, createBranch, finishGitTurn, revertFile, switchBranch, validateTurnFiles } from "../git.js";
+import { beginGitTurn, commitFiles, createBranch, finishGitTurn, previewGitTurn, revertFile, switchBranch, validateTurnFiles } from "../git.js";
+import type { GitTurnDiff, GitTurnRecord } from "../../shared/types.js";
 import { trashPaths } from "../util/trash.js";
 
 // 单元测试不触碰系统废纸篓；断言调用后在临时仓库模拟移走文件。
@@ -53,6 +54,10 @@ describe("F20 Git 提交与撤销", () => {
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
   const write = (path: string, text: string) => writeFile(join(cwd, path), text);
+  const record = (diff: GitTurnDiff): GitTurnRecord => ({
+    id: diff.id!, root: diff.root!, head: diff.head!, recordedAt: diff.recordedAt!, prompt: diff.prompt!,
+    files: diff.files.map(({ patch: _patch, revertUnavailable: _runtime, ...file }) => file),
+  });
 
   beforeEach(async () => {
     vi.mocked(trashPaths).mockClear();
@@ -190,5 +195,79 @@ describe("F20 Git 提交与撤销", () => {
     expect(git("branch", "--show-current")).toBe("feature/f20");
     await switchBranch(cwd, env, original);
     expect(git("branch", "--show-current")).toBe(original);
+  });
+
+  it("历史摘要保存发送时 HEAD，重启后重建已提交、新增和删除文件的差异", async () => {
+    const head = git("rev-parse", "HEAD");
+    const turn = (await beginGitTurn(cwd, env, "修改三个文件\n更多说明"))!;
+    await write("one.txt", "changed\n");
+    await write("new file.txt", "added\n");
+    await rm(join(cwd, "two.txt"));
+    git("add", "-A");
+    git("commit", "-qm", "CLI commit");
+    const diff = await finishGitTurn(turn);
+    expect(diff).toMatchObject({ head, id: turn.id, recordedAt: turn.recordedAt, prompt: "修改三个文件" });
+    const saved = JSON.parse(JSON.stringify(record(diff))) as GitTurnRecord;
+    const beforeStatus = git("status", "--porcelain");
+    const preview = await previewGitTurn(cwd, env, saved);
+    expect(preview.files.map((file) => file.path)).toEqual(["new file.txt", "one.txt", "two.txt"]);
+    for (const file of preview.files) {
+      expect(file.patch).toBe(diff.files.find((item) => item.path === file.path)?.patch);
+      expect(file.changed).toBe(false);
+      expect(file.baselineChanged).toBe(false);
+    }
+    expect(git("status", "--porcelain")).toBe(beforeStatus);
+    expect((await finishGitTurn(turn)).id).toBe(saved.id);
+  });
+
+  it("文件后来变化会标记不一致，预览不修改保存的行数或暂存状态", async () => {
+    const turn = (await beginGitTurn(cwd, env))!;
+    await write("one.txt", "during turn\n");
+    const saved = record(await finishGitTurn(turn));
+    await write("one.txt", "later\nmore lines\n");
+    git("add", "one.txt");
+    const index = git("ls-files", "--stage");
+    const preview = await previewGitTurn(cwd, env, saved);
+    expect(preview.files[0]).toMatchObject({ changed: true, baselineChanged: false });
+    expect(preview.files[0]?.patch).toContain("+later");
+    expect(saved.files[0]).toMatchObject({ additions: 1, deletions: 1 });
+    expect(git("ls-files", "--stage")).toBe(index);
+  });
+
+  it("发送前已有脏内容时标明基线无法准确重建，而不把 HEAD 预览当作当时差异", async () => {
+    await write("one.txt", "before turn\n");
+    const turn = (await beginGitTurn(cwd, env))!;
+    await write("one.txt", "during turn\n");
+    const diff = await finishGitTurn(turn);
+    const preview = await previewGitTurn(cwd, env, record(diff));
+    expect(diff.files[0]?.patch).toContain("-before turn");
+    expect(preview.files[0]).toMatchObject({ changed: false, baselineChanged: true });
+    expect(preview.files[0]?.patch).toContain("-original");
+  });
+
+  it("历史预览拒绝越界路径、元数据路径和伪造 HEAD", async () => {
+    const turn = (await beginGitTurn(cwd, env))!;
+    await write("one.txt", "changed\n");
+    const saved = record(await finishGitTurn(turn));
+    for (const path of ["../outside.txt", ".git/config"]) {
+      await expect(previewGitTurn(cwd, env, { ...saved, files: [{ ...saved.files[0]!, path }] })).rejects.toThrow("文件路径无效");
+    }
+    await symlink(tmpdir(), join(cwd, "escape"));
+    await expect(previewGitTurn(cwd, env, { ...saved, files: [{ ...saved.files[0]!, path: "escape/outside.txt" }] })).rejects.toThrow("仓库外");
+    await expect(previewGitTurn(cwd, env, { ...saved, head: "--output=/tmp/invalid" })).rejects.toThrow("HEAD 无效");
+    await expect(previewGitTurn(cwd, env, { ...saved, root: tmpdir() })).rejects.toThrow("不同的 Git 仓库");
+  });
+
+  it("没有初始提交的记录也能预览新增文件，二进制不传正文", async () => {
+    git("switch", "--quiet", "--orphan", "unborn");
+    const turn = (await beginGitTurn(cwd, env))!;
+    await write("new.txt", "new\n");
+    await writeFile(join(cwd, "binary.dat"), Buffer.from([0, 1, 2]));
+    const saved = record(await finishGitTurn(turn));
+    expect(saved.head).toBeNull();
+    const preview = await previewGitTurn(cwd, env, saved);
+    expect(preview.files.find((file) => file.path === "new.txt")).toMatchObject({ changed: false, baselineChanged: false });
+    expect(preview.files.find((file) => file.path === "new.txt")?.patch).toContain("+new");
+    expect(preview.files.find((file) => file.path === "binary.dat")?.patch).toBeNull();
   });
 });

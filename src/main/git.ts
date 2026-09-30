@@ -1,12 +1,12 @@
 // 分支选择与本轮改动：基于发送前快照提交、撤销，保留其它文件的工作区和暂存状态。
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { GitBranches, GitTurnDiff, GitTurnFile } from "../shared/types.js";
+import type { GitBranches, GitTurnDiff, GitTurnFile, GitTurnPreview, GitTurnRecord } from "../shared/types.js";
 
 const run = promisify(execFile);
 const TIMEOUT_MS = 10_000;
@@ -74,6 +74,9 @@ export async function commitFiles(cwd: string, env: Record<string, string>, file
 type Snapshot = { data?: Buffer; hash: string; mode?: number; symlink?: boolean } | null;
 
 export interface GitTurnSnapshot {
+  id: string;
+  recordedAt: number;
+  prompt: string;
   root: string;
   head: string | null;
   tracked: Set<string>;
@@ -132,7 +135,7 @@ export async function isGitRepository(cwd: string, env: Record<string, string>):
 }
 
 /** 仅把发送前已脏的文件保存在内存；干净文件可从当时的 HEAD 还原。 */
-export async function beginGitTurn(cwd: string, env: Record<string, string>): Promise<GitTurnSnapshot | null> {
+export async function beginGitTurn(cwd: string, env: Record<string, string>, prompt = ""): Promise<GitTurnSnapshot | null> {
   if (!await isGitRepository(cwd, env)) return null;
   const root = await repositoryRoot(cwd, env);
   const head = await git(root, env, ["rev-parse", "--verify", "HEAD"]).catch(() => null);
@@ -146,7 +149,28 @@ export async function beginGitTurn(cwd: string, env: Record<string, string>): Pr
     const path = entry.slice(tab + 1);
     index.set(path, [...(index.get(path) ?? []), entry.slice(0, tab)]);
   }
-  return { root, head, tracked, dirty, env, index, observed: new Map(), handled: new Set(), latestHead: head };
+  return {
+    id: randomUUID(), recordedAt: Date.now(), prompt: prompt.split(/\r?\n/)[0]?.trim().slice(0, 200) ?? "",
+    root, head, tracked, dirty, env, index, observed: new Map(), handled: new Set(), latestHead: head,
+  };
+}
+
+async function safeRepoPath(root: string, path: string): Promise<void> {
+  if (!path || isAbsolute(path) || path.split("/").some((part) => part === ".." || part.toLowerCase() === ".git")) {
+    throw new Error(`文件路径无效：${path}`);
+  }
+  // 文件本身可以是符号链接，但父目录不能跳出仓库；删除的目录逐级检查仍存在的祖先。
+  let parent = dirname(resolve(root, path));
+  while (true) {
+    try { parent = await realpath(parent); break; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      parent = dirname(parent);
+    }
+  }
+  const fromRoot = relative(root, parent);
+  if (fromRoot === ".." || fromRoot.startsWith("../") || isAbsolute(fromRoot)) throw new Error(`文件路径已指向仓库外：${path}`);
+  if (fromRoot.split("/").some((part) => part.toLowerCase() === ".git")) throw new Error(`文件路径指向 Git 元数据：${path}`);
 }
 
 /** 操作仅接受最近一次面板实际列出的文件，过期预览不能覆盖后来的改动。 */
@@ -157,17 +181,7 @@ export async function validateTurnFiles(turn: GitTurnSnapshot, files: string[]):
     if (!turn.observed.has(path) || turn.handled.has(path) || isAbsolute(path) || path.split("/").some((part) => part === ".." || part.toLowerCase() === ".git")) {
       throw new Error(`文件不在当前本轮改动中：${path}`);
     }
-    // 文件本身可以是符号链接，但父目录不能跳出仓库。
-    let parent = dirname(resolve(turn.root, path));
-    while (true) {
-      try { parent = await realpath(parent); break; }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        parent = dirname(parent);
-      }
-    }
-    const fromRoot = relative(turn.root, parent);
-    if (fromRoot === ".." || fromRoot.startsWith("../") || isAbsolute(fromRoot)) throw new Error(`文件路径已指向仓库外：${path}`);
+    await safeRepoPath(turn.root, path);
     const current = await snapshotFile(join(turn.root, path));
     const expected = turn.observed.get(path);
     if (current?.hash !== expected?.hash || current?.mode !== expected?.mode || current?.symlink !== expected?.symlink) {
@@ -214,7 +228,7 @@ export async function revertFile(turn: GitTurnSnapshot, path: string): Promise<v
   turn.handled.add(path);
 }
 
-async function originalFile(turn: GitTurnSnapshot, path: string): Promise<Snapshot> {
+async function originalFile(turn: Pick<GitTurnSnapshot, "root" | "head" | "tracked" | "dirty" | "env">, path: string): Promise<Snapshot> {
   if (turn.dirty.has(path)) return turn.dirty.get(path)!;
   if (!turn.head || !turn.tracked.has(path)) return null;
   try {
@@ -276,6 +290,8 @@ export async function finishGitTurn(turn: GitTurnSnapshot): Promise<GitTurnDiff>
       deletions,
       patch,
       ...(patch === null ? { previewUnavailable: true } : {}),
+      beforeHash: before?.hash ?? null,
+      afterHash: after?.hash ?? null,
       ...(turn.index.get(path)?.some((entry) => entry.startsWith("160000 "))
         ? { revertUnavailable: "子模块改动请在终端处理" }
         : turn.dirty.get(path) && !turn.dirty.get(path)?.data
@@ -284,5 +300,27 @@ export async function finishGitTurn(turn: GitTurnSnapshot): Promise<GitTurnDiff>
     });
   }
   turn.latestHead = await git(turn.root, turn.env, ["rev-parse", "--verify", "HEAD"]).catch(() => null);
-  return { root: turn.root, files };
+  return { id: turn.id, head: turn.head, recordedAt: turn.recordedAt, prompt: turn.prompt, root: turn.root, files };
+}
+
+/** 仅重建历史预览，不建立 F20 可写快照；保存的文件清单与行数始终由记录提供。 */
+export async function previewGitTurn(cwd: string, env: Record<string, string>, record: GitTurnRecord): Promise<GitTurnPreview> {
+  const root = await repositoryRoot(cwd, env);
+  if (await realpath(record.root) !== root) throw new Error("改动记录属于不同的 Git 仓库");
+  if (record.head !== null && !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(record.head)) throw new Error("改动记录的 Git HEAD 无效");
+  for (const file of record.files) await safeRepoPath(root, file.path);
+  const tracked = new Set(record.head ? paths(await output(root, env, ["ls-tree", "-r", "--name-only", "-z", record.head])) : []);
+  const base = { root, env, head: record.head, tracked, dirty: new Map<string, Snapshot>() };
+  const files: GitTurnPreview["files"] = [];
+  for (const file of record.files) {
+    const [before, after] = await Promise.all([originalFile(base, file.path), snapshotFile(join(root, file.path))]);
+    const patch = await filePatch(file.path, before?.data ?? (before ? undefined : Buffer.alloc(0)), after?.data ?? (after ? undefined : Buffer.alloc(0)), env, !!before, !!after);
+    files.push({
+      path: file.path,
+      patch,
+      changed: file.afterHash !== undefined && file.afterHash !== (after?.hash ?? null),
+      baselineChanged: file.beforeHash !== undefined && file.beforeHash !== (before?.hash ?? null),
+    });
+  }
+  return { files };
 }

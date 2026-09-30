@@ -76,7 +76,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
       )}
       {conversation ? (
         <div className="app-no-drag flex shrink-0 items-center gap-0.5">
-          {!isOfficeMode && gitProject === conversation.projectPath ? (
+          {!isOfficeMode && (gitProject === conversation.projectPath || conversation.turnHistory.length > 0) ? (
             <ControlHintTooltip title="查看本轮改动" side="bottom">
               <Button
                 variant={diffOpen ? "secondary" : "ghost"}
@@ -87,7 +87,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
                 aria-pressed={diffOpen}
               >
                 <FileDiffIcon className="size-4" />
-                改动{conversation.turnDiff?.files.length ? ` ${conversation.turnDiff.files.length}` : ""}
+                改动{(conversation.turnDiff?.files.length ?? conversation.turnHistory.at(-1)?.files.length) ? ` ${conversation.turnDiff?.files.length ?? conversation.turnHistory.at(-1)?.files.length}` : ""}
               </Button>
             </ControlHintTooltip>
           ) : null}

@@ -13,7 +13,7 @@ import { StepAgent } from "./agents/step/stepAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
-import { beginGitTurn, commitFiles, createBranch, finishGitTurn, isGitRepository, listBranches, repositoryRoot, revertFile, switchBranch, validateTurnFiles, type GitTurnSnapshot } from "./git.js";
+import { beginGitTurn, commitFiles, createBranch, finishGitTurn, isGitRepository, listBranches, previewGitTurn, repositoryRoot, revertFile, switchBranch, validateTurnFiles, type GitTurnSnapshot } from "./git.js";
 import { buildProjects } from "./projects.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { QuotaService } from "./quotaService.js";
@@ -77,28 +77,33 @@ async function bootstrap() {
   const sessionGitRoots = new Map<string, string>();
   const startingGitSessions = new Set<string>();
   const gitOperationRoots = new Set<string>();
+  const pendingGitFinishes = new Map<string, { root: string; promise: Promise<void> }>();
   const turnGenerations = new Map<string, number>();
   const finishTurn = (sessionKey: string) => {
     const turn = gitTurns.get(sessionKey);
     if (!turn) return;
     gitTurns.delete(sessionKey);
     const generation = turnGenerations.get(sessionKey);
-    void finishGitTurn(turn).then(
+    const promise = finishGitTurn(turn).then(
       (diff) => {
-        if (turnGenerations.get(sessionKey) !== generation) return;
-        completedGitTurns.set(sessionKey, turn);
+        if (!turnGenerations.has(sessionKey)) return;
+        if (turnGenerations.get(sessionKey) === generation) completedGitTurns.set(sessionKey, turn);
         send("git:turnDiff", { sessionKey, diff });
       },
       (error) => {
-        if (turnGenerations.get(sessionKey) !== generation) return;
-        completedGitTurns.set(sessionKey, turn);
-        send("git:turnDiff", { sessionKey, diff: { files: [], error: error instanceof Error ? error.message : String(error) } });
+        if (!turnGenerations.has(sessionKey)) return;
+        if (turnGenerations.get(sessionKey) === generation) completedGitTurns.set(sessionKey, turn);
+        send("git:turnDiff", { sessionKey, turnId: turn.id, diff: { files: [], error: error instanceof Error ? error.message : String(error) } });
       },
-    );
+    ).finally(() => {
+      if (pendingGitFinishes.get(sessionKey)?.promise === promise) pendingGitFinishes.delete(sessionKey);
+    });
+    pendingGitFinishes.set(sessionKey, { root: turn.root, promise });
   };
   const withGitOperation = async (cwd: string, operation: () => Promise<void>) => {
     const root = await repositoryRoot(cwd, buildAgentEnv());
     if (gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请稍后重试");
+    if ([...pendingGitFinishes.values()].some((pending) => pending.root === root)) throw new Error("正在记录该仓库的本轮改动，请稍后重试");
     for (const [key, sessionRoot] of sessionGitRoots) {
       if (sessionRoot === root && (activeGitTurns.has(key) || startingGitSessions.has(key))) {
         throw new Error("该仓库有会话正在运行或等待审批，请结束后再操作 Git");
@@ -239,17 +244,19 @@ async function bootstrap() {
       return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
     }));
     const root = await repositoryRoot(params.projectPath, buildAgentEnv()).catch(() => null);
+    // 排队发送前先完成上一轮的读取，避免把下一轮的写入算进上一轮历史。
+    await Promise.all([...pendingGitFinishes.values()].filter((pending) => pending.root === root).map((pending) => pending.promise));
     if (root && gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请完成后再发送消息");
     if (root) sessionGitRoots.set(params.sessionKey, root);
     startingGitSessions.add(params.sessionKey);
     try {
       // 在 CLI 有机会修改文件前记录基线；Git 不可用时仍照常发送消息。
-      const turn = await beginGitTurn(params.projectPath, buildAgentEnv()).catch(() => null);
+      const turn = await beginGitTurn(params.projectPath, buildAgentEnv(), params.text).catch(() => null);
       turnGenerations.set(params.sessionKey, (turnGenerations.get(params.sessionKey) ?? 0) + 1);
       completedGitTurns.delete(params.sessionKey);
       if (turn) {
         gitTurns.set(params.sessionKey, turn);
-        send("git:turnDiff", { sessionKey: params.sessionKey, diff: null });
+        send("git:turnDiff", { sessionKey: params.sessionKey, diff: null, turnId: turn.id });
       }
       return await agents.send({ ...params, files });
     } catch (error) {
@@ -278,6 +285,7 @@ async function bootstrap() {
   handle("git:switchBranch", (cwd, branch) => withGitOperation(cwd, () => switchBranch(cwd, buildAgentEnv(), branch)));
   handle("git:isRepository", (cwd) => isGitRepository(cwd, buildAgentEnv()));
   handle("git:createBranch", (cwd, name) => withGitOperation(cwd, () => createBranch(cwd, buildAgentEnv(), name)));
+  handle("git:previewTurn", (cwd, record) => previewGitTurn(cwd, buildAgentEnv(), record));
   handle("git:refreshTurnDiff", (sessionKey) => {
     const turn = requireGitTurn(sessionKey);
     return withGitOperation(turn.root, () => refreshGitTurn(sessionKey, turn));
