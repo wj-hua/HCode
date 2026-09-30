@@ -62,6 +62,10 @@ export interface InvokeMap {
   "git:branches": [[cwd: string], GitBranches | null];
   "git:switchBranch": [[cwd: string, branch: string], void];
   "git:isRepository": [[cwd: string], boolean];
+  "git:createBranch": [[cwd: string, name: string], void];
+  "git:commit": [[sessionKey: string, files: string[], message: string], void];
+  "git:revertFile": [[sessionKey: string, file: string], void];
+  "git:refreshTurnDiff": [[sessionKey: string], void];
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "fs:listProjectFiles": [[cwd: string, query: string], string[]];
@@ -137,6 +141,10 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "git:branches",
   "git:switchBranch",
   "git:isRepository",
+  "git:createBranch",
+  "git:commit",
+  "git:revertFile",
+  "git:refreshTurnDiff",
   "fs:readText",
   "fs:stat",
   "fs:listProjectFiles",

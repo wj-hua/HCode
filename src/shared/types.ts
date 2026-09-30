@@ -123,6 +123,8 @@ export interface GitTurnFile {
   patch: string | null;
   /** 大文件或二进制文件只列出，不传输内容。 */
   previewUnavailable?: boolean;
+  /** 没有可安全恢复的发送前内容时，禁用撤销并说明原因。 */
+  revertUnavailable?: string;
 }
 
 export interface GitTurnDiff {

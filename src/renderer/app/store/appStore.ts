@@ -65,6 +65,8 @@ export interface Conversation {
   usage?: ChatUsage;
   /** undefined = 尚无本轮记录；null = 正在收集本轮改动。 */
   turnDiff?: GitTurnDiff | null;
+  /** 本轮发送的用户消息，用于生成提交说明。 */
+  turnPrompt?: string;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
   queue: QueuedMessage[];
@@ -308,6 +310,7 @@ export const useAppStore = create<AppState>((set, get) => {
     patchConversation(conv.viewId, {
       sessionKey,
       runState: "running",
+      turnPrompt: text,
       runStartedAt: conv.runStartedAt ?? Date.now(),
       error: undefined,
       usage: conv.usage ? {

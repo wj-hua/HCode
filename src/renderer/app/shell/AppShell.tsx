@@ -82,7 +82,7 @@ export function AppShell() {
                   <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
                 )}
                 {!isOfficeMode && diffViewId === conversation.viewId ? (
-                  <TurnDiffPanel conversation={conversation} onClose={() => setDiffViewId(null)} />
+                  <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setDiffViewId(null)} />
                 ) : null}
               </>
             ) : (

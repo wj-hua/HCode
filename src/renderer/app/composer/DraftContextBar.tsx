@@ -1,8 +1,10 @@
 // 新会话输入框下方的「文件夹 / 分支」选择：参照 ZCode ChatEmptyWorkspacePreviewMenu 与 GitBranchSwitcher。
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, LoaderIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, LoaderIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { GitBranches } from "@hcode/shared/types";
 import { Button } from "@/components/ui/button.js";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.js";
+import { Input } from "@/components/ui/input.js";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -88,6 +90,14 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
   const [git, setGit] = useState<GitBranches | null | undefined>(undefined);
   const [pending, setPending] = useState(false);
   const [query, setQuery] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const running = useAppStore((state) => Object.values(state.conversations).some((item) => {
+    const root = item.turnDiff?.root ?? item.projectPath;
+    return (item.runState === "running" || item.runState === "awaitingApproval")
+      && (root === projectPath || root.startsWith(`${projectPath}/`) || projectPath.startsWith(`${root}/`));
+  }));
 
   const load = useCallback(async () => {
     setGit(await hcode.invoke("git:branches", projectPath).catch(() => null));
@@ -102,7 +112,7 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
   const visible = git.branches.filter((branch) => matches(query, branch));
 
   const switchTo = async (branch: string) => {
-    if (branch === git.current) return;
+    if (pending || running || branch === git.current) return;
     setPending(true);
     try {
       await hcode.invoke("git:switchBranch", projectPath, branch);
@@ -113,47 +123,86 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
       setPending(false);
     }
   };
+  const create = async () => {
+    if (pending || running || !branchName.trim()) return;
+    setPending(true);
+    setCreateError(null);
+    try {
+      await hcode.invoke("git:createBranch", projectPath, branchName.trim());
+      setCreateOpen(false);
+      toast("已创建并切换到新分支");
+    } catch (error) {
+      setCreateError(errorMessage(error));
+    } finally {
+      await load();
+      setPending(false);
+    }
+  };
 
   return (
-    <DropdownMenu
-      onOpenChange={(open) => {
-        // 每次展开都重新读取，外部切过分支也能看到最新状态
-        if (open) void load();
-        else setQuery("");
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={pending}
-          className="min-w-0 max-w-60 gap-1.5 rounded-full text-foreground-subtle"
-        >
-          <GitBranchIcon className="size-4 shrink-0" />
-          <span className="truncate">{git.current ?? "分离的 HEAD"}</span>
-          {pending ? <LoaderIcon className="size-3 shrink-0 animate-spin" /> : <ChevronDownIcon className="size-3 shrink-0" />}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="w-72 p-0">
-        <MenuSearch value={query} onChange={setQuery} placeholder="搜索分支" />
-        <div className="max-h-64 overflow-y-auto p-1">
-          <DropdownMenuLabel>分支</DropdownMenuLabel>
-          {visible.map((branch) => (
-            <DropdownMenuCheckboxItem
-              key={branch}
-              checked={branch === git.current}
-              onSelect={() => void switchTo(branch)}
-            >
-              <span className="truncate">{branch}</span>
-            </DropdownMenuCheckboxItem>
-          ))}
-          {visible.length === 0 ? <div className="px-2 py-2 text-ui-base text-foreground-subtlest">没有匹配的分支</div> : null}
-        </div>
-        <DropdownMenuSeparator className="my-0" />
-        <div className="px-3 py-2 text-ui-sm text-foreground-subtlest">切换会直接在项目目录执行 git switch</div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          // 每次展开都重新读取，外部切过分支也能看到最新状态
+          if (open) void load();
+          else setQuery("");
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pending || running}
+            className="min-w-0 max-w-60 gap-1.5 rounded-full text-foreground-subtle"
+          >
+            <GitBranchIcon className="size-4 shrink-0" />
+            <span className="truncate">{git.current ?? "分离的 HEAD"}</span>
+            {pending ? <LoaderIcon className="size-3 shrink-0 animate-spin" /> : <ChevronDownIcon className="size-3 shrink-0" />}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="top" className="w-72 p-0">
+          <MenuSearch value={query} onChange={setQuery} placeholder="搜索分支" />
+          <div className="max-h-64 overflow-y-auto p-1">
+            <DropdownMenuLabel>分支</DropdownMenuLabel>
+            {visible.map((branch) => (
+              <DropdownMenuCheckboxItem
+                key={branch}
+                checked={branch === git.current}
+                disabled={pending || running}
+                onSelect={() => void switchTo(branch)}
+              >
+                <span className="truncate">{branch}</span>
+              </DropdownMenuCheckboxItem>
+            ))}
+            {visible.length === 0 ? <div className="px-2 py-2 text-ui-base text-foreground-subtlest">没有匹配的分支</div> : null}
+          </div>
+          <DropdownMenuSeparator className="my-0" />
+          <div className="p-1">
+            <DropdownMenuItem disabled={pending || running} onSelect={() => { setBranchName(""); setCreateError(null); setCreateOpen(true); }}>
+              <PlusIcon className="size-4" />新建分支…
+            </DropdownMenuItem>
+          </div>
+          <div className="px-3 py-2 text-ui-sm text-foreground-subtlest">切换会直接在项目目录执行 git switch</div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={createOpen} onOpenChange={(open) => { if (!pending) setCreateOpen(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>新建分支</DialogTitle>
+            <DialogDescription>从当前 HEAD 创建并切换到新分支。</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void create(); }}>
+            <Input autoFocus aria-label="分支名称" placeholder="例如 feature/my-change" value={branchName} disabled={pending || running} onChange={(event) => setBranchName(event.target.value)} />
+            {createError ? <p role="alert" className="break-words text-ui-sm text-destructive">{createError}</p> : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={pending} onClick={() => setCreateOpen(false)}>取消</Button>
+              <Button type="submit" disabled={pending || running || !branchName.trim()}>{pending ? "创建中…" : "创建并切换"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -161,7 +210,7 @@ export function DraftContextBar({ conversation }: { conversation: Conversation }
   return (
     <div className="mt-1.5 flex min-w-0 items-center gap-1">
       <FolderPicker conversation={conversation} />
-      <BranchPicker projectPath={conversation.projectPath} />
+      <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} />
     </div>
   );
 }
