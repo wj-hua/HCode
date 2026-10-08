@@ -13,6 +13,7 @@ import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 import { Header } from "./Header";
+import { AppBackground } from "./AppBackground";
 import { Sidebar } from "./Sidebar";
 import { SessionSearchDialog } from "./SessionSearchDialog";
 import { QuickSwitchDialog } from "./QuickSwitchDialog";
@@ -24,6 +25,7 @@ const SIDEBAR_WIDTH = 272;
 
 export function AppShell() {
   const isOfficeMode = useIsOfficeMode();
+  const hasBackground = useAppStore((state) => !!state.settings.background.path);
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
   const compareMembers = useAppStore(
@@ -60,7 +62,8 @@ export function AppShell() {
 
   return (
     <DesktopWindowFrame title="HCode" isDesktop isMacDesktop>
-      <div className="relative flex h-full min-h-0 w-full overflow-hidden">
+      <div className="relative isolate flex h-full min-h-0 w-full overflow-hidden">
+        <AppBackground />
         <div
           className={cn(
             "flex-none overflow-hidden transition-[width,opacity] duration-200 ease-out",
@@ -74,7 +77,7 @@ export function AppShell() {
         </div>
         <div className={cn("flex min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
           <div className="app-drag h-1 w-full" />
-          <section className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
+          <section className={cn("relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
             <Header
               conversation={conversation}
               diffOpen={diffOpen}

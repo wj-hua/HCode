@@ -79,6 +79,8 @@ export interface InvokeMap {
   "fs:readAudio": [[path: string], Uint8Array | null];
   /** 弹出文件选择框挑一个音频文件，取消返回 null。 */
   "app:pickAudio": [[], string | null];
+  /** 弹出文件选择框挑一张图片或一个视频作为应用背景，取消返回 null。 */
+  "app:pickBackground": [[], string | null];
   "app:openPath": [[path: string], void];
   "app:showInFinder": [[path: string], void];
   "app:openExternal": [[url: string], void];
@@ -157,6 +159,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "fs:stageAttachment",
   "fs:readAudio",
   "app:pickAudio",
+  "app:pickBackground",
   "app:openPath",
   "app:showInFinder",
   "app:openExternal",

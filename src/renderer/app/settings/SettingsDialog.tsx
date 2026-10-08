@@ -197,6 +197,57 @@ function NotificationSoundSection() {
   );
 }
 
+function BackgroundSection() {
+  const background = useAppStore((state) => state.settings.background);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const update = (patch: Partial<typeof background>) => void updateSettings({ background: { ...background, ...patch } });
+  const pick = async () => {
+    const path = await hcode.invoke("app:pickBackground");
+    if (path) update({ path });
+  };
+  const sliders = [
+    { key: "blur", label: "模糊程度", max: 60, unit: "px" },
+    { key: "mask", label: "蒙层浓度", max: 100, unit: "%" },
+  ] as const;
+
+  return (
+    <div className="flex flex-col">
+      <Row label="应用背景" hint={background.path ? background.path.split("/").at(-1) : "支持图片和视频（视频静音循环播放）"}>
+        <div className="flex gap-2">
+          <Button variant="outline" size="lg" onClick={() => void pick()}>
+            选择文件
+          </Button>
+          {background.path ? (
+            <Button variant="ghost" size="lg" onClick={() => update({ path: "" })}>
+              清除
+            </Button>
+          ) : null}
+        </div>
+      </Row>
+      {background.path
+        ? sliders.map(({ key, label, max, unit }) => (
+            <Row key={key} label={label}>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0}
+                  max={max}
+                  value={background[key]}
+                  onChange={(event) => update({ [key]: Number(event.target.value) })}
+                  className="w-40"
+                />
+                <span className="w-12 text-right text-ui-sm text-foreground-subtle tabular-nums">
+                  {background[key]}
+                  {unit}
+                </span>
+              </div>
+            </Row>
+          ))
+        : null}
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const open = useAppStore((state) => state.settingsOpen);
   const setOpen = useAppStore((state) => state.setSettingsOpen);
@@ -229,6 +280,7 @@ export function SettingsDialog() {
               onChange={(theme) => update({ theme })}
             />
           </Row>
+          <BackgroundSection />
           <Row label="界面语言" hint="影响卡片等内置文案">
             <Segmented
               value={settings.locale}

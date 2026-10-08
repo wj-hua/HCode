@@ -2,9 +2,11 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, powerSaveBlocker, shell } from "electron";
+import { pathToFileURL } from "node:url";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerSaveBlocker, protocol, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AGENTS } from "../shared/agents.js";
+import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS } from "../shared/types.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
@@ -30,6 +32,9 @@ if (process.env.HCODE_DEV_SERVER_URL) {
   app.setPath("userData", join(app.getPath("appData"), "HCode-dev"));
 }
 if (!app.requestSingleInstanceLock()) app.quit();
+
+// 背景图片/视频经此协议提供：视频需要 stream 才能按 Range 拖动播放。
+protocol.registerSchemesAsPrivileged([{ scheme: "hcode-media", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 
 let mainWindow: BrowserWindow | null = null;
 let shellEnv: Record<string, string> = {};
@@ -340,6 +345,21 @@ async function bootstrap() {
       filters: [{ name: "音频", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "aiff"] }],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  handle("app:pickBackground", async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ["openFile"],
+      filters: [
+        { name: "图片或视频", extensions: [...BACKGROUND_IMAGE_EXTENSIONS, ...BACKGROUND_VIDEO_EXTENSIONS] },
+      ],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  // 只提供设置里当前选中的背景文件，不接受渲染进程指定任意路径。
+  protocol.handle("hcode-media", (request) => {
+    const path = store.settings.background.path;
+    if (new URL(request.url).host !== "background" || !path) return new Response(null, { status: 404 });
+    return net.fetch(pathToFileURL(path).toString(), { headers: request.headers });
   });
   handle("app:openPath", async (path) => {
     const error = await shell.openPath(path);

@@ -316,6 +316,19 @@ export function normalizeInterfaceMode(value: unknown): InterfaceMode {
   return value === "office" ? "office" : "coding";
 }
 
+/** 应用背景：path 为本地图片/视频文件（空串 = 不启用）；blur 为模糊半径（px），mask 为蒙层不透明度（0-100）。 */
+export interface BackgroundSettings {
+  path: string;
+  blur: number;
+  mask: number;
+}
+
+export const BACKGROUND_VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "m4v"];
+export const BACKGROUND_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp"];
+
+export const isBackgroundVideo = (path: string) =>
+  BACKGROUND_VIDEO_EXTENSIONS.includes(path.split(".").at(-1)?.toLowerCase() ?? "");
+
 export interface Settings {
   theme: "system" | "light" | "dark";
   locale: "zh-CN" | "en-US";
@@ -338,6 +351,7 @@ export interface Settings {
   notificationSound: NotificationSound;
   /** notificationSound 为 custom 时各事件的音频文件路径；空串 = 用系统提示音。 */
   customSounds: Record<NotificationEvent, string>;
+  background: BackgroundSettings;
 }
 
 /** 按 CLI 分组的设置项。 */
@@ -362,4 +376,5 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnFinish: true,
   notificationSound: "system",
   customSounds: { start: "", done: "", error: "", approval: "" },
+  background: { path: "", blur: 20, mask: 60 },
 };
