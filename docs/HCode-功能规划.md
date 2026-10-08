@@ -13,7 +13,7 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 | P0 | F3 | 删除 / 归档会话（已完成） | 全部（能力不同） |
 | P0 | F4 | `@` 引用项目文件（已完成） | 全部 |
 | P0 | F5 | `/` 斜杠命令补全（已完成） | 全部 |
-| P1 | F6 | 上下文用量与本轮花费（已完成） | 全部 |
+| P1 | F6 | 上下文用量与本轮 Token（已完成） | 全部 |
 | P1 | F7 | 本轮改动 diff 面板（已完成） | 全部（基于 git） |
 | P1 | F8 | 从某条消息分叉 / 回退（已完成） | Claude、Codex |
 | P1 | F9 | 会话全文搜索（已完成） | 全部 |
@@ -114,17 +114,17 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 
 ## P1
 
-### F6 上下文用量与本轮花费
-**进度**：五个 CLI 都已接入，界面不显示缺失的数值。Claude：上下文占用、本轮输入 / 输出 Token、美元估算花费；Codex：上下文占用与本轮 Token（没有美元费用）；StepCode / pi：上下文占用、本轮 Token，模型有计价时显示花费；Antigravity：只有本轮 Token（没有上下文窗口和费用数据）。
+### F6 上下文用量与本轮 Token
+**进度**：五个 CLI 都已接入，界面不显示缺失的数值。Claude、Codex、StepCode / pi：上下文占用与本轮输入 / 输出 Token；Antigravity：只有本轮 Token（没有上下文窗口数据）。不显示费用。
 
 **实现**
-- Claude：每轮 `result.usage` 提供 Token；`total_cost_usd` 是累计估算费用，以相邻结果的差值计算本轮费用；`Query.getContextUsage({ detail: "summary" })` 提供上下文已用量和窗口容量。续聊旧会话时若拿不到之前的费用基线，第一轮费用隐藏。
+- Claude：每轮 `result.usage` 提供 Token；`Query.getContextUsage({ detail: "summary" })` 提供上下文已用量和窗口容量。
 - Codex：使用 app-server 的 `thread/tokenUsage/updated` 通知。相邻 `total` 用量的差值累计本轮 Token，首次通知用 `last`；最近一次 `last` 的输入、输出 Token 与 `modelContextWindow` 用于估算上下文占用。
-- StepCode / pi：一轮结束（`agent_settled` 或 `/compact` 完成）时调用 RPC 的 `get_session_stats`。它返回整个会话的累计 Token 与花费，以及 `contextUsage`（当前上下文估算）；本轮 Token / 花费 = 与上一次读取的差（每个会话首次发送前先读一次作为基线），累计花费为 0 时不显示。输入 Token 含缓存读写。压缩后到下一次回复前 `contextUsage` 为空，沿用上一次的占用。
+- StepCode / pi：一轮结束（`agent_settled` 或 `/compact` 完成）时调用 RPC 的 `get_session_stats`。它返回整个会话的累计 Token，以及 `contextUsage`（当前上下文估算）；本轮 Token = 与上一次读取的差（每个会话首次发送前先读一次作为基线）。输入 Token 含缓存读写。压缩后到下一次回复前 `contextUsage` 为空，沿用上一次的占用。
 - Antigravity：`result.usage`（stream-json）是整个 conversation 的累计值，跨进程重启也连续（已实测），本轮 = 与上一次 result 的差；打开历史会话后的第一轮没有基线，只有 `num_turns` 为 1 时才能确定，否则该轮不显示。输入 = `input_tokens` + `cache_read_tokens`，输出 `output_tokens` 已含思考 Token。
 - `ChatStateEvent.usage` 把用量传到会话状态。输入框工具栏的 `UsageIndicator` 复用 ZCode 的 Context 环形图和悬停面板；占用达到 75% / 90% 时分别变为警示色 / 危险色。
 
-**范围**：只显示当前打开会话收到的实时用量；打开历史会话后，要等下一轮返回用量才会显示。费用是 CLI 的估算值，不是账单金额。
+**范围**：只显示当前打开会话收到的实时用量；打开历史会话后，要等下一轮返回用量才会显示。
 
 ### F7 本轮改动 diff 面板
 **实现**
@@ -298,14 +298,14 @@ v1–v4 与 pi 接入后，主链路已完整：5 个 CLI 的历史会话、流�
 **验收**：模拟额度跌破 10% 弹出一次通知；重置后弹出“已重置”；关闭开关后不再通知。
 
 ### F27 用量统计页
-**现状**：F6 的用量只在当前打开会话里实时显示，历史不留存，无法看到每天、每个 CLI 花了多少。
+**现状**：F6 的用量只在当前打开会话里实时显示，历史不留存，无法看到每天、每个 CLI 用了多少 Token。
 
 **计划**
-- 每轮结束时把 `ChatStateEvent.usage` 累计到主进程持久化文件（`appStore` 同目录的 `usage.json`），按“日期 × CLI × 模型”累加输入 / 输出 Token 与费用；只统计 HCode 内发起的轮次，终端里的会话不在其中。
-- 设置页新增“用量”页签，用 `recharts`（已是依赖）画近 30 天柱状图，可按 CLI 切换 Token / 费用；没有费用数据的 CLI 只显示 Token。
+- 每轮结束时把 `ChatStateEvent.usage` 累计到主进程持久化文件（`appStore` 同目录的 `usage.json`），按“日期 × CLI × 模型”累加输入 / 输出 Token；只统计 HCode 内发起的轮次，终端里的会话不在其中。
+- 设置页新增“用量”页签，用 `recharts`（已是依赖）画近 30 天柱状图，可按 CLI 切换。
 - 提供“清空统计”。
 
-**验收**：连续几天使用后，页签里每天的 Token 与费用与会话内显示的累计一致。
+**验收**：连续几天使用后，页签里每天的 Token 与会话内显示的累计一致。
 
 ### F28 草稿和排队消息保留图片
 **现状**：F18 为避免 base64 体积大，草稿和排队消息里的图片重启后会丢失。

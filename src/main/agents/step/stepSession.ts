@@ -26,11 +26,10 @@ const FLUSH_INTERVAL_MS = 16;
 /** 手动压缩要调用模型生成摘要，比普通请求久。 */
 const COMPACT_TIMEOUT_MS = 10 * 60_000;
 
-/** get_session_stats 里与用量相关的部分；Token 与花费是整个会话的累计值。 */
+/** get_session_stats 里与用量相关的部分；Token 是整个会话的累计值。 */
 interface StatsSnapshot {
   input: number;
   output: number;
-  cost: number;
   contextTokens?: number;
   contextWindow?: number;
 }
@@ -118,7 +117,7 @@ export class StepSession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
-    // 只保留上下文占用，本轮的 Token 与花费等结束后重新计算
+    // 只保留上下文占用，本轮的 Token 等结束后重新计算
     this.usage = this.usage?.contextWindowTokens ? {
       contextUsedTokens: this.usage.contextUsedTokens,
       contextWindowTokens: this.usage.contextWindowTokens,
@@ -244,7 +243,6 @@ export class StepSession {
       return {
         input: number(tokens.input) + number(tokens.cacheRead) + number(tokens.cacheWrite),
         output: number(tokens.output),
-        cost: number(data.cost),
         // 压缩后到下一次回复前，contextUsage 的 tokens 为 null
         ...(number(context.tokens) > 0 && number(context.contextWindow) > 0
           ? { contextTokens: number(context.tokens), contextWindow: number(context.contextWindow) }
@@ -255,20 +253,18 @@ export class StepSession {
     }
   }
 
-  /** 一轮结束时读取累计用量，与本轮开始时的基线相减得到本轮 Token 和花费。 */
+  /** 一轮结束时读取累计用量，与本轮开始时的基线相减得到本轮 Token。 */
   private async refreshUsage() {
     const rpc = this.process;
     if (!rpc?.running) return;
     const stats = await this.readStats(rpc);
     if (!stats) return;
     const base = this.statsBaseline ?? stats;
-    const cost = stats.cost - base.cost;
     this.statsBaseline = stats;
     const previous = this.usage;
     this.usage = {
       inputTokens: Math.max(0, stats.input - base.input),
       outputTokens: Math.max(0, stats.output - base.output),
-      ...(cost > 0 ? { costUsd: cost } : {}),
       ...(stats.contextTokens && stats.contextWindow
         ? {
             contextUsedTokens: stats.contextTokens,

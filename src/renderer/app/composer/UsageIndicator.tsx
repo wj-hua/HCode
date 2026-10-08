@@ -10,12 +10,6 @@ import { cn } from "@/components/lib/utils.js";
 import type { ChatUsage } from "@hcode/shared/types";
 
 const tokens = new Intl.NumberFormat("zh-CN");
-const dollars = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 4,
-  maximumFractionDigits: 6,
-});
 
 export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
   if (!usage) return null;
@@ -26,21 +20,20 @@ export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
   const tone = percent !== undefined && percent >= 90
     ? "text-destructive"
     : percent !== undefined && percent >= 75 ? "text-warning" : "text-foreground-subtle";
-  const hasTurnUsage = usage.inputTokens !== undefined || usage.outputTokens !== undefined || usage.costUsd !== undefined;
+  const hasTurnUsage = usage.inputTokens !== undefined || usage.outputTokens !== undefined;
   if (!hasContext && !hasTurnUsage) return null;
 
   return (
     <Context usedTokens={hasContext ? used : 0} maxTokens={hasContext ? window : 1}>
       <ContextTrigger>
-        <Button type="button" variant="ghost" size="sm" className={cn("h-7 gap-1 rounded-lg px-2 text-ui-sm", tone)} aria-label="上下文用量与本轮花费">
+        <Button type="button" variant="ghost" size="sm" className={cn("h-7 gap-1 rounded-lg px-2 text-ui-sm", tone)} aria-label="上下文与本轮用量">
           {hasContext ? <ContextIcon /> : null}
           {hasContext ? `上下文 ${Math.round(percent!)}%` : "本轮用量"}
-          {usage.costUsd !== undefined ? <span className="text-foreground-subtle">· {dollars.format(usage.costUsd)}</span> : null}
         </Button>
       </ContextTrigger>
       <ContextContent side="top" align="end" className="!w-68">
         <ContextContentBody className="space-y-2 text-ui-sm">
-          <div className="font-medium text-foreground">上下文用量与本轮花费</div>
+          <div className="font-medium text-foreground">上下文与本轮用量</div>
           {hasContext ? (
             <>
               <div className="flex justify-between gap-3"><span>上下文占用</span><span className={tone}>{tokens.format(used)} / {tokens.format(window)}（{percent!.toFixed(1)}%）</span></div>
@@ -49,7 +42,6 @@ export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
           ) : null}
           {usage.inputTokens !== undefined ? <div className="flex justify-between gap-3"><span>本轮输入</span><span>{tokens.format(usage.inputTokens)} tokens</span></div> : null}
           {usage.outputTokens !== undefined ? <div className="flex justify-between gap-3"><span>本轮输出</span><span>{tokens.format(usage.outputTokens)} tokens</span></div> : null}
-          {usage.costUsd !== undefined ? <div className="flex justify-between gap-3"><span>本轮花费（估算）</span><span>{dollars.format(usage.costUsd)}</span></div> : null}
         </ContextContentBody>
       </ContextContent>
     </Context>

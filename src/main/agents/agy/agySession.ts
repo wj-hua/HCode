@@ -290,7 +290,7 @@ export class AgySession {
   /**
    * result.usage 是整个 conversation 的累计值（不是本轮）：本轮 = 与上一次 result 的差。
    * 没有上一次记录时（打开历史会话后的第一轮），只有 num_turns 为 1 才能确定累计值就是本轮。
-   * agy 不报告上下文窗口和费用，所以只显示 Token；输出 Token 已包含思考 Token，输入包含缓存命中。
+   * agy 不报告上下文窗口，所以只显示 Token；输出 Token 已包含思考 Token，输入包含缓存命中。
    */
   private recordUsage(result: JsonRecord) {
     const usage = isRecord(result.usage) ? result.usage : null;

@@ -98,7 +98,6 @@ export class ClaudeSession {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private usage: ChatUsage | undefined;
-  private cumulativeCostUsd: number | null;
   private usageVersion = 0;
 
   constructor(
@@ -118,7 +117,6 @@ export class ClaudeSession {
     this.permissionMode = options.permissionMode;
     this.model = options.model || undefined;
     this.effort = options.effort || undefined;
-    this.cumulativeCostUsd = options.resumeSessionId ? null : 0;
   }
 
   /** 续聊时先把历史喂给投影器，保证新行的 rowId 接在历史后面。 */
@@ -126,9 +124,6 @@ export class ClaudeSession {
     let lastAt = 0;
     for (const record of records) {
       this.projector.consume(record);
-      if (record.type === "result" && typeof record.total_cost_usd === "number") {
-        this.cumulativeCostUsd = record.total_cost_usd;
-      }
       const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
       if (Number.isFinite(at)) lastAt = Math.max(lastAt, at);
     }
@@ -251,16 +246,10 @@ export class ClaudeSession {
     this.projector.consume(message as unknown as ClaudeRecord);
     if (message.type === "result") {
       const version = this.usageVersion;
-      const previousCost = this.cumulativeCostUsd;
-      const totalCost = message.total_cost_usd;
-      if (Number.isFinite(totalCost) && totalCost >= 0) this.cumulativeCostUsd = totalCost;
       const input = message.usage.input_tokens + message.usage.cache_read_input_tokens + message.usage.cache_creation_input_tokens;
       this.usage = {
         inputTokens: input,
         outputTokens: message.usage.output_tokens,
-        ...(previousCost !== null && Number.isFinite(totalCost) && totalCost >= 0
-          ? { costUsd: totalCost >= previousCost ? totalCost - previousCost : totalCost }
-          : {}),
       };
       const activeQuery = this.activeQuery;
       if (activeQuery) {

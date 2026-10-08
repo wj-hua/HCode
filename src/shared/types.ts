@@ -205,14 +205,13 @@ export interface ChatStateEvent {
   usage?: ChatUsage;
 }
 
-/** 当前会话最近一轮的用量。费用是 CLI 报告的美元估算值。 */
+/** 当前会话最近一轮的用量。 */
 export interface ChatUsage {
   contextUsedTokens?: number;
   contextWindowTokens?: number;
   contextUsedPercent?: number;
   inputTokens?: number;
   outputTokens?: number;
-  costUsd?: number;
 }
 
 export interface PermissionRequestEvent {
