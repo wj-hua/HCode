@@ -6,6 +6,7 @@ import { Composer } from "../composer/Composer";
 import { AGENTS } from "@hcode/shared/agents";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { Timeline } from "./Timeline";
+import { TaskListPanel } from "./TaskListPanel";
 
 const STICK_THRESHOLD_PX = 80;
 
@@ -23,8 +24,8 @@ export function ConversationView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
-  const [showJump, setShowJump] = useState(false);
   const lastScrollTopRef = useRef(0);
+  const [showJump, setShowJump] = useState(false);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
@@ -41,6 +42,8 @@ export function ConversationView({
       if (stickRef.current) scrollToBottom();
     });
     observer.observe(content);
+    // 固定任务清单展开或收起会改变消息区高度；停在底部时仍跟随最新消息。
+    if (scrollRef.current) observer.observe(scrollRef.current);
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
@@ -69,50 +72,53 @@ export function ConversationView({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
-        <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
-          {conversation.loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">
-              <LoaderIcon className="size-4 animate-spin" />
-              正在读取会话…
-            </div>
-          ) : conversation.loadError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base text-destructive">
-              读取会话失败：{conversation.loadError}
-            </div>
-          ) : conversation.rows.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-24 text-center">
-              <div className="text-ui-lg font-medium text-foreground">和 {AGENTS[conversation.agent].name} 开始对话</div>
-              <div className="text-ui-base text-foreground-subtle">工作目录：{conversation.projectPath}</div>
-            </div>
-          ) : (
-            <Timeline
-              rows={conversation.rows}
-              workspacePath={conversation.projectPath}
-              permissions={permissions}
-              running={conversation.runState === "running"}
-              canFork={Boolean(AGENTS[conversation.agent].fork && conversation.sessionId) && !running}
-              canResend={!running && !column && !conversation.compareId}
-              highlightedRowId={searchTarget?.rowId ?? null}
-            />
-          )}
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
+          <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
+            {conversation.loading ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">
+                <LoaderIcon className="size-4 animate-spin" />
+                正在读取会话…
+              </div>
+            ) : conversation.loadError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base text-destructive">
+                读取会话失败：{conversation.loadError}
+              </div>
+            ) : conversation.rows.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-24 text-center">
+                <div className="text-ui-lg font-medium text-foreground">和 {AGENTS[conversation.agent].name} 开始对话</div>
+                <div className="text-ui-base text-foreground-subtle">工作目录：{conversation.projectPath}</div>
+              </div>
+            ) : (
+              <Timeline
+                rows={conversation.rows}
+                workspacePath={conversation.projectPath}
+                permissions={permissions}
+                running={conversation.runState === "running"}
+                canFork={Boolean(AGENTS[conversation.agent].fork && conversation.sessionId) && !running}
+                canResend={!running && !column && !conversation.compareId}
+                highlightedRowId={searchTarget?.rowId ?? null}
+              />
+            )}
+          </div>
         </div>
+        {showJump ? (
+          <Button
+            variant="outline"
+            size="icon-md"
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-background shadow-md"
+            onClick={() => {
+              stickRef.current = true;
+              scrollToBottom("smooth");
+            }}
+          >
+            <ArrowDownIcon />
+          </Button>
+        ) : null}
       </div>
-      {showJump ? (
-        <Button
-          variant="outline"
-          size="icon-md"
-          className={cn("absolute left-1/2 -translate-x-1/2 rounded-full bg-background shadow-md", column ? "bottom-4" : "bottom-40")}
-          onClick={() => {
-            stickRef.current = true;
-            scrollToBottom("smooth");
-          }}
-        >
-          <ArrowDownIcon />
-        </Button>
-      ) : null}
-      {column ? null : (
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-6 pb-4">
+      <div className={cn("shrink-0", column ? "px-3" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
+        <TaskListPanel conversation={conversation} />
+        {column ? null : (
           <Composer
             key={conversation.viewId}
             conversation={conversation}
@@ -121,8 +127,8 @@ export function ConversationView({
               scrollToBottom();
             }}
           />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
