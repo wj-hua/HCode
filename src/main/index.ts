@@ -66,6 +66,9 @@ function buildAgentEnv(): Record<string, string> {
 }
 
 async function bootstrap() {
+  if (!app.isPackaged && process.platform === "darwin") {
+    app.dock?.setIcon(join(app.getAppPath(), "resources", "icon.png"));
+  }
   shellEnv = (await captureLoginShellEnvSnapshot()) ?? {};
   const store = new AppStore(app.getPath("userData"));
   let quota: QuotaService | null = null;
