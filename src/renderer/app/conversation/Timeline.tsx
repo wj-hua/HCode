@@ -28,6 +28,7 @@ import { useAppStore } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { PermissionCard } from "./PermissionCard";
+import { useFilePreview } from "./FilePreviewContext";
 
 interface Turn {
   turnId: string;
@@ -276,16 +277,17 @@ function MessageActions({ row, canFork, canResend, isLastUser }: {
 }
 
 function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow; canFork: boolean; canResend: boolean; isLastUser: boolean }) {
+  const preview = useFilePreview();
   const images = (row.attachments ?? []).filter((attachment) => attachment.ref.startsWith("data:image/")).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
   const files = (row.attachments ?? []).filter((attachment) => !attachment.ref.startsWith("data:image/")).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
   return (
     <div className="group/user flex flex-col items-end gap-2">
       <ImageAttachments images={images} className="justify-end" />
-      <FileAttachments files={files} className="justify-end" />
+      <FileAttachments files={files} className="justify-end" onPreview={preview?.onOpenFilePath} />
       {row.text.trim() ? (
         <div className="flex max-w-xl flex-col gap-2 rounded-xl rounded-tr-xs border border-border bg-surface px-4 py-3 text-ui-base text-foreground">
           <ConversationUserInputBody contentText={row.text} rowId={row.rowId}>
-            <ConversationUserInputContent text={row.text} />
+            <ConversationUserInputContent text={row.text} onOpenFile={preview?.onOpenFilePath} />
           </ConversationUserInputBody>
         </div>
       ) : null}
@@ -295,6 +297,7 @@ function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow
 }
 
 function AssistantText({ row }: { row: AssistantTextRow }) {
+  const preview = useFilePreview();
   const theme = useUiStore((state) => state.theme);
   const codePreviewSettings = useUiStore((state) => state.codePreviewSettings);
   const isOfficeMode = useIsOfficeMode();
@@ -314,6 +317,9 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
         theme={theme}
         codePreviewSettings={codePreviewSettings}
         onOpenExternalUrl={openExternal}
+        onOpenFileLink={preview?.onOpenFileLink}
+        onOpenCodeViewer={preview?.onOpenCodeViewer}
+        workspacePath={preview?.workspacePath}
       >
         {row.text}
       </MessageResponse>
@@ -345,6 +351,7 @@ function ReasoningView({ row }: { row: ReasoningRow }) {
 }
 
 const ToolRow = memo(function ToolRow({ row, workspacePath }: { row: ToolCallRow; workspacePath: string }) {
+  const preview = useFilePreview();
   const theme = useUiStore((state) => state.theme);
   const codePreviewSettings = useUiStore((state) => state.codePreviewSettings);
   const node = useMemo(() => toolCallRowToLegacyNode(row), [row]);
@@ -356,7 +363,8 @@ const ToolRow = memo(function ToolRow({ row, workspacePath }: { row: ToolCallRow
       codePreviewSettings={codePreviewSettings}
       showTodoToolCalls
       onOpenBrowserUrl={openExternal}
-      onOpenFileLink={(target) => void hcode.invoke("app:openPath", target.path)}
+      onOpenFileLink={preview?.onOpenFileLink}
+      onOpenCodeViewer={preview?.onOpenCodeViewer}
     />
   );
 });

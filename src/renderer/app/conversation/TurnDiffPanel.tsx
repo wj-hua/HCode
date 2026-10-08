@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, RefreshCwIcon, Undo2Icon, XIcon } from "lucide-react";
+import { ExternalLinkIcon, RefreshCwIcon, Undo2Icon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { GitTurnFile, GitTurnPreview } from "@hcode/shared/types";
 import { Button } from "@/components/ui/button.js";
@@ -21,6 +21,7 @@ import { getPlainTextPatchPreviewLines } from "@/lib/patchDiffPreview.js";
 import { hcode } from "../bridge";
 import { errorMessage, useAppStore, type Conversation } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
+import { SidePanel } from "./SidePanel";
 
 export function TurnDiffPanel({ conversation, onClose }: { conversation: Conversation; onClose: () => void }) {
   const [recordId, setRecordId] = useState<string | null>(null);
@@ -113,14 +114,12 @@ export function TurnDiffPanel({ conversation, onClose }: { conversation: Convers
   };
 
   return (
-    <aside className="absolute inset-y-11 right-0 z-20 flex w-[min(560px,85%)] flex-col border-l border-border bg-background shadow-xl" aria-label="本轮改动">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-        <div className="font-medium text-foreground">{historical ? "改动记录" : "本轮改动"} <span className="text-foreground-subtle">{files.length ? `· ${files.length} 个文件` : ""}</span></div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" disabled={historical ? loadingPreview : disabled || !conversation.turnDiff} onClick={() => historical ? setPreviewRevision((value) => value + 1) : void perform("refresh")} aria-label="刷新改动预览"><RefreshCwIcon /></Button>
-          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="关闭改动面板"><XIcon /></Button>
-        </div>
-      </div>
+    <SidePanel
+      label="改动面板"
+      title={<>{historical ? "改动记录" : "本轮改动"} <span className="text-foreground-subtle">{files.length ? `· ${files.length} 个文件` : ""}</span></>}
+      actions={<Button variant="ghost" size="icon-sm" disabled={historical ? loadingPreview : disabled || !conversation.turnDiff} onClick={() => historical ? setPreviewRevision((value) => value + 1) : void perform("refresh")} aria-label="刷新改动预览"><RefreshCwIcon /></Button>}
+      onClose={onClose}
+    >
       {conversation.turnHistory.length ? (
         <div className="shrink-0 border-b border-border px-4 py-2">
           <label className="flex items-center gap-2 text-ui-sm text-foreground-subtle">
@@ -244,6 +243,6 @@ export function TurnDiffPanel({ conversation, onClose }: { conversation: Convers
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </aside>
+    </SidePanel>
   );
 }

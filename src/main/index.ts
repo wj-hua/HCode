@@ -22,6 +22,7 @@ import { listProjectFiles } from "./projectFiles.js";
 import { ExtensionsService } from "./extensions.js";
 import { searchSessions } from "./sessionSearch.js";
 import { installApplicationMenu } from "./menu.js";
+import { readTextFile } from "./readTextFile.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -310,15 +311,7 @@ async function bootstrap() {
     });
   });
 
-  handle("fs:readText", async (path, maxBytes = 2 * 1024 * 1024) => {
-    try {
-      const info = await stat(path);
-      if (!info.isFile() || info.size > maxBytes) return null;
-      return await readFile(path, "utf8");
-    } catch {
-      return null;
-    }
-  });
+  handle("fs:readText", readTextFile);
   handle("fs:stat", async (path) => {
     try {
       const info = await stat(path);
@@ -346,7 +339,8 @@ async function bootstrap() {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
   handle("app:openPath", async (path) => {
-    await shell.openPath(path);
+    const error = await shell.openPath(path);
+    if (error) throw new Error(error);
   });
   handle("app:showInFinder", (path) => shell.showItemInFolder(path));
   handle("app:openExternal", async (url) => {

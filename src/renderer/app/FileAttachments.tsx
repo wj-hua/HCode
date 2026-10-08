@@ -9,9 +9,10 @@ export interface FileAttachmentItem {
   size: number;
 }
 
-export function FileAttachments({ files, onRemove, className }: {
+export function FileAttachments({ files, onRemove, onPreview, className }: {
   files: readonly FileAttachmentItem[];
   onRemove?: (index: number) => void;
+  onPreview?: (path: string) => void;
   className?: string;
 }) {
   if (files.length === 0) return null;
@@ -22,7 +23,7 @@ export function FileAttachments({ files, onRemove, className }: {
         return (
           <div key={`${file.path}-${index}`} className="flex max-w-60 items-center gap-2 rounded-lg border border-border bg-background px-2 py-1.5 text-ui-sm">
             <Icon className="size-4 shrink-0 text-foreground-subtle" />
-            <button type="button" title={file.path} className="min-w-0 truncate text-left hover:underline" onClick={() => void hcode.invoke("app:showInFinder", file.path)}>
+            <button type="button" title={file.path} className="min-w-0 truncate text-left hover:underline" onClick={() => onPreview ? onPreview(file.path) : void hcode.invoke("app:showInFinder", file.path)}>
               {file.name}
             </button>
             {onRemove ? (

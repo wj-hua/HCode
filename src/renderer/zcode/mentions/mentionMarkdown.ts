@@ -93,8 +93,8 @@ export function buildPluginMentionMarkdown(label: string, pluginId: string): str
 
 type MentionTextPart =
   | { type: "text"; text: string }
-  | { type: "file"; label: string }
-  | { type: "directory"; label: string }
+  | { type: "file"; label: string; path?: string }
+  | { type: "directory"; label: string; path?: string }
   | { type: "skill"; label: string }
   | { type: "command"; label: string }
   | { type: "subagent"; label: string }
@@ -210,9 +210,9 @@ export function parseMentionMarkdown(content: string): MentionTextPart[] {
     } else if (isDirectoryMentionDestination(destination)) {
       // 目录 mention 之前只按普通 file 还原，消息回显层拿不到 folder 语义，
       // 于是文件夹候选在气泡里会继续显示成普通文件图标。这里根据链接目标是否以斜杠结尾恢复目录类型。
-      parts.push({ type: "directory", label: label.startsWith("@") ? label.slice(1) : label });
+      parts.push({ type: "directory", label: label.startsWith("@") ? label.slice(1) : label, path: unescapeMarkdownText(destination) });
     } else {
-      parts.push({ type: "file", label: label.startsWith("@") ? label.slice(1) : label });
+      parts.push({ type: "file", label: label.startsWith("@") ? label.slice(1) : label, path: unescapeMarkdownText(destination) });
     }
     cursor = matchStart + fullMatch.length;
   }

@@ -75,24 +75,31 @@ function V4UserInputMention({
   part,
   authoritativeGoal,
   pluginIcon,
+  onOpenFile,
 }: {
   part: Exclude<V4UserInputMentionPart, { type: "text" }>;
   authoritativeGoal: boolean;
   pluginIcon?: string;
+  onOpenFile?: (path: string) => void;
 }) {
   if (part.type === "file" || part.type === "directory") {
-    return (
-      <span className={mentionClassName("files")}>
-        <FileDisplayInline
-          path={part.label}
-          options={{
-            className: "inline-flex min-w-0 max-w-full items-center gap-1 align-middle",
-            iconSize: 16,
-            kind: part.type === "directory" ? "directory" : "file",
-            fileNameClassName: "truncate text-ui-base leading-6 font-medium text-current",
-          }}
-        />
-      </span>
+    const content = (
+      <FileDisplayInline
+        path={part.label}
+        options={{
+          className: "inline-flex min-w-0 max-w-full items-center gap-1 align-middle",
+          iconSize: 16,
+          kind: part.type === "directory" ? "directory" : "file",
+          fileNameClassName: "truncate text-ui-base leading-6 font-medium text-current",
+        }}
+      />
+    );
+    return onOpenFile ? (
+      <button type="button" className={cn(mentionClassName("files"), "cursor-pointer hover:underline")} title={part.path ?? part.label} onClick={() => onOpenFile(part.path ?? part.label)}>
+        {content}
+      </button>
+    ) : (
+      <span className={mentionClassName("files")}>{content}</span>
     );
   }
 
@@ -184,10 +191,12 @@ export const ConversationUserInputContent = memo(function ConversationUserInputC
   text,
   attachments = EMPTY_ATTACHMENTS,
   contextAttachmentCount = 0,
+  onOpenFile,
 }: {
   text: string;
   attachments?: readonly unknown[];
   contextAttachmentCount?: number;
+  onOpenFile?: (path: string) => void;
 }) {
   const pluginIconProjection = usePluginReferenceIconProjection();
   const goalQuery = parseV4UserInputGoalQuery(text, attachments, contextAttachmentCount);
@@ -212,6 +221,7 @@ export const ConversationUserInputContent = memo(function ConversationUserInputC
             key={`${part.type}-${index}`}
             part={part}
             authoritativeGoal={index === authoritativeGoalPartIndex}
+            onOpenFile={onOpenFile}
             pluginIcon={
               part.type === "plugin" && part.pluginId
                 ? pluginIconProjection?.iconByPluginId.get(part.pluginId)

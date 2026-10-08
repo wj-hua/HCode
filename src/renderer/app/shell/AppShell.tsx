@@ -7,6 +7,8 @@ import { CompareView } from "../conversation/CompareView";
 import { ConversationView } from "../conversation/ConversationView";
 import { hcode } from "../bridge";
 import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
+import { FilePreviewPanel } from "../conversation/FilePreviewPanel";
+import { useUiStore } from "../store/uiStore";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
@@ -30,13 +32,17 @@ export function AppShell() {
       return id ? Object.values(state.conversations).filter((conv) => conv.compareId === id) : [];
     }),
   );
-  const [diffViewId, setDiffViewId] = useState<string | null>(null);
+  const sidePanel = useUiStore((state) => state.sidePanel);
+  const setSidePanel = useUiStore((state) => state.setSidePanel);
+  const panelOwnerExists = useAppStore((state) => !sidePanel || !!state.conversations[sidePanel.viewId]);
+  const diffOpen = !isOfficeMode && sidePanel?.type === "diff" && sidePanel.viewId === conversation?.viewId;
+  const filePreview = sidePanel?.type === "file" && (sidePanel.viewId === conversation?.viewId || compareMembers.some((member) => member.viewId === sidePanel.viewId)) ? sidePanel : null;
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ id: string; rowId: number | null; key: number } | null>(null);
   useEffect(() => {
-    if (isOfficeMode) setDiffViewId(null);
-  }, [isOfficeMode]);
+    if (!panelOwnerExists || (isOfficeMode && sidePanel?.type === "diff")) setSidePanel(null);
+  }, [isOfficeMode, panelOwnerExists, sidePanel, setSidePanel]);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
   useGlobalShortcuts(openSearch, openQuickSwitch);
@@ -71,8 +77,8 @@ export function AppShell() {
           <section className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
             <Header
               conversation={conversation}
-              diffOpen={!isOfficeMode && !!conversation && diffViewId === conversation.viewId}
-              onToggleDiff={() => setDiffViewId(diffViewId === conversation?.viewId ? null : conversation?.viewId ?? null)}
+              diffOpen={diffOpen}
+              onToggleDiff={() => setSidePanel(diffOpen || !conversation ? null : { type: "diff", viewId: conversation.viewId })}
             />
             {conversation ? (
               <>
@@ -81,8 +87,19 @@ export function AppShell() {
                 ) : (
                   <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
                 )}
-                {!isOfficeMode && diffViewId === conversation.viewId ? (
-                  <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setDiffViewId(null)} />
+                {diffOpen ? (
+                  <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setSidePanel(null)} />
+                ) : null}
+                {filePreview ? (
+                  <FilePreviewPanel
+                    key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`}
+                    source={filePreview.source}
+                    onClose={() => setSidePanel(null)}
+                    onViewFile={() => {
+                      const { source, viewId } = filePreview;
+                      if (source.path) setSidePanel({ type: "file", viewId, source: { type: "file", title: source.title, path: source.path } });
+                    }}
+                  />
                 ) : null}
               </>
             ) : (
