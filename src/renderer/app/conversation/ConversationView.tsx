@@ -24,6 +24,7 @@ export function ConversationView({
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
+  const lastScrollTopRef = useRef(0);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
@@ -59,7 +60,10 @@ export function ConversationView({
     const el = scrollRef.current;
     if (!el) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickRef.current = distance < STICK_THRESHOLD_PX;
+    // 内容增长（如刚发送的新消息）会让距离变大但 scrollTop 不会变小；只有用户向上滚才取消跟随。
+    if (distance < STICK_THRESHOLD_PX) stickRef.current = true;
+    else if (el.scrollTop < lastScrollTopRef.current) stickRef.current = false;
+    lastScrollTopRef.current = el.scrollTop;
     setShowJump(distance > STICK_THRESHOLD_PX * 4);
   };
 
