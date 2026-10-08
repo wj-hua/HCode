@@ -329,6 +329,8 @@ export interface Settings {
   defaultModels: Record<AgentKind, string>;
   /** 输入框里最近选择的思考强度（空串 = CLI 默认），新建会话沿用。 */
   defaultEfforts: Record<AgentKind, string>;
+  /** 置顶会话的 agent:sessionId 键；仅影响所属项目内的会话排序。 */
+  pinnedSessions: string[];
   /** 有会话正在运行时阻止电脑休眠（显示器仍可关闭）。 */
   preventSleepWhileRunning: boolean;
   /** 任务开始、完成、出错或等待审批时通知；后台发送系统通知。 */
@@ -355,6 +357,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultPermissionModes: { claude: "default", codex: "on-request", step: "ask", agy: "default", pi: "default" },
   defaultModels: { claude: "", codex: "", step: "", agy: "", pi: "" },
   defaultEfforts: { claude: "", codex: "", step: "", agy: "", pi: "" },
+  pinnedSessions: [],
   preventSleepWhileRunning: true,
   notifyOnFinish: true,
   notificationSound: "system",

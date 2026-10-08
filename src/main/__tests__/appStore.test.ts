@@ -73,6 +73,7 @@ describe("AppStore.updateSettings", () => {
     );
     const { settings } = new AppStore(dir);
     expect(settings.theme).toBe("dark");
+    expect(settings.pinnedSessions).toEqual([]);
     expect(settings.agentPaths).toEqual({ ...DEFAULT_SETTINGS.agentPaths, claude: "/old/claude" });
     expect(settings.defaultPermissionModes.claude).toBe("plan");
     expect(settings.defaultModels.claude).toBe("sonnet");
@@ -98,5 +99,24 @@ describe("AppStore.updateSettings", () => {
     expect(new AppStore(dir).settings.interfaceMode).toBe("office");
     store.updateSettings({ interfaceMode: "coding" });
     expect(new AppStore(dir).settings.interfaceMode).toBe("coding");
+  });
+
+  it("置顶记录重启后保留，删除时只清理对应 CLI 的会话并持久化", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    const store = new AppStore(dir);
+    const pinnedSessions = ["claude:same", "codex:same", "step:other", "pi:other", "agy:other"];
+    store.updateSettings({ pinnedSessions });
+    store.updateSettings({ theme: "dark" });
+
+    const restarted = new AppStore(dir);
+    expect(restarted.settings.pinnedSessions).toEqual(pinnedSessions);
+    expect(restarted.removeSessionPin({ agent: "claude", id: "same" }).pinnedSessions)
+      .toEqual(pinnedSessions.slice(1));
+    expect(new AppStore(dir).settings.pinnedSessions).toEqual(pinnedSessions.slice(1));
+    restarted.removeSessionPin({ agent: "codex", id: "same" });
+    expect(new AppStore(dir).settings.pinnedSessions).toEqual(pinnedSessions.slice(2));
+    expect(restarted.removeSessionPin({ agent: "claude", id: "missing" }).pinnedSessions)
+      .toEqual(pinnedSessions.slice(2));
+    expect(restarted.settings.theme).toBe("dark");
   });
 });

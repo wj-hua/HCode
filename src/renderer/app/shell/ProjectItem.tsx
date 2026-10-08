@@ -11,6 +11,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMemo, useState, type CSSProperties, type MouseEvent } from "react";
 import type { Project } from "@hcode/shared/types";
+import { sessionPinKey, sortSessionsWithPins } from "@hcode/shared/sessionPins";
 import { Button, buttonVariants } from "@/components/ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible.js";
 import {
@@ -101,6 +102,7 @@ export function ProjectItem({
 }) {
   const expanded = useAppStore((state) => state.expanded[project.path] ?? false);
   const sessions = useAppStore((state) => state.sessions[project.path]);
+  const pinnedSessions = useAppStore((state) => state.settings.pinnedSessions);
   const toggleProject = useAppStore((state) => state.toggleProject);
   const newChat = useAppStore((state) => state.newChat);
   const setProjectPinned = useAppStore((state) => state.setProjectPinned);
@@ -120,9 +122,10 @@ export function ProjectItem({
   const [focusWithin, setFocusWithin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const sorted = useMemo(() => sortSessionsWithPins(sessions ?? [], pinnedSessions), [sessions, pinnedSessions]);
   const filtered = query
-    ? (sessions ?? []).filter((session) => session.title.toLowerCase().includes(query))
-    : (sessions ?? []);
+    ? sorted.filter((session) => session.title.toLowerCase().includes(query))
+    : sorted;
   const isOpen = !collapsed && (expanded || (query.length > 0 && filtered.length > 0));
   const visible = filtered.slice(0, limit);
   // 与 ZCode 一致：操作按钮只在交互时挂载，菜单打开时保活。
@@ -260,7 +263,7 @@ export function ProjectItem({
                 ) : (
                   <ul className="space-y-0.5">
                     {visible.map((session) => (
-                      <SessionItem key={session.id} session={session} />
+                      <SessionItem key={sessionPinKey(session)} session={session} />
                     ))}
                   </ul>
                 )}

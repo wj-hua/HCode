@@ -52,7 +52,8 @@ export interface InvokeMap {
   "sessions:load": [[ref: SessionRef], SessionLoadResult];
   "sessions:search": [[query: string], SessionSearchResult[]];
   "sessions:rename": [[ref: SessionRef, title: string], void];
-  "sessions:delete": [[ref: SessionRef], void];
+  /** 删除 / 归档成功后清理置顶记录，返回最新设置。 */
+  "sessions:delete": [[ref: SessionRef], Settings];
   /** 分叉出新会话；回退到第一条消息之前时没有可保留的内容，返回 null。 */
   "sessions:fork": [[params: ForkParams], SessionSummary | null];
   "chat:send": [[params: ChatSendParams], { sessionKey: string }];

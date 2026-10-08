@@ -23,6 +23,7 @@ import type {
   SettingsPatch,
 } from "@hcode/shared/types";
 import { DEFAULT_SETTINGS } from "@hcode/shared/types";
+import { sessionPinKey } from "@hcode/shared/sessionPins";
 import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
@@ -132,6 +133,7 @@ interface AppState {
   /** 拖动排序：把 activePath 移到 overPath 所在位置。 */
   reorderProjects(activePath: string, overPath: string): Promise<void>;
   renameSession(summary: SessionSummary, title: string): Promise<void>;
+  setSessionPinned(summary: SessionSummary, pinned: boolean): Promise<void>;
   /** 删除会话（Codex 为归档），并关闭已打开的对话视图。 */
   deleteSession(summary: SessionSummary): Promise<void>;
   /** 从当前会话的某条用户消息分叉出新会话并打开；回退时把这条消息放回新会话的输入框。 */
@@ -233,6 +235,8 @@ function rowAttachments(row: Extract<ConversationRow, { kind: "userInput" }>): {
 let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
+  // 连续置顶不同会话时逐次读取最新设置，避免后一次补丁覆盖前一次。
+  let pinUpdate = Promise.resolve();
   const patchConversation = (viewId: string, patch: Partial<Conversation>) =>
     set((state) => {
       const current = state.conversations[viewId];
@@ -720,12 +724,25 @@ export const useAppStore = create<AppState>((set, get) => {
       await get().loadSessions(summary.projectPath);
     },
 
+    setSessionPinned(summary, pinned) {
+      pinUpdate = pinUpdate.then(async () => {
+        const key = sessionPinKey(summary);
+        const current = get().settings.pinnedSessions;
+        const next = pinned ? [...new Set([...current, key])] : current.filter((item) => item !== key);
+        await get().updateSettings({ pinnedSessions: next });
+      }).catch((error) => {
+        toast(`置顶设置失败：${errorMessage(error)}`, { variant: "warning" });
+      });
+      return pinUpdate;
+    },
+
     async deleteSession(summary) {
-      const conv = Object.values(get().conversations).find((c) => c.sessionId === summary.id);
+      const conv = Object.values(get().conversations).find((c) => c.agent === summary.agent && c.sessionId === summary.id);
       try {
         // 先关闭主进程里的活动会话，避免 CLI 进程继续写已删除的会话文件
         if (conv?.sessionKey) await hcode.invoke("chat:close", conv.sessionKey);
-        await hcode.invoke("sessions:delete", { agent: summary.agent, id: summary.id, projectPath: summary.projectPath });
+        const settings = await hcode.invoke("sessions:delete", { agent: summary.agent, id: summary.id, projectPath: summary.projectPath });
+        set({ settings });
       } catch (error) {
         toast(`删除失败：${errorMessage(error)}`, { variant: "warning" });
         return;

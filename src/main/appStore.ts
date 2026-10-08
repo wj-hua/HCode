@@ -1,7 +1,8 @@
 // HCode 自己的少量持久化数据：设置、用户手动添加/置顶的项目。对话内容不在这里。
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_SETTINGS, normalizeInterfaceMode, type Settings, type SettingsPatch } from "../shared/types.js";
+import { DEFAULT_SETTINGS, normalizeInterfaceMode, type SessionSummary, type Settings, type SettingsPatch } from "../shared/types.js";
+import { sessionPinKey } from "../shared/sessionPins.js";
 
 interface ProjectPrefs {
   pinned: string[];
@@ -109,6 +110,12 @@ export class AppStore {
   updateProjects(update: (prefs: ProjectPrefs) => ProjectPrefs) {
     this.projects = update(this.projects);
     writeJson(this.projectsPath, this.projects);
+  }
+
+  removeSessionPin(session: Pick<SessionSummary, "agent" | "id">): Settings {
+    const key = sessionPinKey(session);
+    if (!this.settings.pinnedSessions.includes(key)) return this.settings;
+    return this.updateSettings({ pinnedSessions: this.settings.pinnedSessions.filter((item) => item !== key) });
   }
 
   readWindowState(): WindowState {

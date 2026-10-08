@@ -228,7 +228,10 @@ async function bootstrap() {
     return searchSessions(agents, query, () => generation !== searchGeneration);
   });
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
-  handle("sessions:delete", (ref) => agents.get(ref.agent).deleteSession(ref.id, ref.projectPath));
+  handle("sessions:delete", async (ref) => {
+    await agents.get(ref.agent).deleteSession(ref.id, ref.projectPath);
+    return store.removeSessionPin(ref);
+  });
   handle("sessions:fork", (params) => {
     const provider = agents.get(params.ref.agent);
     if (!provider.forkSession) throw new Error(`${AGENTS[params.ref.agent].name} 不支持分叉会话`);

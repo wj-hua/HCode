@@ -1,6 +1,7 @@
-import { LoaderIcon, SquareTerminalIcon } from "lucide-react";
+import { LoaderIcon, PinIcon, PinOffIcon, SquareTerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { SessionSummary } from "@hcode/shared/types";
+import { sessionPinKey } from "@hcode/shared/sessionPins";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,8 +32,10 @@ export function SessionItem({ session }: { session: SessionSummary }) {
   const openSession = useAppStore((state) => state.openSession);
   const renameSession = useAppStore((state) => state.renameSession);
   const deleteSession = useAppStore((state) => state.deleteSession);
+  const setSessionPinned = useAppStore((state) => state.setSessionPinned);
+  const pinned = useAppStore((state) => state.settings.pinnedSessions.includes(sessionPinKey(session)));
   const conversation = useAppStore((state) =>
-    Object.values(state.conversations).find((conv) => conv.sessionId === session.id),
+    Object.values(state.conversations).find((conv) => conv.agent === session.agent && conv.sessionId === session.id),
   );
   const isActive = useAppStore(
     (state) => state.activeViewId !== null && state.activeViewId === conversation?.viewId,
@@ -122,6 +125,11 @@ export function SessionItem({ session }: { session: SessionSummary }) {
                 {!renaming ? (
                   <span className="mr-0.5 flex shrink-0 items-center gap-1.5 text-ui-sm text-foreground-subtle">
                     {/* 左侧 16px 槽只放状态（与 ZCode 一致，空闲时留空以体现层级）；CLI 徽标归入右侧元信息。 */}
+                    {pinned ? (
+                      <span title="已置顶" aria-label="已置顶">
+                        <PinIcon aria-hidden="true" className="size-3 text-foreground-subtlest" />
+                      </span>
+                    ) : null}
                     <AgentBadge agent={session.agent} className="opacity-70" />
                     {formatCompactRelativeTime(session.updatedAt)}
                   </span>
@@ -131,6 +139,10 @@ export function SessionItem({ session }: { session: SessionSummary }) {
           </li>
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-44">
+          <ContextMenuItem onSelect={() => void setSessionPinned(session, !pinned)}>
+            {pinned ? <PinOffIcon /> : <PinIcon />}
+            {pinned ? "取消置顶" : "置顶"}
+          </ContextMenuItem>
           <ContextMenuItem onSelect={() => setRenaming(true)}>重命名</ContextMenuItem>
           <ContextMenuItem onSelect={() => void hcode.invoke("app:copyText", session.id)}>
             复制会话 ID
