@@ -4,6 +4,7 @@ import type {
   AgentQuota,
   AgentStatus,
   ModelOption,
+  UsageStats,
   ChatRowsEvent,
   ChatSendParams,
   ChatStateEvent,
@@ -90,6 +91,8 @@ export interface InvokeMap {
   "app:saveText": [[defaultName: string, text: string], string | null];
   /** 显示并聚焦主窗口（点击系统通知时用）。 */
   "app:focusWindow": [[], void];
+  "usage:get": [[], UsageStats];
+  "usage:clear": [[], void];
   "settings:get": [[], Settings];
   "settings:set": [[patch: SettingsPatch], Settings];
 }
@@ -167,6 +170,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "app:copyText",
   "app:saveText",
   "app:focusWindow",
+  "usage:get",
+  "usage:clear",
   "settings:get",
   "settings:set",
 ];

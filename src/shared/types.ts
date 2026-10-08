@@ -214,6 +214,16 @@ export interface ChatUsage {
   outputTokens?: number;
 }
 
+/** 某天、某 CLI、某模型累计的 Token 与完成的轮数。 */
+export interface UsageBucket {
+  input: number;
+  output: number;
+  turns: number;
+}
+
+/** 本地日期（YYYY-MM-DD）→ CLI → 模型 → 累计用量；只统计 HCode 内发起的轮次。 */
+export type UsageStats = Record<string, Partial<Record<AgentKind, Record<string, UsageBucket>>>>;
+
 export interface PermissionRequestEvent {
   sessionKey: string;
   interactionId: string;

@@ -1,7 +1,7 @@
 // HCode 自己的少量持久化数据：设置、用户手动添加/置顶的项目。对话内容不在这里。
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_SETTINGS, normalizeInterfaceMode, type SessionSummary, type Settings, type SettingsPatch } from "../shared/types.js";
+import { DEFAULT_SETTINGS, normalizeInterfaceMode, type AgentKind, type SessionSummary, type Settings, type SettingsPatch, type UsageStats } from "../shared/types.js";
 import { sessionPinKey } from "../shared/sessionPins.js";
 
 interface ProjectPrefs {
@@ -90,6 +90,7 @@ export class AppStore {
   private readonly settingsPath: string;
   private readonly projectsPath: string;
   private readonly windowPath: string;
+  private readonly usagePath: string;
   settings: Settings;
   projects: ProjectPrefs;
 
@@ -98,6 +99,7 @@ export class AppStore {
     this.settingsPath = join(dataDir, "settings.json");
     this.projectsPath = join(dataDir, "projects.json");
     this.windowPath = join(dataDir, "window.json");
+    this.usagePath = join(dataDir, "usage.json");
     this.settings = migrateSettings(readJson<Record<string, unknown>>(this.settingsPath, {}));
     this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [] });
   }
@@ -117,6 +119,25 @@ export class AppStore {
     const key = sessionPinKey(session);
     if (!this.settings.pinnedSessions.includes(key)) return this.settings;
     return this.updateSettings({ pinnedSessions: this.settings.pinnedSessions.filter((item) => item !== key) });
+  }
+
+  readUsage(): UsageStats {
+    return readJson<UsageStats>(this.usagePath, {});
+  }
+
+  /** 把一轮对话的 Token 累加到今天（本地日期）× CLI × 模型。 */
+  recordUsage(agent: AgentKind, model: string, input: number, output: number, now = new Date()) {
+    const stats = this.readUsage();
+    const day = (stats[now.toLocaleDateString("en-CA")] ??= {});
+    const bucket = ((day[agent] ??= {})[model] ??= { input: 0, output: 0, turns: 0 });
+    bucket.input += input;
+    bucket.output += output;
+    bucket.turns += 1;
+    writeJson(this.usagePath, stats);
+  }
+
+  clearUsage() {
+    writeJson(this.usagePath, {});
   }
 
   readWindowState(): WindowState {

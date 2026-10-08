@@ -14,6 +14,7 @@ import {
   playNotificationSound,
 } from "../notificationSound";
 import { ExtensionsSection } from "./ExtensionsSection";
+import { UsageSection } from "./UsageSection";
 
 function Segmented<T extends string>({
   value,
@@ -253,7 +254,7 @@ export function SettingsDialog() {
   const setOpen = useAppStore((state) => state.setSettingsOpen);
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
-  const [tab, setTab] = useState<"general" | "extensions">("general");
+  const [tab, setTab] = useState<"general" | "usage" | "extensions">("general");
 
   const update = (patch: SettingsPatch) => void updateSettings(patch);
 
@@ -266,9 +267,10 @@ export function SettingsDialog() {
         </DialogHeader>
         <div className="flex gap-1 border-b border-border pb-2">
           <Button variant={tab === "general" ? "secondary" : "ghost"} size="sm" onClick={() => setTab("general")}>常规</Button>
+          <Button variant={tab === "usage" ? "secondary" : "ghost"} size="sm" onClick={() => setTab("usage")}>用量</Button>
           <Button variant={tab === "extensions" ? "secondary" : "ghost"} size="sm" onClick={() => setTab("extensions")}>MCP / Skills</Button>
         </div>
-        {tab === "extensions" ? <ExtensionsSection open={open} /> : <div className="flex flex-col divide-y divide-border/60">
+        {tab === "extensions" ? <ExtensionsSection open={open} /> : tab === "usage" ? <UsageSection open={open} /> : <div className="flex flex-col divide-y divide-border/60">
           <Row label="主题">
             <Segmented
               value={settings.theme}
