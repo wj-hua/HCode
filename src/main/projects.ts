@@ -1,13 +1,13 @@
-// 项目列表 = 用户手动添加的目录；会话只用来统计各项目的会话数和最近活跃时间。
+// 工作区索引：用户项目与应用管理的对话目录分别归类，会话提供活动时间和数量。
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { Project, SessionSummary } from "../shared/types.js";
 import type { AppStore } from "./appStore.js";
 
-export function buildProjects(sessions: readonly SessionSummary[], store: AppStore): Project[] {
+export function buildProjects(sessions: readonly SessionSummary[], store: AppStore, conversationPath: string): Project[] {
   const { pinned, manual } = store.projects;
   const byPath = new Map<string, Project>(
-    manual.map((path) => [
+    manual.filter((path) => path !== conversationPath).map((path) => [
       path,
       {
         path,
@@ -19,9 +19,18 @@ export function buildProjects(sessions: readonly SessionSummary[], store: AppSto
       },
     ]),
   );
+  const conversation: Project = {
+    path: conversationPath,
+    name: "对话",
+    purpose: "conversation",
+    lastActiveAt: 0,
+    sessionCount: 0,
+    pinned: false,
+    exists: existsSync(conversationPath),
+  };
 
   for (const session of sessions) {
-    const project = byPath.get(session.projectPath);
+    const project = session.projectPath === conversationPath ? conversation : byPath.get(session.projectPath);
     if (!project) continue;
     project.sessionCount += 1;
     project.lastActiveAt = Math.max(project.lastActiveAt, session.updatedAt);
@@ -35,8 +44,9 @@ export function buildProjects(sessions: readonly SessionSummary[], store: AppSto
 
   // 置顶在前，其余保持用户拖动后的顺序（sort 是稳定的）
   const order = new Map(store.projects.manual.map((path, index) => [path, index]));
-  return [...byPath.values()].sort((a, b) => {
+  const projects = [...byPath.values()].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0);
   });
+  return [...projects, conversation];
 }

@@ -22,6 +22,7 @@ export function ConversationView({
   column?: boolean;
 }) {
   const permissions = useAppStore((state) => state.permissions);
+  const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -89,7 +90,7 @@ export function ConversationView({
               ) : conversation.rows.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-24 text-center">
                   <div className="text-ui-lg font-medium text-foreground">和 {AGENTS[conversation.agent].name} 开始对话</div>
-                  <div className="text-ui-base text-foreground-subtle">工作目录：{conversation.projectPath}</div>
+                  <div className="text-ui-base text-foreground-subtle">{outsideProject ? "不在项目中工作" : `工作目录：${conversation.projectPath}`}</div>
                 </div>
               ) : (
                 <Timeline

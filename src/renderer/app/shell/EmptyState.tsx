@@ -1,4 +1,4 @@
-import { FolderIcon, FolderPlusIcon } from "lucide-react";
+import { FolderIcon, FolderPlusIcon, MessageCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { formatRelativeTime, shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
@@ -8,10 +8,12 @@ export function EmptyState() {
   const newChat = useAppStore((state) => state.newChat);
   const toggleProject = useAppStore((state) => state.toggleProject);
   const addProject = useAppStore((state) => state.addProject);
+  const workOutsideProject = useAppStore((state) => state.workOutsideProject);
+  const pending = useAppStore((state) => state.conversationWorkspacePending);
   const agentStatuses = useAppStore((state) => state.agentStatuses);
   const noAgent = agentStatuses !== null && agentStatuses.every((status) => !status.found);
   const setSettingsOpen = useAppStore((state) => state.setSettingsOpen);
-  const recent = projects.filter((project) => project.exists).slice(0, 6);
+  const recent = projects.filter((project) => project.exists && project.purpose !== "conversation").slice(0, 6);
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-8">
@@ -19,7 +21,7 @@ export function EmptyState() {
         <div className="flex flex-col gap-1.5">
           <h1 className="text-ui-xl font-semibold text-foreground">开始一个新会话</h1>
           <p className="text-ui-base text-foreground-subtle">
-            选择项目后用 Claude Code、Codex、StepCode、Antigravity 或 pi 开始对话，或者从左侧打开历史会话继续。
+            选择项目或不在项目中工作，用 Claude Code、Codex、StepCode、Antigravity 或 pi 开始对话。
           </p>
         </div>
         {noAgent ? (
@@ -60,6 +62,10 @@ export function EmptyState() {
           >
             <FolderPlusIcon className="size-4 shrink-0" />
             <span className="text-ui-base">添加项目文件夹…</span>
+          </button>
+          <button type="button" disabled={pending} onClick={() => void workOutsideProject(true)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground-subtle hover:bg-surface-hover hover:text-foreground disabled:opacity-50">
+            <MessageCircleIcon className="size-4 shrink-0" />
+            <span className="text-ui-base">{pending ? "打开对话中…" : "不在项目中工作"}</span>
           </button>
         </div>
       </div>

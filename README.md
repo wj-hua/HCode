@@ -3,6 +3,7 @@
 macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZCode)。支持 **Claude Code**、**Codex**、**StepCode**、**Antigravity** 与 **pi** 五个 CLI（同一套界面，会话按项目混排）：
 
 - 项目列表：手动添加、置顶或移除项目文件夹；根据各 CLI 的会话统计已添加项目的会话数和最近活动时间
+- 不在项目中工作：从首页、输入框项目菜单或侧边栏“对话”旁的 + 开始非项目会话；草稿切换保留文字与附件，历史归入独立的“对话”分区，支持五种 CLI
 - 会话置顶：右键置顶常用会话，在所属项目内优先显示，重启后保留；删除或归档时自动清理置顶记录
 - 会话历史：按已添加的项目列出各 CLI 的历史会话（包括终端里创建的），用 ZCode 卡片查看完整对话
 - 新建会话 / 续聊历史会话，流式输出，随时停止（Esc）
@@ -50,6 +51,8 @@ Electron 主进程为每个 CLI 实现 `AgentProvider`，由 `AgentRegistry` 按
 | pi | 读取 `~/.pi/agent/sessions` 的会话 JSONL | 与 StepCode 同一套代码：每个会话一个 `pi --mode rpc` 进程 |
 
 项目列表只包含手动添加的文件夹。若某个 CLI 的历史会话属于尚未添加的目录，需先添加该项目文件夹，才能从侧边栏查看会话。
+
+非项目对话无需添加文件夹。HCode 在自己的应用数据目录中管理共享工作目录，正式版为 `~/Library/Application Support/HCode/workspace/default`，开发版为 `~/Library/Application Support/HCode-dev/workspace/default`。目录在首次使用时创建，重启后保留生成的文件，各 CLI 的历史仍由原 CLI 保存。它不会进入最近项目列表，也不会改变所选 CLI 的权限模式；需要处理已有项目时，可在未发送的草稿中重新选择项目。
 
 ## 结构
 

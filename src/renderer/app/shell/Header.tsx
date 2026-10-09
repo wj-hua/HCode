@@ -12,6 +12,8 @@ import { useAppStore, type Conversation } from "../store/appStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
 export function Header({ conversation, diffOpen, onToggleDiff }: { conversation: Conversation | undefined; diffOpen: boolean; onToggleDiff: () => void }) {
+  const project = useAppStore((state) => state.projects.find((item) => item.path === conversation?.projectPath));
+  const outsideProject = project?.purpose === "conversation";
   const isOfficeMode = useIsOfficeMode();
   const [gitProject, setGitProject] = useState<string | null>(null);
   useEffect(() => {
@@ -31,7 +33,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
       ? state.sessions[conversation.projectPath]?.find((item) => item.id === conversation.sessionId)
       : undefined,
   );
-  const projectName = conversation?.projectPath.split("/").filter(Boolean).at(-1);
+  const projectName = project?.name ?? conversation?.projectPath.split("/").filter(Boolean).at(-1);
   const title = summary?.title ?? conversation?.title ?? (conversation ? "新会话" : "");
 
   return (
@@ -103,7 +105,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
           </ControlHintTooltip>
           {!isOfficeMode ? (
             <ControlHintTooltip
-              title={conversation.sessionId ? "在终端中继续此会话" : "在终端中打开项目"}
+              title={conversation.sessionId ? "在终端中继续此会话" : outsideProject ? "在终端中打开对话目录" : "在终端中打开项目"}
               side="bottom"
             >
               <Button

@@ -34,6 +34,7 @@ import { useAppStore } from "../store/appStore";
 import { SortableProjectItem } from "./ProjectItem";
 import { QuotaIndicator } from "./QuotaIndicator";
 import { RunningTasks } from "./RunningTasks";
+import { ConversationSection } from "./ConversationSection";
 
 const SECTION_CHEVRON_CLASS =
   "size-3.5 shrink-0 opacity-0 transition-opacity group-hover/purpose-section:opacity-100 group-focus-within/purpose-section:opacity-100";
@@ -59,6 +60,8 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const reorderProjects = useAppStore((state) => state.reorderProjects);
   const projects = useAppStore((state) => state.projects);
+  const conversationWorkspace = projects.find((project) => project.purpose === "conversation");
+  const workOutsideProject = useAppStore((state) => state.workOutsideProject);
   const search = useAppStore((state) => state.search);
   const setSearch = useAppStore((state) => state.setSearch);
   const addProject = useAppStore((state) => state.addProject);
@@ -78,8 +81,9 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
     setDragWidth(null);
   };
   const visibleProjects = useMemo(() => {
-    if (!query) return projects;
-    return projects.filter(
+    const regularProjects = projects.filter((project) => project.purpose !== "conversation");
+    if (!query) return regularProjects;
+    return regularProjects.filter(
       (project) =>
         project.name.toLowerCase().includes(query) ||
         project.path.toLowerCase().includes(query) ||
@@ -108,9 +112,9 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
             size="icon-md"
             className="app-no-drag text-foreground-subtle"
             onClick={() => {
-              const path = activeProjectPath ?? projects[0]?.path;
+              const path = activeProjectPath ?? projects.find((project) => project.purpose !== "conversation")?.path;
               if (path) newChat(path);
-              else void addProject();
+              else void workOutsideProject(true);
             }}
           >
             <SquarePenIcon />
@@ -222,6 +226,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
               </CollapsibleContent>
             </Collapsible>
           </section>
+          {conversationWorkspace ? <ConversationSection workspace={conversationWorkspace} query={query} /> : null}
         </div>
       </ScrollFadeViewport>
 

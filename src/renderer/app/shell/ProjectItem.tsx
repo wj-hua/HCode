@@ -102,6 +102,8 @@ export function ProjectItem({
 }) {
   const expanded = useAppStore((state) => state.expanded[project.path] ?? false);
   const sessions = useAppStore((state) => state.sessions[project.path]);
+  const sessionError = useAppStore((state) => state.sessionErrors[project.path]);
+  const loadSessions = useAppStore((state) => state.loadSessions);
   const pinnedSessions = useAppStore((state) => state.settings.pinnedSessions);
   const toggleProject = useAppStore((state) => state.toggleProject);
   const newChat = useAppStore((state) => state.newChat);
@@ -253,7 +255,12 @@ export function ProjectItem({
           <div className="flex flex-col gap-2">
             <div>
               <div className="space-y-1">
-                {sessions === undefined ? (
+                {sessionError ? (
+                  <div role="alert" className="px-2.5 py-1 text-ui-sm text-destructive">
+                    读取会话失败：{sessionError}
+                    <button type="button" className="ml-2 underline" onClick={() => void loadSessions(project.path)}>重试</button>
+                  </div>
+                ) : sessions === undefined ? (
                   <div className="flex items-center gap-2 px-2.5 py-1 text-ui-base text-foreground-subtlest">
                     <Spinner className="size-4 text-foreground-subtlest" />
                     <span>正在获取会话...</span>

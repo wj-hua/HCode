@@ -135,9 +135,9 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void)
           return true;
         case "newChat": {
           const active = state.activeViewId ? state.conversations[state.activeViewId] : undefined;
-          const projectPath = active?.projectPath ?? state.projects[0]?.path;
+          const projectPath = active?.projectPath ?? state.projects.find((project) => project.purpose !== "conversation")?.path;
           if (projectPath) state.newChat(projectPath);
-          else void state.addProject();
+          else void state.workOutsideProject(true);
           return true;
         }
         case "openProject":
