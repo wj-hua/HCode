@@ -76,8 +76,8 @@ export interface InvokeMap {
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "fs:listProjectFiles": [[cwd: string, query: string], string[]];
   "fs:stageAttachment": [[file: { name: string; data: string }], string];
-  /** 读取提示音文件；不存在、不是文件或超过大小上限时返回 null。 */
-  "fs:readAudio": [[path: string], Uint8Array | null];
+  /** 读取提示音、预览图片等二进制文件（上限 10 MiB）；不存在、不是文件或超限时返回 null。 */
+  "fs:readMedia": [[path: string], Uint8Array | null];
   /** 弹出文件选择框挑一个音频文件，取消返回 null。 */
   "app:pickAudio": [[], string | null];
   /** 弹出文件选择框挑一张图片或一个视频作为应用背景，取消返回 null。 */
@@ -160,7 +160,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "fs:stat",
   "fs:listProjectFiles",
   "fs:stageAttachment",
-  "fs:readAudio",
+  "fs:readMedia",
   "app:pickAudio",
   "app:pickBackground",
   "app:openPath",

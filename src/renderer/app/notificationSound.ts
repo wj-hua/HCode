@@ -35,7 +35,7 @@ async function play(src: string, revoke = false) {
 }
 
 async function playFile(path: string): Promise<boolean> {
-  const bytes = path ? await hcode.invoke("fs:readAudio", path) : null;
+  const bytes = path ? await hcode.invoke("fs:readMedia", path) : null;
   if (!bytes) return false;
   await play(URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>])), true);
   return true;

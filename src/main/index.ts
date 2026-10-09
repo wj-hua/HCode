@@ -333,7 +333,7 @@ async function bootstrap() {
     }
   });
   handle("fs:listProjectFiles", (cwd, query) => listProjectFiles(cwd, query));
-  handle("fs:readAudio", async (path) => {
+  handle("fs:readMedia", async (path) => {
     try {
       const info = await stat(path);
       if (!info.isFile() || info.size > 10 * 1024 * 1024) return null;

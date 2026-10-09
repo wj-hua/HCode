@@ -7,6 +7,7 @@ import { CompareView } from "../conversation/CompareView";
 import { ConversationView } from "../conversation/ConversationView";
 import { hcode } from "../bridge";
 import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
+import { FilePreviewProvider } from "../conversation/FilePreviewContext";
 import { FilePreviewPanel } from "../conversation/FilePreviewPanel";
 import { useUiStore } from "../store/uiStore";
 import { SettingsDialog } from "../settings/SettingsDialog";
@@ -94,15 +95,13 @@ export function AppShell() {
                   <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setSidePanel(null)} />
                 ) : null}
                 {filePreview ? (
-                  <FilePreviewPanel
-                    key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`}
-                    source={filePreview.source}
-                    onClose={() => setSidePanel(null)}
-                    onViewFile={() => {
-                      const { source, viewId } = filePreview;
-                      if (source.path) setSidePanel({ type: "file", viewId, source: { type: "file", title: source.title, path: source.path } });
-                    }}
-                  />
+                  <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
+                    <FilePreviewPanel
+                      key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`}
+                      source={filePreview.source}
+                      onClose={() => setSidePanel(null)}
+                    />
+                  </FilePreviewProvider>
                 ) : null}
               </>
             ) : (
