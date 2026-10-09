@@ -1,4 +1,4 @@
-import { FolderIcon, LoaderIcon, SearchIcon } from "lucide-react";
+import { FolderIcon, LoaderIcon, MessageCircleIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.js";
 import type { Project, SessionSummary } from "@hcode/shared/types";
@@ -67,6 +67,7 @@ export function QuickSwitchDialog({ open, onOpenChange }: { open: boolean; onOpe
     state.toggleProject(result.project.path, true);
     const opened = Object.values(state.conversations).find((conv) => conv.projectPath === result.project.path);
     if (opened) state.activateView(opened.viewId);
+    else if (result.project.purpose === "conversation") void state.workOutsideProject(true);
     else state.newChat(result.project.path);
   };
 
@@ -113,7 +114,7 @@ export function QuickSwitchDialog({ open, onOpenChange }: { open: boolean; onOpe
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left outline-none hover:bg-surface-hover aria-selected:bg-selected focus-visible:ring-2 focus-visible:ring-ring"
             >
               {result.kind === "project" ? (
-                <><FolderIcon className="size-4 shrink-0 text-foreground-subtle" /><span className="min-w-0 flex-1 truncate text-ui-base">{result.project.name}</span><span className="max-w-48 truncate text-ui-xs text-foreground-subtlest">{shortenHome(result.project.path)}</span></>
+                <>{result.project.purpose === "conversation" ? <MessageCircleIcon className="size-4 shrink-0 text-foreground-subtle" /> : <FolderIcon className="size-4 shrink-0 text-foreground-subtle" />}<span className="min-w-0 flex-1 truncate text-ui-base">{result.project.name}</span><span className="max-w-48 truncate text-ui-xs text-foreground-subtlest">{result.project.purpose === "conversation" ? "不在项目中工作" : shortenHome(result.project.path)}</span></>
               ) : (
                 <><span className="size-4 shrink-0 text-center text-ui-xs text-foreground-subtle">●</span><span className="min-w-0 flex-1 truncate text-ui-base">{result.session.title}</span><span className="max-w-48 truncate text-ui-xs text-foreground-subtlest">{AGENTS[result.session.agent].name} · {shortenHome(result.session.projectPath)}</span></>
               )}

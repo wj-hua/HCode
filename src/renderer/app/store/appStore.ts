@@ -32,6 +32,7 @@ import { applyRowOps } from "../rows";
 import { drafts, fileDrafts, imageDrafts } from "../composer/drafts";
 import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
+import { selectConversationWorkspace } from "./conversationWorkspaceActions";
 import { discardTurnHistory, loadTurnHistory, saveTurnHistory, turnDiffPatch } from "../conversation/turnHistory";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
@@ -81,13 +82,15 @@ export interface Conversation {
   compareId?: string;
 }
 
-interface AppState {
+export interface AppState {
   ready: boolean;
   settings: Settings;
   agentStatuses: AgentStatus[] | null;
   models: Partial<Record<AgentKind, ModelOption[]>>;
   projects: Project[];
   sessions: Record<string, SessionSummary[]>;
+  sessionErrors: Record<string, string | undefined>;
+  conversationWorkspacePending: boolean;
   expanded: Record<string, boolean>;
   search: string;
   conversations: Record<string, Conversation>;
@@ -106,6 +109,8 @@ interface AppState {
   setSearch(search: string): void;
   openSession(summary: SessionSummary): Promise<void>;
   newChat(projectPath: string, agent?: AgentKind): void;
+  /** 选择非项目目录；newDraft 为 true 时从独立入口新建，而不迁移当前草稿。 */
+  workOutsideProject(newDraft?: boolean): Promise<void>;
   /** 草稿会话（还没发送过）切换使用的 CLI。 */
   setDraftAgent(agent: AgentKind): void;
   /** 草稿会话切换工作目录。 */
@@ -447,6 +452,8 @@ export const useAppStore = create<AppState>((set, get) => {
     models: {},
     projects: [],
     sessions: {},
+    sessionErrors: {},
+    conversationWorkspacePending: false,
     expanded: {},
     search: "",
     conversations: {},
@@ -466,6 +473,8 @@ export const useAppStore = create<AppState>((set, get) => {
       // 默认展开最近活跃的项目
       const first = get().projects[0];
       if (first) get().toggleProject(first.path, true);
+      const conversation = get().projects.find((project) => project.purpose === "conversation");
+      if (conversation && conversation !== first) get().toggleProject(conversation.path, true);
       set({ ready: true });
       set({ agentStatuses: await hcode.invoke("agent:status") });
     },
@@ -479,10 +488,17 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async loadSessions(projectPath) {
-      const list = await hcode.invoke("sessions:list", projectPath);
-      set((state) => ({
-        sessions: { ...state.sessions, [projectPath]: withLiveSessions(list, projectPath, state.conversations) },
-      }));
+      try {
+        const list = await hcode.invoke("sessions:list", projectPath);
+        set((state) => ({
+          sessions: { ...state.sessions, [projectPath]: withLiveSessions(list, projectPath, state.conversations) },
+          sessionErrors: { ...state.sessionErrors, [projectPath]: undefined },
+        }));
+      } catch (error) {
+        const message = errorMessage(error);
+        set((state) => ({ sessionErrors: { ...state.sessionErrors, [projectPath]: message } }));
+        toast(`读取会话失败：${message}`, { variant: "warning" });
+      }
     },
 
     toggleProject(projectPath, expanded) {
@@ -536,6 +552,18 @@ export const useAppStore = create<AppState>((set, get) => {
         patchConversation(viewId, { rows: result.rows, loading: false });
       } catch (error) {
         patchConversation(viewId, { loading: false, loadError: errorMessage(error) });
+      }
+    },
+
+    async workOutsideProject(newDraft = false) {
+      if (get().conversationWorkspacePending) return;
+      set({ conversationWorkspacePending: true });
+      try {
+        await selectConversationWorkspace(get, newDraft);
+      } catch (error) {
+        toast(`打开对话工作目录失败：${errorMessage(error)}`, { variant: "warning" });
+      } finally {
+        set({ conversationWorkspacePending: false });
       }
     },
 

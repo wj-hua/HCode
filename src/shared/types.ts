@@ -79,6 +79,8 @@ export interface McpAddParams {
 }
 
 export interface Project {
+  /** 应用管理的非项目对话目录；未标记的条目为用户项目。 */
+  purpose?: "conversation";
   /** 项目绝对路径（即 CLI 的 cwd），作为唯一键。 */
   path: string;
   name: string;

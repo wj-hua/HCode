@@ -17,6 +17,7 @@ import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
 import { beginGitTurn, commitFiles, createBranch, finishGitTurn, isGitRepository, listBranches, previewGitTurn, repositoryRoot, revertFile, switchBranch, validateTurnFiles, type GitTurnSnapshot } from "./git.js";
 import { buildProjects } from "./projects.js";
+import { ConversationWorkspace } from "./conversationWorkspace.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { QuotaService } from "./quotaService.js";
 import { createMainWindow } from "./window.js";
@@ -76,6 +77,7 @@ async function bootstrap() {
   }
   shellEnv = (await captureLoginShellEnvSnapshot()) ?? {};
   const store = new AppStore(app.getPath("userData"));
+  const conversationWorkspace = new ConversationWorkspace(app.getPath("userData"));
   let quota: QuotaService | null = null;
 
   // 有会话在运行且开关打开时阻止系统休眠
@@ -196,7 +198,8 @@ async function bootstrap() {
   handle("extensions:setSkillEnabled", (agent, projectPath, path, name, enabled) => extensions.setSkillEnabled(agent, projectPath, path, name, enabled));
   handle("quota:list", (force) => quota!.list(force));
 
-  handle("projects:list", async () => buildProjects(await agents.allSessions(), store));
+  handle("workspace:conversation", () => conversationWorkspace.ensure());
+  handle("projects:list", async () => buildProjects(await agents.allSessions(), store, conversationWorkspace.path));
   handle("projects:add", async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ["openDirectory", "createDirectory"],
@@ -206,12 +209,13 @@ async function bootstrap() {
     if (result.canceled || !path) return null;
     store.updateProjects((prefs) => ({
       ...prefs,
-      manual: prefs.manual.includes(path) ? prefs.manual : [path, ...prefs.manual],
+      manual: path === conversationWorkspace.path || prefs.manual.includes(path) ? prefs.manual : [path, ...prefs.manual],
     }));
-    const projects = buildProjects(await agents.allSessions(), store);
+    const projects = buildProjects(await agents.allSessions(), store, conversationWorkspace.path);
     return projects.find((project) => project.path === path) ?? null;
   });
   handle("projects:setPinned", (path, pinned) => {
+    if (path === conversationWorkspace.path) throw new Error("对话目录不支持项目置顶");
     store.updateProjects((prefs) => ({
       ...prefs,
       pinned: pinned ? [...new Set([...prefs.pinned, path])] : prefs.pinned.filter((p) => p !== path),
@@ -220,10 +224,11 @@ async function bootstrap() {
   handle("projects:reorder", (paths) => {
     store.updateProjects((prefs) => ({
       ...prefs,
-      manual: [...paths.filter((p) => prefs.manual.includes(p)), ...prefs.manual.filter((p) => !paths.includes(p))],
+      manual: [...paths.filter((p) => p !== conversationWorkspace.path && prefs.manual.includes(p)), ...prefs.manual.filter((p) => p !== conversationWorkspace.path && !paths.includes(p))],
     }));
   });
   handle("projects:remove", (path) => {
+    if (path === conversationWorkspace.path) throw new Error("对话目录由 HCode 管理，不能移除");
     store.updateProjects((prefs) => ({
       ...prefs,
       pinned: prefs.pinned.filter((p) => p !== path),
@@ -252,6 +257,7 @@ async function bootstrap() {
   });
 
   handle("chat:send", async (params) => {
+    if (params.projectPath === conversationWorkspace.path) await conversationWorkspace.ensure();
     const files = await Promise.all((params.files ?? []).map(async (file) => {
       if (!isAbsolute(file.path)) throw new Error(`附件路径无效：${file.name}`);
       const path = await realpath(file.path);

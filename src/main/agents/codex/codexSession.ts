@@ -477,10 +477,11 @@ export class CodexSession {
     this.emitState();
   }
 
-  close() {
+  /** 释放本地绑定；同线程重绑定保留服务端订阅，避免异步 unsubscribe 取消新绑定的事件。 */
+  close(unsubscribe = true) {
     this.closed = true;
     this.rejectAllPending();
-    if (this.threadId && this.host.client.running) {
+    if (unsubscribe && this.threadId && this.host.client.running) {
       void this.host.client.request("thread/unsubscribe", { threadId: this.threadId }).catch(() => undefined);
     }
   }

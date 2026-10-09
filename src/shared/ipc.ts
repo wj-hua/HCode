@@ -45,6 +45,7 @@ export interface InvokeMap {
   /** 各 CLI 的订阅额度；force 时忽略主进程缓存。 */
   "quota:list": [[force?: boolean], AgentQuota[]];
   "projects:list": [[], Project[]];
+  "workspace:conversation": [[], string];
   "projects:add": [[], Project | null];
   "projects:setPinned": [[path: string, pinned: boolean], void];
   "projects:reorder": [[paths: string[]], void];
@@ -132,6 +133,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "extensions:setSkillEnabled",
   "quota:list",
   "projects:list",
+  "workspace:conversation",
   "projects:add",
   "projects:setPinned",
   "projects:reorder",

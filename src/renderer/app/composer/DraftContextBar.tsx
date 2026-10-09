@@ -1,5 +1,5 @@
 // 新会话输入框下方的「文件夹 / 分支」选择：参照 ZCode ChatEmptyWorkspacePreviewMenu 与 GitBranchSwitcher。
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, LoaderIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, LoaderIcon, MessageCircleIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { GitBranches } from "@hcode/shared/types";
 import { Button } from "@/components/ui/button.js";
@@ -44,14 +44,17 @@ function FolderPicker({ conversation }: { conversation: Conversation }) {
   const projects = useAppStore((state) => state.projects);
   const setDraftProject = useAppStore((state) => state.setDraftProject);
   const addProject = useAppStore((state) => state.addProject);
+  const workOutsideProject = useAppStore((state) => state.workOutsideProject);
+  const pending = useAppStore((state) => state.conversationWorkspacePending);
+  const outsideProject = projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation");
   const [query, setQuery] = useState("");
-  const name = conversation.projectPath.split("/").filter(Boolean).at(-1) ?? conversation.projectPath;
-  const visible = projects.filter((project) => project.exists && matches(query, project.name, project.path));
+  const name = outsideProject ? "选择项目" : conversation.projectPath.split("/").filter(Boolean).at(-1) ?? conversation.projectPath;
+  const visible = projects.filter((project) => project.purpose !== "conversation" && project.exists && matches(query, project.name, project.path));
 
   return (
     <DropdownMenu onOpenChange={(open) => !open && setQuery("")}>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="min-w-0 max-w-60 gap-1.5 rounded-full text-foreground-subtle">
+        <Button type="button" variant="ghost" size="sm" disabled={pending} className="min-w-0 max-w-60 gap-1.5 rounded-full text-foreground-subtle">
           <FolderIcon className="size-4 shrink-0" />
           <span className="truncate">{name}</span>
           <ChevronDownIcon className="size-3 shrink-0" />
@@ -79,6 +82,10 @@ function FolderPicker({ conversation }: { conversation: Conversation }) {
             <FolderPlusIcon className="size-4 text-foreground-subtle" />
             打开文件夹…
           </DropdownMenuItem>
+          <DropdownMenuCheckboxItem checked={outsideProject} disabled={pending} onSelect={() => void workOutsideProject()}>
+            <MessageCircleIcon className="size-4 text-foreground-subtle" />
+            不在项目中工作
+          </DropdownMenuCheckboxItem>
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -207,10 +214,11 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
 }
 
 export function DraftContextBar({ conversation }: { conversation: Conversation }) {
+  const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
   return (
     <div className="mt-1.5 flex min-w-0 items-center gap-1">
       <FolderPicker conversation={conversation} />
-      <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} />
+      {!outsideProject ? <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} /> : null}
     </div>
   );
 }

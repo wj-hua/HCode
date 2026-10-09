@@ -6,7 +6,7 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: { "@hcode/shared": r("./src/shared") },
+    alias: { "@hcode/shared": r("./src/shared"), "@": r("./src/renderer/zcode") },
   },
   test: {
     include: ["src/**/*.test.ts"],

@@ -400,6 +400,13 @@ export class CodexAgent implements AgentProvider {
     let session = this.sessions.get(params.sessionKey);
     if (!session) {
       await this.client.ensureStarted();
+      // 窗口刷新后会用新 key 续聊同一线程；保留旧绑定会把后续事件发给已消失的视图。
+      const previous = params.resumeSessionId ? this.sessionForThread(params.resumeSessionId) : undefined;
+      if (previous?.isBusy) throw new Error("该 Codex 会话正在运行，请等待完成后再续聊");
+      if (previous) {
+        previous.close(false);
+        this.sessions.delete(previous.key);
+      }
       session = new CodexSession(
         {
           client: this.client,
