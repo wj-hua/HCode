@@ -9,7 +9,11 @@ import { hcode } from "../bridge";
 
 const DAYS = 30;
 const full = new Intl.NumberFormat("zh-CN");
-const compact = new Intl.NumberFormat("zh-CN", { notation: "compact" });
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+function formatTokens(value: number): string {
+  return compact.format(value).replace(/[KBT]/g, (unit) => unit.toLowerCase());
+}
 
 const chartConfig = {
   input: { label: "输入", color: "var(--color-sky-500)" },
@@ -77,13 +81,13 @@ export function UsageSection({ open }: { open: boolean }) {
       </div>
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "输入 Token", value: total.input },
-          { label: "输出 Token", value: total.output },
-          { label: "对话轮数", value: total.turns },
+          { label: "输入 Token", value: formatTokens(total.input) },
+          { label: "输出 Token", value: formatTokens(total.output) },
+          { label: "对话轮数", value: full.format(total.turns) },
         ].map(({ label, value }) => (
           <div key={label} className="flex flex-col rounded-lg border border-border bg-surface px-3 py-2">
             <span className="text-ui-sm text-foreground-subtle">{label}（近 {DAYS} 天）</span>
-            <span className="text-lg font-medium text-foreground tabular-nums">{full.format(value)}</span>
+            <span className="text-lg font-medium text-foreground tabular-nums">{value}</span>
           </div>
         ))}
       </div>
@@ -91,8 +95,18 @@ export function UsageSection({ open }: { open: boolean }) {
         <BarChart data={days} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" axisLine={false} tickLine={false} tickMargin={8} minTickGap={16} />
-          <YAxis axisLine={false} tickLine={false} width={44} tickFormatter={(value: number) => compact.format(value)} />
-          <ChartTooltip content={<ChartTooltipContent />} />
+          <YAxis axisLine={false} tickLine={false} width={60} tickFormatter={formatTokens} />
+          <ChartTooltip content={
+            <ChartTooltipContent formatter={(value, name) => (
+              <>
+                <div className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: chartConfig[name as keyof typeof chartConfig]?.color }} />
+                <div className="flex flex-1 justify-between gap-4 leading-none">
+                  <span className="text-muted-foreground">{chartConfig[name as keyof typeof chartConfig]?.label ?? name}</span>
+                  <span className="font-mono font-medium text-foreground tabular-nums">{formatTokens(Number(value))}</span>
+                </div>
+              </>
+            )} />
+          } />
           <Bar dataKey="input" stackId="tokens" fill="var(--color-input)" />
           <Bar dataKey="output" stackId="tokens" fill="var(--color-output)" radius={[3, 3, 0, 0]} />
         </BarChart>
@@ -105,7 +119,7 @@ export function UsageSection({ open }: { open: boolean }) {
             <div key={model} className="flex items-center justify-between gap-4 py-2 text-ui-sm">
               <span className="min-w-0 truncate text-foreground">{model}</span>
               <span className="shrink-0 text-foreground-subtle tabular-nums">
-                输入 {full.format(sum.input)} · 输出 {full.format(sum.output)} · {sum.turns} 轮
+                输入 {formatTokens(sum.input)} · 输出 {formatTokens(sum.output)} · {sum.turns} 轮
               </span>
             </div>
           ))
