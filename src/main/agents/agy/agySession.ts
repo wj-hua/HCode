@@ -17,6 +17,7 @@ import type {
   RowOp,
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
+import { ResponseMetrics } from "../responseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { withProjectFilePaths } from "../../projectFiles.js";
 import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
@@ -130,6 +131,7 @@ export class AgySession {
   private reportedModel: string | undefined;
 
   private usage: ChatUsage | undefined;
+  private readonly responseMetrics = new ResponseMetrics();
   /** 上一次 result 里的累计用量（整个 conversation 累计，跨进程重启也连续），用来相减得到本轮用量。 */
   private lastTotals: { input: number; output: number } | undefined;
   private readonly projector = new AgyRowProjector();
@@ -172,6 +174,7 @@ export class AgySession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
+    this.responseMetrics.start();
     this.usage = undefined;
     this.projector.beginLocalTurn(text, Date.now(), images, files);
     this.flushNow();
@@ -269,7 +272,16 @@ export class AgySession {
   private handleEvent(event: JsonRecord) {
     const now = Date.now();
     if (event.event === "step_update" && isRecord(event.step_update)) {
-      this.projector.streamStep(event.step_update, now);
+      const update = event.step_update;
+      if (update.step_type === "agent_response") {
+        const first = this.responseMetrics.output(update.thinking_delta);
+        const firstText = this.responseMetrics.output(update.text_delta);
+        if (first || firstText) this.emitState();
+        if (update.state === "DONE") this.responseMetrics.endSegment();
+      } else {
+        this.responseMetrics.endSegment();
+      }
+      this.projector.streamStep(update, now);
       this.scheduleFlush();
     } else if (event.event === "result" && isRecord(event.result)) {
       const result = event.result;
@@ -350,6 +362,8 @@ export class AgySession {
 
   private setState(state: ChatRunState) {
     if (this.state === state) return;
+    if (state === "idle" || state === "error") this.responseMetrics.finish();
+    if (state === "awaitingApproval") this.responseMetrics.endSegment();
     this.state = state;
     this.emitState();
   }
@@ -365,7 +379,7 @@ export class AgySession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
-      ...(this.usage ? { usage: this.usage } : {}),
+      usage: { ...this.usage, ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
     });
   }
 

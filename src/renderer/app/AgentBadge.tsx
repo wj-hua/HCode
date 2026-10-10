@@ -1,4 +1,4 @@
-// CLI（及额度来源）标识：小方块字母徽标（不使用各家品牌 logo）。
+// CLI 标识：小方块字母徽标（不使用各家品牌 logo）。
 import type { QuotaSource } from "@hcode/shared/types";
 import { quotaSourceName } from "@hcode/shared/agents";
 import { cn } from "@/components/lib/utils.js";
@@ -9,7 +9,6 @@ const STYLE: Record<QuotaSource, { letter: string; className: string }> = {
   step: { letter: "S", className: "bg-[#2563eb] text-white" },
   agy: { letter: "A", className: "bg-[#16a34a] text-white" },
   pi: { letter: "π", className: "bg-[#7c3aed] text-white" },
-  glm: { letter: "Z", className: "bg-[#1e3a8a] text-white" },
 };
 
 export function AgentBadge({ agent, className }: { agent: QuotaSource; className?: string }) {

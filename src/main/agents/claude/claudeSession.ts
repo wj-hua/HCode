@@ -25,6 +25,7 @@ import type {
   SlashCommandOption,
 } from "../../../shared/types.js";
 import { inputAttachments } from "../rowProjectorBase.js";
+import { ClaudeResponseMetrics } from "./claudeResponseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { ClaudeRowProjector, type ClaudeRecord } from "./rowProjector.js";
 
@@ -98,6 +99,7 @@ export class ClaudeSession {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private usage: ChatUsage | undefined;
+  private readonly responseMetrics = new ClaudeResponseMetrics();
   private usageVersion = 0;
 
   constructor(
@@ -148,6 +150,7 @@ export class ClaudeSession {
     if (this.closed) throw new Error("会话已关闭");
     this.clearIdleTimer();
     this.error = undefined;
+    this.responseMetrics.start();
     this.usageVersion++;
     this.usage = this.usage ? {
       contextUsedTokens: this.usage.contextUsedTokens,
@@ -229,6 +232,7 @@ export class ClaudeSession {
   }
 
   private handleMessage(message: SDKMessage) {
+    if (message.type === "stream_event" && this.responseMetrics.consumeStream(message)) this.emitState();
     if (message.type === "system" && message.subtype === "commands_changed") {
       this.host.onCommandsChanged(this.key, message.commands.map(({ name, description, argumentHint, aliases }) => ({
         name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
@@ -440,6 +444,8 @@ export class ClaudeSession {
 
   private setState(state: ChatRunState) {
     if (this.state === state) return;
+    if (state === "idle" || state === "error") this.responseMetrics.finish();
+    if (state === "awaitingApproval") this.responseMetrics.endSegment();
     this.state = state;
     this.emitState();
   }
@@ -454,7 +460,7 @@ export class ClaudeSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(this.model ? { model: this.model } : {}),
-      ...(this.usage ? { usage: this.usage } : {}),
+      usage: { ...this.usage, outputSpeedBasis: "response", ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
     });
   }
 

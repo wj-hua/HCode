@@ -141,8 +141,8 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
 export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step", "agy", "pi"];
 
 /** 额度面板里的排列顺序。 */
-export const QUOTA_SOURCES: QuotaSource[] = [...AGENT_KINDS, "glm"];
+export const QUOTA_SOURCES: QuotaSource[] = [...AGENT_KINDS];
 
 export function quotaSourceName(source: QuotaSource): string {
-  return source === "glm" ? "GLM Coding Plan" : AGENTS[source].name;
+  return AGENTS[source].name;
 }

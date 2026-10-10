@@ -16,6 +16,7 @@ import type {
   RowOp,
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
+import { ResponseMetrics } from "../responseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { withProjectFilePaths } from "../../projectFiles.js";
 import type { PiVariant } from "./piVariant.js";
@@ -72,6 +73,7 @@ export class StepSession {
   private state: ChatRunState = "idle";
   private error: string | undefined;
   private usage: ChatUsage | undefined;
+  private readonly responseMetrics = new ResponseMetrics();
   /** 本轮开始时的累计用量，本轮用量 = 结束时的累计值 - 它。 */
   private statsBaseline: StatsSnapshot | undefined;
   private readonly pending = new Map<string, PendingUi>();
@@ -117,6 +119,7 @@ export class StepSession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
+    this.responseMetrics.start();
     // 只保留上下文占用，本轮的 Token 等结束后重新计算
     this.usage = this.usage?.contextWindowTokens ? {
       contextUsedTokens: this.usage.contextUsedTokens,
@@ -188,14 +191,24 @@ export class StepSession {
     const now = Date.now();
     switch (event.type) {
       case "message_start":
-        if (isRecord(event.message) && event.message.role === "assistant") this.projector.beginAssistantMessage(now);
+        if (isRecord(event.message) && event.message.role === "assistant") {
+          this.responseMetrics.endSegment();
+          this.projector.beginAssistantMessage(now);
+        }
         break;
       case "message_update":
-        if (isRecord(event.assistantMessageEvent)) this.projector.streamEvent(event.assistantMessageEvent, now);
+        if (isRecord(event.assistantMessageEvent)) {
+          const update = event.assistantMessageEvent;
+          if (update.type === "text_delta" || update.type === "thinking_delta" || update.type === "toolcall_delta") {
+            if (this.responseMetrics.output(update.delta)) this.emitState();
+          }
+          this.projector.streamEvent(update, now);
+        }
         break;
       case "message_end": {
         if (!isRecord(event.message)) break;
         const message = event.message as StepMessage;
+        if (message.role === "assistant") this.responseMetrics.endSegment();
         this.projector.consumeMessage(message, now);
         if (message.role === "assistant" && message.stopReason === "error") {
           this.error = typeof message.errorMessage === "string" ? message.errorMessage : `${this.variant.name} 执行出错`;
@@ -440,6 +453,8 @@ export class StepSession {
 
   private setState(state: ChatRunState) {
     if (this.state === state) return;
+    if (state === "idle" || state === "error") this.responseMetrics.finish();
+    if (state === "awaitingApproval") this.responseMetrics.endSegment();
     this.state = state;
     this.emitState();
   }
@@ -455,7 +470,7 @@ export class StepSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
-      ...(this.usage ? { usage: this.usage } : {}),
+      usage: { ...this.usage, ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
     });
   }
 

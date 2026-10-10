@@ -13,6 +13,7 @@ import type {
   PermissionResolvedEvent,
 } from "../../../shared/types.js";
 import { isRecord } from "../rowProjectorBase.js";
+import { CodexResponseMetrics } from "./codexResponseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import type { AppServerClient, ServerRequest } from "./appServerClient.js";
 import { CodexRowProjector, type CodexItem, type CodexTurn } from "./codexProjector.js";
@@ -93,6 +94,7 @@ export class CodexSession {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private usage: ChatUsage | undefined;
+  private readonly responseMetrics = new CodexResponseMetrics();
   private totalInputTokens: number | null = null;
   private totalOutputTokens: number | null = null;
 
@@ -120,6 +122,8 @@ export class CodexSession {
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], skill?: InvokedSkill) {
     if (this.closed) throw new Error("会话已关闭");
     this.error = undefined;
+    this.currentTurnId = null;
+    this.responseMetrics.start();
     this.usage = this.usage ? {
       contextUsedTokens: this.usage.contextUsedTokens,
       contextWindowTokens: this.usage.contextWindowTokens,
@@ -210,6 +214,22 @@ export class CodexSession {
 
   handleNotification(method: string, params: Record<string, unknown>) {
     const now = Date.now();
+    if (method === "turn/started" && isRecord(params.turn) && typeof params.turn.id === "string") {
+      if (!this.responseMetrics.beginTurn(params.turn.id)) return;
+      this.currentTurnId = params.turn.id;
+    }
+    const turnId = params.turnId ?? (isRecord(params.turn) ? params.turn.id : undefined);
+    if (typeof turnId === "string" && this.currentTurnId && turnId !== this.currentTurnId) return;
+    const metricsTurn = this.responseMetrics.acceptsTurn(turnId);
+    if (method === "thread/tokenUsage/updated" && !metricsTurn) return;
+    if (metricsTurn && (method === "item/agentMessage/delta" || method === "item/reasoning/summaryTextDelta" ||
+      method === "item/reasoning/textDelta")) {
+      if (this.responseMetrics.output(params.delta)) this.emitState();
+    }
+    if (metricsTurn && (method === "item/started" || method === "item/completed") && isRecord(params.item) &&
+      typeof params.item.type === "string" && typeof params.item.id === "string") {
+      this.responseMetrics.item(params.item.type, params.item.id, method === "item/started");
+    }
     switch (method) {
       case "thread/tokenUsage/updated": {
         const tokenUsage = isRecord(params.tokenUsage) ? params.tokenUsage : null;
@@ -272,6 +292,7 @@ export class CodexSession {
         break;
       case "turn/completed": {
         const turn = (isRecord(params.turn) ? params.turn : {}) as Partial<CodexTurn>;
+        if (metricsTurn) this.responseMetrics.finishTurn(turn.status ?? "completed", turn.durationMs);
         this.projector.finishTurn(
           { status: turn.status ?? "completed", durationMs: turn.durationMs ?? null, error: turn.error ?? null },
           now,
@@ -355,6 +376,7 @@ export class CodexSession {
         return false;
     }
     this.pending.set(interactionId, entry);
+    this.responseMetrics.approval(interactionId, true);
     if (event.toolName !== "AskUserQuestion" && itemId) {
       this.projector.setToolPendingApproval(itemId, event.toolName, event.input, interactionId, Date.now());
       this.flushNow();
@@ -390,6 +412,7 @@ export class CodexSession {
     const entry = this.pending.get(interactionId);
     if (!entry) return;
     this.pending.delete(interactionId);
+    this.responseMetrics.approval(interactionId, false);
     const allowed = decision.decision === "allow" || decision.decision === "allowSession";
     const { client } = this.host;
     switch (entry.kind) {
@@ -442,12 +465,14 @@ export class CodexSession {
     for (const [interactionId, entry] of this.pending) {
       if (entry.request.id !== requestId) continue;
       this.pending.delete(interactionId);
+      this.responseMetrics.approval(interactionId, false);
       this.host.emitPermissionResolved({ sessionKey: this.key, interactionId });
     }
   }
 
   private rejectAllPending() {
     for (const [interactionId, entry] of this.pending) {
+      this.responseMetrics.approval(interactionId, false);
       this.host.client.respond(entry.request.id, entry.kind === "userInput" ? { answers: {} } : { decision: "cancel" });
       this.host.emitPermissionResolved({ sessionKey: this.key, interactionId });
     }
@@ -497,6 +522,8 @@ export class CodexSession {
 
   private setState(state: ChatRunState) {
     if (this.state === state) return;
+    if (state === "idle" || state === "error") this.responseMetrics.finish();
+    if (state === "awaitingApproval") this.responseMetrics.endSegment();
     this.state = state;
     this.emitState();
   }
@@ -511,7 +538,7 @@ export class CodexSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...((this.model ?? this.reportedModel) ? { model: this.model ?? this.reportedModel } : {}),
-      ...(this.usage ? { usage: this.usage } : {}),
+      usage: { ...this.usage, outputSpeedBasis: "activeTurn", ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
     });
   }
 
