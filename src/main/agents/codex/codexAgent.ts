@@ -20,10 +20,12 @@ import type {
 import { probeCli } from "../../util/locateCli.js";
 import { codexQuota, quotaError, quotaUnavailable } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
-import type { AgentEvents, AgentProvider } from "../types.js";
+import type { AgentEvents, AgentProvider, AgentSendParams } from "../types.js";
 import { AppServerClient, type ServerRequest } from "./appServerClient.js";
 import { projectCodexTurns, type CodexTurn } from "./codexProjector.js";
 import { CodexSession } from "./codexSession.js";
+import { CODEX_RESEARCH_PROTOCOL_VERSION } from "../../sessions/researchRuntime.js";
+import { readToolCatalog, sourceCatalogReason } from "./toolCatalog.js";
 
 const CODEX_HOME = process.env.CODEX_HOME ?? join(homedir(), ".codex");
 /** 列表里只显示人发起的会话（不含子 agent / 自动审查等内部线程）。 */
@@ -88,7 +90,7 @@ export class CodexAgent implements AgentProvider {
     this.client = new AppServerClient(async () => {
       const status = await this.getStatus();
       if (!status.found || !status.path) throw new Error("未找到 codex 命令，请在设置中指定路径");
-      return { path: status.path, env: this.getEnv() };
+      return { path: status.path, env: this.getEnv(), experimentalApi: status.version?.includes(CODEX_RESEARCH_PROTOCOL_VERSION) === true };
     }, appVersion);
     this.client.on("notification", (method: string, params: Record<string, unknown>) =>
       this.onNotification(method, params),
@@ -388,7 +390,7 @@ export class CodexAgent implements AgentProvider {
     return this.sessions.has(sessionKey);
   }
 
-  async send(params: ChatSendParams): Promise<{ sessionKey: string }> {
+  async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
     const compact = /^\/compact\s*$/i.test(params.text);
     const review = /^\/review(?:\s|$)/i.test(params.text.trim());
     if ((compact || review) && ((params.images?.length ?? 0) > 0 || (params.files?.length ?? 0) > 0)) {
@@ -412,6 +414,7 @@ export class CodexAgent implements AgentProvider {
           client: this.client,
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
+          emitTurnOutcome: (event) => this.events.turnOutcome?.(event),
           emitPermission: (event) => this.events.permission(event),
           emitPermissionResolved: (event) => this.events.permissionResolved(event),
           onThreadId: (created) => this.invalidate([created.projectPath]),
@@ -423,20 +426,22 @@ export class CodexAgent implements AgentProvider {
           ...(params.resumeSessionId ? { threadId: params.resumeSessionId } : {}),
           permissionMode: params.permissionMode,
           ...(params.model ? { model: params.model } : {}),
+          ...(params.research ? { research: params.research } : {}),
         },
       );
       this.sessions.set(session.key, session);
       if (params.resumeSessionId) session.seedHistory(await this.loadTurns(params.resumeSessionId));
       session.emitState();
-    } else if (session.permissionMode !== params.permissionMode) {
-      await session.setPermissionMode(params.permissionMode);
+    } else {
+      await session.configureResearch(params.research);
+      if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
     }
     session.effort = params.effort || undefined;
     const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(params.text.trim());
     const skill = match && !["review", "compact"].includes(match[1]!.toLowerCase())
       ? (await this.listSkills(params.projectPath)).find((item) => item.name === match[1])
       : undefined;
-    void session.send(params.text, params.images, params.files, skill);
+    void session.send(params.text, params.images, params.files, skill, params.executionTurnId);
     return { sessionKey: session.key };
   }
 
@@ -489,6 +494,16 @@ export class CodexAgent implements AgentProvider {
     const session = this.sessions.get(sessionKey);
     if (!session) throw new Error("会话不存在或已关闭");
     return session;
+  }
+
+  async collaborationSourceReason(sessionId: string) {
+    const session = this.sessionForThread(sessionId);
+    return session ? session.collaborationSourceReason() : sourceCatalogReason(await readToolCatalog(this.client, sessionId));
+  }
+  async endResearch(sessionKey: string, mode: PermissionMode) {
+    const session = this.require(sessionKey);
+    await session.configureResearch(undefined);
+    await session.setPermissionMode(mode);
   }
 
   async interrupt(sessionKey: string) {

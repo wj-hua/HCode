@@ -17,7 +17,7 @@ import type {
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { claudeQuota, quotaError } from "../quota.js";
-import type { AgentEvents, AgentProvider } from "../types.js";
+import type { AgentEvents, AgentProvider, AgentSendParams } from "../types.js";
 import { ClaudeHistory } from "./claudeHistory.js";
 import { ClaudeSession } from "./claudeSession.js";
 
@@ -225,7 +225,7 @@ export class ClaudeAgent implements AgentProvider {
     return this.sessions.has(sessionKey);
   }
 
-  async send(params: ChatSendParams): Promise<{ sessionKey: string }> {
+  async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
     let session = this.sessions.get(params.sessionKey);
     if (!session) {
       const status = await this.getStatus();
@@ -238,6 +238,7 @@ export class ClaudeAgent implements AgentProvider {
           env: this.getEnv(),
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
+          emitTurnOutcome: (event) => this.events.turnOutcome?.(event),
           emitPermission: (event) => {
             this.interactionOwner.set(event.interactionId, event.sessionKey);
             this.events.permission(event);
@@ -268,11 +269,19 @@ export class ClaudeAgent implements AgentProvider {
       }
       session.emitState();
     } else {
+      await session.configureResearch(params.research);
       if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
       if (session.effort !== (params.effort || undefined)) await session.setEffort(params.effort ?? "");
     }
-    session.send(params.text, params.images, params.files);
+    await session.configureResearch(params.research);
+    session.send(params.text, params.images, params.files, params.executionTurnId);
     return { sessionKey: session.key };
+  }
+
+  async endResearch(sessionKey: string, mode: PermissionMode) {
+    const session = this.require(sessionKey);
+    await session.configureResearch(undefined);
+    await session.setPermissionMode(mode);
   }
 
   private require(sessionKey: string): ClaudeSession {

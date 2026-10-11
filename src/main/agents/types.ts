@@ -16,8 +16,17 @@ import type {
   SessionSummary,
   SlashCommandOption,
 } from "../../shared/types.js";
+import type { TurnOutcome } from "../../shared/collaboration.js";
+import type { ResearchRuntime } from "../sessions/researchRuntime.js";
+
+/** 内部执行身份由主进程生成，不能由 Renderer 指定。 */
+export interface AgentSendParams extends ChatSendParams {
+  executionTurnId?: string;
+  research?: ResearchRuntime;
+}
 
 export interface AgentEvents {
+  turnOutcome?(event: TurnOutcome): void;
   rows(sessionKey: string, ops: RowOp[]): void;
   state(event: ChatStateEvent): void;
   commands(sessionKey: string, commands: SlashCommandOption[]): void;
@@ -47,8 +56,12 @@ export interface AgentProvider {
   forkSession?(params: ForkParams): Promise<SessionSummary | null>;
   /** 在终端里继续该会话的命令行（不含 cd）。 */
   resumeCommand(sessionId: string): Promise<string[]>;
-  send(params: ChatSendParams): Promise<{ sessionKey: string }>;
+  send(params: AgentSendParams): Promise<{ sessionKey: string }>;
   hasSession(sessionKey: string): boolean;
+  /** 在可信终态后移除临时研究工具并恢复会话原权限；不创建新身份。 */
+  endResearch?(sessionKey: string, mode: PermissionMode): Promise<void>;
+  /** 当前原生线程能否发起协作；返回明确限制，不偷偷创建替代线程。 */
+  collaborationSourceReason?(sessionId: string): Promise<string | undefined>;
   interrupt(sessionKey: string): Promise<void>;
   setPermissionMode(sessionKey: string, mode: PermissionMode): Promise<void>;
   setModel(sessionKey: string, model: string): Promise<void>;

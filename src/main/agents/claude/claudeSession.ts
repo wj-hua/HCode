@@ -27,11 +27,15 @@ import type {
 import { inputAttachments } from "../rowProjectorBase.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { ClaudeRowProjector, type ClaudeRecord } from "./rowProjector.js";
+import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
+import type { TurnOutcome } from "../../../shared/collaboration.js";
+import { researchMcp, RESEARCH_MCP_NAME, type ResearchRuntime } from "../../sessions/researchRuntime.js";
 
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
 const FLUSH_INTERVAL_MS = 16;
 
 export interface ClaudeSessionHost {
+  emitTurnOutcome?(event: TurnOutcome): void;
   claudePath: string;
   env: Record<string, string>;
   emitRows(sessionKey: string, ops: RowOp[]): void;
@@ -99,6 +103,9 @@ export class ClaudeSession {
   private closed = false;
   private usage: ChatUsage | undefined;
   private usageVersion = 0;
+  private readonly lifecycle: TurnLifecycle;
+  private research: ResearchRuntime | undefined;
+  private pumpPromise: Promise<void> | null = null;
 
   constructor(
     private readonly host: ClaudeSessionHost,
@@ -117,6 +124,7 @@ export class ClaudeSession {
     this.permissionMode = options.permissionMode;
     this.model = options.model || undefined;
     this.effort = options.effort || undefined;
+    this.lifecycle = new TurnLifecycle(this.key, "claude", (event) => this.host.emitTurnOutcome?.(event));
   }
 
   /** 续聊时先把历史喂给投影器，保证新行的 rowId 接在历史后面。 */
@@ -136,6 +144,17 @@ export class ClaudeSession {
     return this.state === "running" || this.state === "awaitingApproval";
   }
 
+  /** 只在空闲回合边界更换工具，停止旧 query 后保留原生身份与投影历史。 */
+  async configureResearch(runtime: ResearchRuntime | undefined) {
+    if (this.research === runtime) return;
+    if (this.isBusy) throw new Error("会话运行中，不能更换协作工具");
+    this.clearIdleTimer();
+    this.input?.end();
+    this.activeQuery?.close();
+    await this.pumpPromise;
+    this.research = runtime;
+  }
+
   async listCommands(): Promise<SlashCommandOption[] | null> {
     if (!this.activeQuery) return null;
     const commands = await this.activeQuery.supportedCommands();
@@ -144,8 +163,9 @@ export class ClaudeSession {
     }));
   }
 
-  send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []) {
+  send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], executionTurnId: string = randomUUID()) {
     if (this.closed) throw new Error("会话已关闭");
+    this.lifecycle.begin(executionTurnId);
     this.clearIdleTimer();
     this.error = undefined;
     this.usageVersion++;
@@ -172,6 +192,7 @@ export class ClaudeSession {
       type: "user",
       message: { role: "user", content },
       parent_tool_use_id: null,
+      uuid: executionTurnId,
     } as SDKUserMessage);
     this.setState("running");
   }
@@ -190,19 +211,25 @@ export class ClaudeSession {
         permissionMode: permissionMode as ClaudePermissionMode,
         // 允许用户在会话中途切换到“完全放行”；是否真的放行仍由 permissionMode 决定
         allowDangerouslySkipPermissions: true,
-        canUseTool: this.canUseTool,
+        canUseTool: this.research ? undefined : this.canUseTool,
         includePartialMessages: true,
         thinking: { type: "adaptive", display: "summarized" },
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code" },
         ...(this.model ? { model: this.model } : {}),
         ...(this.effort ? { effort: this.effort as EffortLevel } : {}),
+        ...(this.research ? {
+          tools: [], settingSources: [], settings: { disableAllHooks: true }, strictMcpConfig: true,
+          mcpServers: { [RESEARCH_MCP_NAME]: researchMcp(this.research) },
+          allowedTools: ["mcp__hcode__read_file", "mcp__hcode__list_files", ...(this.research.tools ?? []).map((definition) => `mcp__hcode__${definition.name}`)],
+          ...(this.research.outputSchema ? { outputFormat: { type: "json_schema" as const, schema: this.research.outputSchema } } : {}),
+        } : {}),
         stderr: (data: string) => {
           if (process.env.HCODE_DEBUG) process.stderr.write(`[claude] ${data}`);
         },
       },
     });
-    void this.pump(this.activeQuery);
+    this.pumpPromise = this.pump(this.activeQuery);
   }
 
   private async pump(activeQuery: Query) {
@@ -217,6 +244,8 @@ export class ClaudeSession {
         this.error = message;
       }
     } finally {
+      // 旧 query 的异步退出不能结束后续 query 的回合或清空其审批状态。
+      if (this.activeQuery && this.activeQuery !== activeQuery) return;
       if (this.activeQuery === activeQuery) {
         this.activeQuery = null;
         this.input = null;
@@ -225,6 +254,7 @@ export class ClaudeSession {
       if (this.projector.hasOpenTurn) this.projector.closeTurn(Date.now(), this.error ? "failed" : undefined);
       this.flushNow();
       if (!this.closed) this.setState(this.error ? "error" : "idle");
+      this.lifecycle.finish({ outcome: this.error ? "failed" : "interrupted", text: "", error: this.error ?? "Claude 未返回可信回合结果即结束", nativeSessionId: this.sessionId });
     }
   }
 
@@ -268,15 +298,24 @@ export class ClaudeSession {
       }
       this.host.onQuotaChanged();
       this.flushNow();
-      if (this.pending.size === 0) this.setState("idle");
+      if (message.subtype !== "success" || message.is_error) this.error = message.subtype === "success" ? message.result : message.errors.join("\n");
+      if (this.pending.size === 0) this.setState(this.error ? "error" : "idle");
       else this.emitState();
       this.scheduleIdleClose();
+      this.lifecycle.finish({
+        outcome: message.subtype === "success" && !message.is_error ? "succeeded" : "failed",
+        text: message.subtype === "success" ? (message.structured_output !== undefined ? JSON.stringify(message.structured_output) : message.result) : "",
+        ...(message.subtype !== "success" ? { error: message.errors.join("\n") } : message.is_error ? { error: message.result } : {}),
+        nativeSessionId: message.session_id,
+        usage: this.usage,
+      });
       return;
     }
     this.scheduleFlush();
   }
 
   private readonly canUseTool: CanUseTool = (toolName, input, options) => {
+    if (this.research) return Promise.resolve({ behavior: "deny", message: `研究会话禁止非白名单工具：${toolName}` });
     const interactionId = randomUUID();
     this.projector.setToolPendingApproval(
       options.toolUseID,
@@ -371,16 +410,19 @@ export class ClaudeSession {
 
   async interrupt() {
     if (!this.isBusy) return;
+    this.lifecycle.requestCancellation();
     this.projector.markInterrupted();
     this.rejectAllPending("用户已停止");
     try {
       await this.activeQuery?.interrupt();
-    } catch {
+    } catch (error) {
+      if (this.research) throw error;
       // 进程已退出时忽略
     }
   }
 
   async setPermissionMode(mode: PermissionMode) {
+    if (this.research && mode !== "default" && mode !== "plan") throw new Error("协作研究期间不能扩大权限");
     this.permissionMode = mode;
     this.emitState();
     try {
@@ -417,6 +459,7 @@ export class ClaudeSession {
     this.activeQuery?.close();
     this.activeQuery = null;
     this.input = null;
+    this.lifecycle.finish({ outcome: "interrupted", text: "", error: "会话已关闭", nativeSessionId: this.sessionId });
   }
 
   // ───────────────────────── 内部工具 ─────────────────────────

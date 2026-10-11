@@ -16,7 +16,6 @@ import { AGENTS } from "../../../shared/agents.js";
 import type {
   AgentQuota,
   AgentStatus,
-  ChatSendParams,
   ModelOption,
   PermissionDecision,
   PermissionMode,
@@ -28,9 +27,10 @@ import { probeCli } from "../../util/locateCli.js";
 import { trashPaths } from "../../util/trash.js";
 import { agyQuota, quotaError } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
-import type { AgentEvents, AgentProvider } from "../types.js";
+import type { AgentEvents, AgentProvider, AgentSendParams } from "../types.js";
 import { skillName } from "../../util/skillFrontmatter.js";
 import { projectAgyHistory, userRequestText, type AgyStep } from "./agyProjector.js";
+import { GEMINI_MODEL_PREFIX } from "./agyResearchSession.js";
 import { AGY_DATA_DIR, AgySession, type AgyLaunch } from "./agySession.js";
 
 const execFileAsync = promisify(execFile);
@@ -183,6 +183,7 @@ export class AgyAgent implements AgentProvider {
     private readonly events: AgentEvents,
     private readonly getEnv: () => Record<string, string>,
     private readonly getPathOverride: () => string,
+    private readonly researchRoot: string,
   ) {}
 
   async getStatus(refresh = false): Promise<AgentStatus> {
@@ -218,19 +219,15 @@ export class AgyAgent implements AgentProvider {
   /** `agy models` 每行是 “id<TAB>名称”。 */
   async listModels(): Promise<ModelOption[]> {
     if (this.models) return this.models;
-    try {
-      const { path, env } = await this.resolveLaunch(AGY_DATA_DIR, []);
-      const { stdout } = await execFileAsync(path, ["models"], { env, timeout: 30_000 });
-      const models = stdout
-        .split("\n")
-        .map((line) => line.split("\t"))
-        .filter((parts) => parts.length >= 2 && parts[0]!.trim())
-        .map(([value, label]) => ({ value: value!.trim(), label: label!.trim() }));
-      if (models.length === 0) return AGENTS.agy.models;
-      this.models = [AGENTS.agy.models[0]!, ...models];
-    } catch {
-      return AGENTS.agy.models;
-    }
+    const { path, env } = await this.resolveLaunch(AGY_DATA_DIR, []);
+    const { stdout } = await execFileAsync(path, ["models"], { env, timeout: 30_000 });
+    const models = stdout.split("\n").filter((line) => line.trim()).map((line) => {
+      const parts = line.split("\t");
+      if (parts.length !== 2 || !parts[0]!.trim() || !parts[1]!.trim()) throw new Error("agy 模型列表格式无效，不能使用静态列表替代");
+      return { value: parts[0]!.trim(), label: parts[1]!.trim() };
+    });
+    if (!models.length) throw new Error("agy 没有返回当前账号的模型列表");
+    this.models = [AGENTS.agy.models[0]!, ...models];
     return this.models;
   }
 
@@ -392,7 +389,8 @@ export class AgyAgent implements AgentProvider {
     return this.sessions.has(sessionKey);
   }
 
-  async send(params: ChatSendParams): Promise<{ sessionKey: string }> {
+  async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
+    if (params.research && (!params.model?.startsWith(GEMINI_MODEL_PREFIX) || !(await this.listModels()).some((model) => model.value === params.model))) throw new Error("请选择 agy 返回的可用 Gemini 模型，不自动替换模型");
     let session = this.sessions.get(params.sessionKey);
     if (!session) {
       session = new AgySession(
@@ -400,6 +398,7 @@ export class AgyAgent implements AgentProvider {
           resolveLaunch: (cwd, args) => this.resolveLaunch(cwd, args),
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
+          emitTurnOutcome: (event) => this.events.turnOutcome?.(event),
           onSettled: (done) => {
             this.invalidate([done.projectPath]);
             this.events.quotaStale("agy");
@@ -410,16 +409,19 @@ export class AgyAgent implements AgentProvider {
           projectPath: params.projectPath,
           ...(params.resumeSessionId ? { sessionId: params.resumeSessionId } : {}),
           permissionMode: params.permissionMode,
+          ...(params.research ? { research: params.research, researchRoot: this.researchRoot } : {}),
           ...(params.model ? { model: params.model } : {}),
         },
       );
       this.sessions.set(session.key, session);
       if (params.resumeSessionId) session.seedHistory(await readSteps(params.resumeSessionId).catch(() => []));
       session.emitState();
-    } else if (session.permissionMode !== params.permissionMode) {
-      await session.setPermissionMode(params.permissionMode);
+    } else {
+      session.configureResearch(params.research);
+      if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
+      if (session.model !== params.model) await session.setModel(params.model ?? "");
     }
-    void session.send(params.text, params.images, params.files);
+    void session.send(params.text, params.images, params.files, params.executionTurnId);
     return { sessionKey: session.key };
   }
 

@@ -1,3 +1,5 @@
+import type { AdoptionPreview, AdoptionRequest, AdoptionState } from "./codeAdoption.js";
+import type {ExpertProfilePreview} from "./expertProfiles.js";
 // IPC 契约：preload 暴露的 window.hcode 与主进程 handler 共用同一份定义。
 import type {
   AgentKind,
@@ -31,9 +33,34 @@ import type {
   McpAddParams,
 } from "./types.js";
 import type { AppCommand } from "./shortcuts.js";
+import type { CollaborationCapabilities, CollaborationSnapshot, CollaborationStartParams, CollaborationResumeParams, RecoveryIssue } from "./collaboration.js";
+import type { ExpertStartParams, ExpertResumeParams } from './experts.js';
+
+import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "collaboration:codeAdmission": [[path: string], CodeAdmission];
+  "collaboration:candidatePreview": [[id: string, versionId: string], CandidatePreview];
+  "collaboration:adoptionPreview": [[id: string, versionId: string], AdoptionPreview];
+  "collaboration:applyCandidate": [[id: string, request: AdoptionRequest], AdoptionState];
+  "collaboration:recoverAdoption": [[id: string, adoptionId: string], AdoptionState];
+  "collaboration:candidateAction": [[id: string, action: "manual" | "discard"], string];
+  "collaboration:capabilities": [[source?: import("./collaboration.js").CollaborationSource], CollaborationCapabilities[]];
+  "collaboration:start": [[params: CollaborationStartParams], CollaborationSnapshot];
+  "collaboration:expertProfiles": [[projectPath:string], ExpertProfilePreview[]];
+  "collaboration:startExperts": [[params: ExpertStartParams], CollaborationSnapshot];
+  "collaboration:resumeExperts": [[id:string,params:ExpertResumeParams],void];
+  "collaboration:get": [[id: string], CollaborationSnapshot];
+  "collaboration:list": [[sessionKey: string, sessionId?: string], CollaborationSnapshot[]];
+  "collaboration:cancel": [[id: string], void];
+  "collaboration:pause": [[id: string], void];
+  "collaboration:resume": [[id: string, params: CollaborationResumeParams], void];
+  "collaboration:reply": [[id: string, messageId: string, text: string], void];
+  "collaboration:cancelDelivery": [[id: string, deliveryId: string], void];
+  "collaboration:recoveryIssues": [[], RecoveryIssue[]];
+  "collaboration:repair": [[id: string], CollaborationSnapshot];
+  "collaboration:artifact": [[runId: string, versionId: string], { text: string; markdown: string }];
   "agent:status": [[], AgentStatus[]];
   "agent:models": [[agent: AgentKind], ModelOption[]];
   "agent:commands": [[agent: AgentKind, projectPath: string, sessionKey?: string, sessionId?: string], SlashCommandOption[]];
@@ -100,6 +127,7 @@ export interface InvokeMap {
 
 /** 主进程 → 渲染进程事件 */
 export interface EventMap {
+  "collaboration:updated": CollaborationSnapshot;
   "app:menuCommand": { command: AppCommand; index?: number; fromAccelerator?: boolean };
   "sessions:indexChanged": { projectPaths: string[] };
   "chat:rows": ChatRowsEvent;
@@ -123,6 +151,8 @@ export interface HCodeBridge {
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
+  "collaboration:expertProfiles",
+  "collaboration:adoptionPreview", "collaboration:applyCandidate", "collaboration:recoverAdoption", "collaboration:codeAdmission", "collaboration:candidatePreview", "collaboration:candidateAction", "collaboration:capabilities", "collaboration:start", "collaboration:startExperts", "collaboration:resumeExperts", "collaboration:get", "collaboration:list", "collaboration:cancel", "collaboration:artifact", "collaboration:pause", "collaboration:resume", "collaboration:reply", "collaboration:cancelDelivery", "collaboration:recoveryIssues", "collaboration:repair",
   "agent:status",
   "agent:models",
   "agent:commands",
@@ -179,6 +209,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
+  "collaboration:updated",
   "app:menuCommand",
   "sessions:indexChanged",
   "chat:rows",

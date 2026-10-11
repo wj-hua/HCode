@@ -26,6 +26,10 @@ import { ExtensionsService } from "./extensions.js";
 import { searchSessions } from "./sessionSearch.js";
 import { installApplicationMenu } from "./menu.js";
 import { readTextFile } from "./readTextFile.js";
+import { SessionExecutionService } from "./sessions/sessionExecutionService.js";
+import {ExpertProfileService} from "./collaboration/experts/profiles/expertProfileService.js";
+import { CollaborationService } from "./collaboration/collaborationService.js";
+import { CollaborationRepository } from "./collaboration/collaborationRepository.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -79,6 +83,7 @@ async function bootstrap() {
   const store = new AppStore(app.getPath("userData"));
   const conversationWorkspace = new ConversationWorkspace(app.getPath("userData"));
   let quota: QuotaService | null = null;
+  let execution: SessionExecutionService | null = null;
 
   // 有会话在运行且开关打开时阻止系统休眠
   const runningSessions = new Set<string>();
@@ -145,8 +150,10 @@ async function bootstrap() {
   };
 
   const events: AgentEvents = {
+    turnOutcome: (event) => execution?.acceptOutcome(event),
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
     state: (event) => {
+      if (event.sessionId) execution?.observeIdentity(event.sessionKey, event.agent, event.sessionId);
       const wasActive = activeGitTurns.has(event.sessionKey);
       if (event.state === "running") runningSessions.add(event.sessionKey);
       else runningSessions.delete(event.sessionKey);
@@ -175,7 +182,7 @@ async function bootstrap() {
     claude,
     codex,
     step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
-    agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy),
+    agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration")),
     pi: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.pi, PI_VARIANT),
   });
   quota = new QuotaService(agents, buildAgentEnv, (snapshot) => send("quota:updated", snapshot));
@@ -256,22 +263,26 @@ async function bootstrap() {
     return provider.forkSession(params);
   });
 
-  handle("chat:send", async (params) => {
-    if (params.projectPath === conversationWorkspace.path) await conversationWorkspace.ensure();
-    const files = await Promise.all((params.files ?? []).map(async (file) => {
-      if (!isAbsolute(file.path)) throw new Error(`附件路径无效：${file.name}`);
-      const path = await realpath(file.path);
-      const info = await stat(path);
-      if (!info.isFile()) throw new Error(`附件不是文件：${file.name}`);
-      return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
-    }));
-    const root = await repositoryRoot(params.projectPath, buildAgentEnv()).catch(() => null);
-    // 排队发送前先完成上一轮的读取，避免把下一轮的写入算进上一轮历史。
-    await Promise.all([...pendingGitFinishes.values()].filter((pending) => pending.root === root).map((pending) => pending.promise));
-    if (root && gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请完成后再发送消息");
-    if (root) sessionGitRoots.set(params.sessionKey, root);
-    startingGitSessions.add(params.sessionKey);
-    try {
+  execution = new SessionExecutionService({
+    send: (params) => agents.send(params),
+    interrupt: async (key) => { await requireSession(key).interrupt(key); },
+    failedToSend: finishTurn,
+    finishedSending: (key) => startingGitSessions.delete(key),
+    prepare: async (params) => {
+      if (params.projectPath === conversationWorkspace.path) await conversationWorkspace.ensure();
+      const files = await Promise.all((params.files ?? []).map(async (file) => {
+        if (!isAbsolute(file.path)) throw new Error(`附件路径无效：${file.name}`);
+        const path = await realpath(file.path);
+        const info = await stat(path);
+        if (!info.isFile()) throw new Error(`附件不是文件：${file.name}`);
+        return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
+      }));
+      const root = await repositoryRoot(params.projectPath, buildAgentEnv()).catch(() => null);
+      // 排队发送前先完成上一轮的读取，避免把下一轮的写入算进上一轮历史。
+      await Promise.all([...pendingGitFinishes.values()].filter((pending) => pending.root === root).map((pending) => pending.promise));
+      if (root && gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请完成后再发送消息");
+      if (root) sessionGitRoots.set(params.sessionKey, root);
+      startingGitSessions.add(params.sessionKey);
       // 在 CLI 有机会修改文件前记录基线；Git 不可用时仍照常发送消息。
       const turn = await beginGitTurn(params.projectPath, buildAgentEnv(), params.text).catch(() => null);
       turnGenerations.set(params.sessionKey, (turnGenerations.get(params.sessionKey) ?? 0) + 1);
@@ -280,20 +291,41 @@ async function bootstrap() {
         gitTurns.set(params.sessionKey, turn);
         send("git:turnDiff", { sessionKey: params.sessionKey, diff: null, turnId: turn.id });
       }
-      return await agents.send({ ...params, files });
-    } catch (error) {
-      finishTurn(params.sessionKey);
-      throw error;
-    } finally {
-      startingGitSessions.delete(params.sessionKey);
-    }
+      return { ...params, files };
+    },
   });
+  handle("chat:send", (params) => execution!.send(params));
+  const collaboration = new CollaborationService(new CollaborationRepository(join(app.getPath("userData"), "collaborations")), execution, agents, (snapshot) => send("collaboration:updated", snapshot), process.platform, new ExpertProfileService(join(app.getPath("userData"),"collaborations"),{discoverSkills:project=>extensions.expertSkills(project)}));
+  handle("collaboration:codeAdmission", (path) => collaboration.inspectCodeProject(path));
+  handle("collaboration:candidatePreview", (id, version) => collaboration.candidatePreview(id, version));
+  handle("collaboration:adoptionPreview", (id,version) => collaboration.adoptionPreview(id,version));
+  handle("collaboration:applyCandidate", (id,request) => collaboration.applyCandidate(id,request));
+  handle("collaboration:recoverAdoption", (id,adoptionId) => collaboration.recoverAdoption(id,adoptionId));
+  handle("collaboration:candidateAction", (id, action) => collaboration.candidateAction(id, action));
+  handle("collaboration:capabilities", (source) => collaboration.capabilities(source));
+  handle("collaboration:start", (params) => collaboration.start(params));
+  handle('collaboration:expertProfiles',project=>collaboration.profiles.catalog(project));
+  handle('collaboration:startExperts',params=>collaboration.startExperts(params));
+  handle('collaboration:resumeExperts',(id,params)=>collaboration.expertControls.resume(id,params));
+  handle("collaboration:get", (id) => collaboration.get(id));
+  handle("collaboration:list", (key, id) => collaboration.list(key, id));
+  handle("collaboration:pause", (id) => collaboration.controls.stop(id, "pause"));
+  handle("collaboration:resume", (id, params) => collaboration.controls.resume(id, params));
+  handle("collaboration:reply", (id, messageId, text) => collaboration.controls.reply(id, messageId, text));
+  handle("collaboration:cancelDelivery", (id, deliveryId) => collaboration.controls.cancelDelivery(id, deliveryId));
+  handle("collaboration:recoveryIssues", () => collaboration.recoveryIssues());
+  handle("collaboration:repair", (id) => collaboration.repair(id));
+  handle("collaboration:cancel", (id) => collaboration.cancel(id));
+  handle("collaboration:artifact", (runId, versionId) => collaboration.artifact(runId, versionId));
   handle("chat:interrupt", async (sessionKey) => {
+    const runId = execution!.reservationOwner(sessionKey);
+    if (runId) return collaboration.cancel(runId);
     await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
   });
-  handle("chat:setPermissionMode", (sessionKey, mode) => requireSession(sessionKey).setPermissionMode(sessionKey, mode));
-  handle("chat:setModel", (sessionKey, model) => requireSession(sessionKey).setModel(sessionKey, model));
+  handle("chat:setPermissionMode", (sessionKey, mode) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改权限"); return requireSession(sessionKey).setPermissionMode(sessionKey, mode); });
+  handle("chat:setModel", (sessionKey, model) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改模型"); return requireSession(sessionKey).setModel(sessionKey, model); });
   handle("chat:close", (sessionKey) => {
+    if (execution!.isReserved(sessionKey)) return;
     gitTurns.delete(sessionKey);
     completedGitTurns.delete(sessionKey);
     sessionGitRoots.delete(sessionKey);
@@ -441,6 +473,7 @@ async function bootstrap() {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(store);
   });
   app.on("before-quit", () => {
+    collaboration.dispose();
     quota?.dispose();
     agents.dispose();
   });

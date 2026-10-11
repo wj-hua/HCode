@@ -30,7 +30,7 @@ export class AppServerClient extends EventEmitter {
   private stderrTail = "";
 
   constructor(
-    private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string> }>,
+    private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string>; experimentalApi?: boolean }>,
     /** initialize 握手里上报的 HCode 版本。 */
     private readonly clientVersion: string,
   ) {
@@ -54,7 +54,7 @@ export class AppServerClient extends EventEmitter {
   }
 
   private async start() {
-    const { path, env } = await this.resolveLaunch();
+    const { path, env, experimentalApi } = await this.resolveLaunch();
     const child = spawn(path, ["app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     this.buffer = "";
@@ -82,7 +82,7 @@ export class AppServerClient extends EventEmitter {
     });
     await this.request("initialize", {
       clientInfo: { name: "hcode", title: "HCode", version: this.clientVersion },
-      capabilities: null,
+      capabilities: experimentalApi ? { experimentalApi: true } : null,
     });
     this.notify("initialized");
   }

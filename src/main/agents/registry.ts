@@ -2,11 +2,10 @@
 import type {
   AgentKind,
   AgentStatus,
-  ChatSendParams,
   PermissionDecision,
   SessionSummary,
 } from "../../shared/types.js";
-import type { AgentProvider } from "./types.js";
+import type { AgentProvider, AgentSendParams } from "./types.js";
 
 export class AgentRegistry {
   constructor(private readonly providers: Record<AgentKind, AgentProvider>) {}
@@ -35,7 +34,7 @@ export class AgentRegistry {
     return lists.flat().sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  send(params: ChatSendParams) {
+  send(params: AgentSendParams) {
     return this.get(params.agent).send(params);
   }
 

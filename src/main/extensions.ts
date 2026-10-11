@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import type { ExtensionAgent, ExtensionsSnapshot, McpAddParams, McpEntry, SkillEntry } from "../shared/types.js";
 import type { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import type { CodexAgent } from "./agents/codex/codexAgent.js";
+import {discoverExpertSkillSources} from "./extensions/expertSkillSources.js";
 import { skillName } from "./util/skillFrontmatter.js";
 
 const execFile = promisify(execFileCallback);
@@ -61,7 +62,7 @@ async function ignoreClaudeLocalSettings(projectPath: string): Promise<void> {
   }
 }
 
-async function claudeSkills(projectPath: string): Promise<SkillEntry[]> {
+async function claudeSkills(projectPath: string, allSources = false): Promise<SkillEntry[]> {
   const userSettings = await readObject(join(homedir(), ".claude", "settings.json"));
   const projectSettings = await readObject(join(projectPath, ".claude", "settings.json"));
   const localSettings = await readObject(join(projectPath, ".claude", "settings.local.json"));
@@ -105,6 +106,7 @@ async function claudeSkills(projectPath: string): Promise<SkillEntry[]> {
       skills.push({ name, description: parsed.description, path, scope: root.scope, enabled: root.enabled && (root.scope === "plugin" || overrides[name] !== "off"), canToggle: root.canToggle });
     }
   }
+  if(allSources)return skills;
   // Claude 对重名技能只加载优先级更高的一份；用户技能优先于项目技能。
   return [...new Map(skills.reverse().map((skill) => [skill.name, skill])).values()]
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -127,6 +129,11 @@ export class ExtensionsService {
       maxBuffer: 4 * 1024 * 1024,
     });
     return stdout;
+  }
+
+  async expertSkills(projectPath:string):Promise<SkillEntry[]> {
+    const [codex,claude]=await Promise.all([this.codex.listManagedSkills(projectPath),claudeSkills(projectPath,true)]);
+    return discoverExpertSkillSources(homedir(),projectPath,[...codex,...claude]);
   }
 
   async list(agent: ExtensionAgent, projectPath: string): Promise<ExtensionsSnapshot> {

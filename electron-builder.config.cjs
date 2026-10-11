@@ -5,6 +5,7 @@ module.exports = {
   directories: { output: "release", buildResources: "resources" },
   files: ["out/**/*", "!out/**/*.map", "!out/test/**", "package.json"],
   asar: true,
+  asarUnpack: ["out/native/*.dylib"],
   npmRebuild: false,
   mac: {
     target: [{ target: "dmg", arch: ["arm64"] }],

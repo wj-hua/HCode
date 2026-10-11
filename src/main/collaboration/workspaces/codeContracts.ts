@@ -1,0 +1,10 @@
+// 隔离交付的 IPC/落盘校验；检查命令只接受宿主发现的有限选项。
+import { z } from 'zod';
+import { adoptionStateSchema } from '../adoption/adoptionContracts.js';
+export const checkIdSchema = z.enum(['node-test', 'typecheck', 'test', 'build']);
+export const codeStartSchema = z.object({ admissionHash: z.string().regex(/^[a-f0-9]{64}$/), checks: z.array(checkIdSchema).min(1).max(4).refine((value) => new Set(value).size === value.length, '检查重复') }).strict();
+const hash = z.string().regex(/^[a-f0-9]{64}$/);
+export const admissionSchema = z.object({ hash, fileCount: z.number().int().nonnegative(), bytes: z.number().nonnegative(), checks: z.array(z.object({ id: checkIdSchema, executable: z.string().min(1), args: z.array(z.string()), description: z.string(), scripts: z.record(z.string(), z.string()).optional() }).strict()), gitStatus: z.string(), sourceRevision: z.string(), strategy: z.literal('full-copy') }).strict();
+export const workspaceSchema = z.object({ id: z.string().uuid(), path: z.string().min(1), originalPath: z.string().min(1), baselineHash: hash, admission: admissionSchema, state: z.enum(['candidate', 'manual', 'discarded']) }).strict();
+export const codeVersionSchema = z.object({ id: z.string().uuid(), version: z.number().int().positive(), hash, changes: z.array(z.object({ path: z.string(), kind: z.enum(['added', 'modified', 'deleted']), binary: z.boolean(), beforeHash: hash.optional(), afterHash: hash.optional(), beforeMode: z.number().int().optional(), afterMode: z.number().int().optional() }).strict()) }).strict();
+export const codeStateSchema = z.object({ adoption: adoptionStateSchema.optional(), workspace: workspaceSchema, versions: z.array(codeVersionSchema), validations: z.array(z.object({ checkId: checkIdSchema, command: z.string(), versionId: z.string().uuid(), versionHash: hash, exitCode: z.number().int().nullable(), status: z.enum(['passed', 'failed', 'interrupted']), stdout: z.string(), stderr: z.string(), logTruncated: z.boolean() }).strict()), phase: z.enum(['execution', 'validation', 'review', 'candidate', 'manual', 'discarded']), stopUnconfirmed: z.boolean().optional() }).strict();

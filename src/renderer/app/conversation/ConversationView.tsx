@@ -8,6 +8,7 @@ import { useAppStore, type Conversation } from "../store/appStore";
 import { Timeline } from "./Timeline";
 import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
+import { CollaborationPanel, useActiveCollaboration } from "../collaboration/CollaborationPanel";
 
 const STICK_THRESHOLD_PX = 80;
 
@@ -21,6 +22,7 @@ export function ConversationView({
   /** 对比分栏中的一列：不带输入框，由对比视图共用底部输入框。 */
   column?: boolean;
 }) {
+  const collaboration = useActiveCollaboration(conversation);
   const permissions = useAppStore((state) => state.permissions);
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -121,7 +123,8 @@ export function ConversationView({
         </div>
         <div className={cn("shrink-0", column ? "px-3" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
           <TaskListPanel conversation={conversation} />
-          {column ? null : (
+          {column ? null : <CollaborationPanel conversation={conversation} />}
+          {column || collaboration ? null : (
             <Composer
               key={conversation.viewId}
               conversation={conversation}
