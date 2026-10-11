@@ -20,7 +20,7 @@ export const snapshotSchema = z.object({
   status: z.enum(["running", "stopping", "paused", "awaitingUser", "completed", "failed", "cancelled", "interrupted"]),
   stage: z.enum(["planning", "awaitingWorkers", "expertResearch", "peerReview", "synthesis", "finished"]),
   tasks: z.array(z.object({ id: z.string().uuid(), deliveryId: z.string().uuid().optional(), expertId:z.string().uuid().optional(), sessionKey: z.string().uuid(), agent: z.enum(COLLABORATION_WORKER_AGENTS), model: z.string().optional(), role: z.enum(["planning", "execution", "review", "synthesis"]), status: z.enum(["running", "succeeded", "failed", "cancelled", "interrupted"]), nativeSessionId: z.string().optional(), error: z.string().optional(), usage: z.object({ contextUsedTokens: z.number().optional(), contextWindowTokens: z.number().optional(), contextUsedPercent: z.number().optional(), inputTokens: z.number().optional(), outputTokens: z.number().optional() }).strict().optional() }).strict()),
-  deliveries: z.array(z.object({ id: z.string().uuid(), requestKey: z.string(), objective: z.string(), executor: startSchema.shape.executor, status: z.enum(["queued", "executing", "reviewing", "revising", "accepted", "failed", "awaitingUser", "cancelled", "interrupted"]), versions: z.array(versionSchema), reviews: z.array(z.object({ versionId: z.string().uuid(), verdict: z.enum(["approved", "changesRequested", "inconclusive"]), summary: z.string(), issues: reviewSchema.shape.issues, reviewer: z.object({ agent: z.enum(["claude", "codex", "step", "agy", "pi"]), sessionKey: z.string().uuid(), nativeSessionId: z.string().optional() }).strict().optional() }).strict()), error: z.string().optional(), workerSessionKey: z.string().uuid().optional() }).strict()),
+  deliveries: z.array(z.object({ code: codeStateSchema.optional(), id: z.string().uuid(), requestKey: z.string(), objective: z.string(), executor: startSchema.shape.executor, status: z.enum(["queued", "executing", "reviewing", "revising", "accepted", "failed", "awaitingUser", "cancelled", "interrupted"]), versions: z.array(versionSchema), reviews: z.array(z.object({ versionId: z.string().uuid(), verdict: z.enum(["approved", "changesRequested", "inconclusive"]), summary: z.string(), issues: reviewSchema.shape.issues, reviewer: z.object({ agent: z.enum(["claude", "codex", "step", "agy", "pi"]), sessionKey: z.string().uuid(), nativeSessionId: z.string().optional() }).strict().optional() }).strict()), error: z.string().optional(), workerSessionKey: z.string().uuid().optional() }).strict()),
   summary: z.string().optional(), error: z.string().optional(), persistenceError: z.string().optional(),
   stopIntent: z.enum(["pause", "cancel"]).optional(),
   code: codeStateSchema.optional(),
@@ -28,6 +28,16 @@ export const snapshotSchema = z.object({
   messages: z.array(z.object({ id: z.string().uuid(), deliveryId: z.string().uuid(), requestKey: z.string(), sender: z.enum(["worker", "initiator", "user"]), recipient: z.enum(["initiator", "worker"]), type: z.enum(["clarification", "answer", "context"]), text: z.string().max(COLLABORATION_LIMITS.maxContextLength), createdAt: z.number(), requiresUser: z.boolean().optional(), replyTo: z.string().uuid().optional() }).strict()).max(COLLABORATION_LIMITS.maxMessages).optional(),
 }).strict().superRefine((snapshot,context)=>{
   if((snapshot.params.mode==='experts')!==Boolean(snapshot.experts)||snapshot.experts&&(snapshot.code||snapshot.deliveries.length))context.addIssue({code:'custom',message:'专家状态与协作模式不一致'});
+  if(snapshot.params.mode!=='experts'){
+    const options=snapshot.params.code,configured=options?.tasks;
+    if(configured){
+      const mismatch=snapshot.code || snapshot.deliveries.length!==configured.length || new Set(snapshot.deliveries.map(delivery=>delivery.code?.workspace.id)).size!==configured.length || snapshot.deliveries.some(delivery=>{
+        const task=configured.find(task=>task.requestKey===delivery.requestKey),code=delivery.code;
+        return !task||!code||task.objective!==delivery.objective||task.executor.agent!==delivery.executor.agent||task.executor.model!==delivery.executor.model||JSON.stringify(task.allowedPaths)!==JSON.stringify(code.allowedPaths)||code.workspace.runId!==snapshot.id||code.workspace.originalPath!==snapshot.params.initiator.projectPath||code.workspace.baselineHash!==options!.admissionHash;
+      });
+      if(mismatch)context.addIssue({code:'custom',message:'并行写任务状态与用户确认计划或共同基线不一致'});
+    }else if(snapshot.deliveries.some(delivery=>delivery.code))context.addIssue({code:'custom',message:'未配置并行写任务，不能附加独立代码工作区'});
+  }
   if(snapshot.params.mode==='experts'&&snapshot.experts&&(snapshot.experts.turnLimit??MAX_RUN_TURNS)!==(snapshot.params.turnLimit??MAX_RUN_TURNS))context.addIssue({code:'custom',message:'专家累计预算与启动配置不一致'});
 });
 

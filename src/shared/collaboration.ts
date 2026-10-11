@@ -67,6 +67,7 @@ export interface DeliveryReview {
 }
 
 export interface DeliverySnapshot {
+  code?: CodeDeliveryState;
   id: string;
   requestKey: string;
   objective: string;

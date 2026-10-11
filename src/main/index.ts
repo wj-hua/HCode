@@ -301,7 +301,7 @@ async function bootstrap() {
   handle("collaboration:adoptionPreview", (id,version) => collaboration.adoptionPreview(id,version));
   handle("collaboration:applyCandidate", (id,request) => collaboration.applyCandidate(id,request));
   handle("collaboration:recoverAdoption", (id,adoptionId) => collaboration.recoverAdoption(id,adoptionId));
-  handle("collaboration:candidateAction", (id, action) => collaboration.candidateAction(id, action));
+  handle("collaboration:candidateAction", (id, action, deliveryId) => collaboration.candidateAction(id, action, deliveryId));
   handle("collaboration:capabilities", (source) => collaboration.capabilities(source));
   handle("collaboration:start", (params) => collaboration.start(params));
   handle('collaboration:expertProfiles',project=>collaboration.profiles.catalog(project));

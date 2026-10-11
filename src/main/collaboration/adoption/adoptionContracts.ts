@@ -29,6 +29,7 @@ export const adoptionStateSchema = z
   .object({
     id: z.string().uuid(),
     runId: z.string().uuid(),
+    workspaceId: z.string().uuid().optional(),
     versionId: z.string().uuid(),
     versionHash: adoptionHash,
     previewHash: adoptionHash,

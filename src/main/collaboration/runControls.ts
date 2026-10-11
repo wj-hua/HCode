@@ -1,4 +1,5 @@
 // 用户操作在可信回合边界生效；续跑保留历史/预算并复核证据，绝不自动扩大权限。
+import { codeCandidates, deliveryCode } from '../../shared/codeCandidates.js';
 import { z } from "zod";
 import type { CollaborationResumeParams, DeliverySnapshot } from "../../shared/collaboration.js";
 import type { AgentRegistry } from "../agents/registry.js";
@@ -12,6 +13,7 @@ import { assertEvidenceCurrent } from "./reportEvidence.js";
 import type { WorkspaceService } from "./workspaces/workspaceService.js";
 interface ControlHost {
   workspaces?: WorkspaceService;
+  exclusive<T>(id:string,action:()=>Promise<T>):Promise<T>;
   repository: CollaborationRepository;
   execution: SessionExecutionService;
   agents: AgentRegistry;
@@ -26,6 +28,9 @@ export class RunControls {
 
   /** stopping 先持久化；paused/cancelled 由调度器确认活动回合停止后落盘。 */
   async stop(id: string, intent: "pause" | "cancel") {
+    return this.host.exclusive(id,()=>this.stopRun(id,intent));
+  }
+  private async stopRun(id:string,intent:"pause"|"cancel") {
     const active = await this.host.active(id);
     const snapshot = active.snapshot;
     if (!["running", "stopping"].includes(snapshot.status)) {
@@ -50,6 +55,9 @@ export class RunControls {
   }
 
   async cancelDelivery(id: string, deliveryId: string) {
+    return this.host.exclusive(id,()=>this.cancelRunDelivery(id,deliveryId));
+  }
+  private async cancelRunDelivery(id:string,deliveryId:string) {
     const active = await this.host.active(id);
     const delivery = this.delivery(active, deliveryId);
     if (delivery.status === "accepted") throw new Error("报告已接受，不能取消已完成交付");
@@ -69,16 +77,23 @@ export class RunControls {
 
   /** 只重跑用户指定的交付；旧意见/旧版本保留，硬预算累计不重置。 */
   async resume(id: string, input: CollaborationResumeParams) {
+    return this.host.exclusive(id,()=>this.resumeRun(id,input));
+  }
+  private async resumeRun(id:string,input:CollaborationResumeParams) {
     const params = resumeSchema.parse(input);
     const active = await this.host.active(id);
     if (["running", "stopping", "cancelled"].includes(active.snapshot.status)) throw new Error("请先暂停或等待活动回合结束");
     await active.done;
     const snapshot = active.snapshot;
+    if(codeCandidates(snapshot).some(({code})=>code.adoption && (['prepared','applying','needsRecovery'].includes(code.adoption.status)||code.adoption.cleanupPending)))throw new Error('请先恢复原项目的未完成采纳，再续跑 AI');
     if(snapshot.experts)throw new Error("专家流程请使用专家续跑操作");
-    if(snapshot.code&&this.host.workspaces?.isLeased(snapshot.code.workspace.id))throw new Error("候选正在采纳或其他操作中");
-    if (adoptionBlocksEdits(snapshot.code?.adoption)) throw new Error("候选已应用或采纳尚需恢复，不能重新执行");
-    if (snapshot.code?.workspace.state === "discarded" || snapshot.code?.stopUnconfirmed) throw new Error("候选已丢弃或停止未确认，不能续跑");
     const targets = params.deliveryId ? [this.delivery(active, params.deliveryId)] : snapshot.deliveries.filter((entry) => entry.status !== "accepted" && entry.status !== "cancelled");
+    for(const delivery of targets){
+      const code=deliveryCode(snapshot,delivery);
+      if(code&&this.host.workspaces?.isLeased(code.workspace.id))throw new Error("候选正在采纳或其他操作中");
+      if(adoptionBlocksEdits(code?.adoption))throw new Error("候选已应用或采纳尚需恢复，不能重新执行");
+      if(code?.workspace.state==='discarded'||code?.stopUnconfirmed)throw new Error("候选已丢弃或停止未确认，不能续跑");
+    }
     if (!targets.length) throw new Error("没有需要续跑的交付，请选择具体任务");
     const requiredTurns = 1 + targets.length * (params.action === "review" ? 1 : 2);
     if (snapshot.tasks.length + requiredTurns > MAX_RUN_TURNS) throw new Error("累计回合预算不足；保留历史，需要另行决定预算，不自动加额度或换模型");
@@ -92,6 +107,7 @@ export class RunControls {
     }
     // 接管期间其他已接受报告也可能变化；不让旧通过结论污染最终汇总。
     for (const delivery of snapshot.deliveries.filter((entry) => entry.status === "accepted")) {
+      if(adoptionBlocksEdits(deliveryCode(snapshot,delivery)?.adoption))continue;
       try { await this.checkVersion(active, delivery); }
       catch (error) { await this.invalidate(active, delivery, error); }
     }
@@ -115,7 +131,7 @@ export class RunControls {
     delivery.status = "awaitingUser";
     delivery.error = String(error);
     active.snapshot.status = "awaitingUser";
-    active.snapshot.error = active.snapshot.code ? "候选或报告变化，旧接受结果失效；请重新实现 / 修订后验证并送审" : "报告或源码变化，旧接受结果失效；请重新调研后送审";
+    active.snapshot.error = codeCandidates(active.snapshot).length ? "候选或报告变化，旧接受结果失效；请重新实现 / 修订后验证并送审" : "报告或源码变化，旧接受结果失效；请重新调研后送审";
     delete active.snapshot.summary;
     await this.host.changed(active);
   }
@@ -124,11 +140,12 @@ export class RunControls {
     const version = delivery.versions.at(-1);
     if (!version) throw new Error("没有报告可以重新审查，请选择重新执行");
     await this.host.repository.readReport(active.snapshot.id, version);
-    await assertEvidenceCurrent(active.snapshot.code?.workspace.path ?? active.snapshot.params.initiator.projectPath, version.evidence);
-    if (active.snapshot.code) {
-      const frozen = active.snapshot.code.versions.at(-1);
+    const code=deliveryCode(active.snapshot,delivery);
+    await assertEvidenceCurrent(code?.workspace.path ?? active.snapshot.params.initiator.projectPath, version.evidence);
+    if (code) {
+      const frozen = code.versions.at(-1);
       if (!frozen || !this.host.workspaces) throw new Error("没有候选代码版本可重新审查");
-      await this.host.workspaces.assertCurrent(active.snapshot.code.workspace, frozen);
+      await this.host.workspaces.assertCurrent(code.workspace, frozen);
     }
   }
 }

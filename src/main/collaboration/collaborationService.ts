@@ -1,6 +1,9 @@
 // 当前会话发起委派，宿主调度审查与修订；模型工具仅访问闭包绑定的 Run。
 import { CollaborationRunner } from "./collaborationRunner.js";
 import { WorkspaceService } from "./workspaces/workspaceService.js";
+import { codeCandidates, candidateForVersion, candidateSnapshot, deliveryCode } from '../../shared/codeCandidates.js';
+import { RunOperations } from './runOperations.js';
+import { CodeRunService } from './workspaces/codeRunService.js';
 import { CodeDeliveryWorkflow } from "./workspaces/codeDeliveryWorkflow.js";
 import { inspectCodeProject } from "./workspaces/validationPlan.js";
 import { randomUUID } from "node:crypto";
@@ -27,7 +30,7 @@ import { expertSummaryData } from './experts/expertEvidence.js';
 
 import { ExpertProfileService } from "./experts/profiles/expertProfileService.js";
 import { CodeAdoptionService } from "./adoption/codeAdoptionService.js";
-import { adoptionBlocksEdits, type AdoptionRequest } from "../../shared/codeAdoption.js";
+import { type AdoptionRequest } from "../../shared/codeAdoption.js";
 export class CollaborationService {
   readonly adoption: CodeAdoptionService;
   private readonly runs = new Map<string, ActiveRun>();
@@ -35,6 +38,8 @@ export class CollaborationService {
   readonly expertControls:ExpertControls;
   private readonly runner: CollaborationRunner;
   readonly workspaces: WorkspaceService;
+  private readonly codeRuns: CodeRunService;
+  private readonly operations=new RunOperations();
   inspectCodeProject = inspectCodeProject;
 
   private activate(snapshot: CollaborationSnapshot) {
@@ -46,11 +51,13 @@ export class CollaborationService {
 
   constructor(private readonly repository: CollaborationRepository, private readonly execution: SessionExecutionService, private readonly agents: AgentRegistry, private readonly emit: (snapshot: CollaborationSnapshot) => void, private readonly platform: NodeJS.Platform = process.platform, readonly profiles = new ExpertProfileService(repository.root)) {
     this.workspaces = new WorkspaceService(repository.root);
+    this.codeRuns = new CodeRunService(this.workspaces);
     this.adoption = new CodeAdoptionService(this.workspaces,repository);
     this.runner=new CollaborationRunner({repository,execution,agents,profiles,emit,changed:active=>this.changed(active),tools:active=>this.tools(active),launchDelivery:(active,delivery,reviewOnly)=>this.launchDelivery(active,delivery,reviewOnly),revalidateDeliveries:active=>this.revalidateDeliveries(active)});
     this.expertControls=new ExpertControls({repository,execution,profiles,active:async id=>this.runs.get(z.string().uuid().parse(id))??this.activate(this.recovered(await repository.load(id))),assertSource:async (source,experts)=>{const capabilities=await this.capabilities(source);assertExpertBackends(experts,capabilities);const capability=capabilities.find(entry=>entry.agent===source.agent);if(!capability?.canInitiate)throw new Error(capability?.reason??'当前源会话不支持专家主持');},changed:active=>this.changed(active),continue:(active,params)=>{active.done=this.runner.run(active,params);}});
     this.controls = new RunControls({
       workspaces: this.workspaces,
+      exclusive:(id,action)=>this.operations.execute(id,action),
       repository, execution, agents,
       active: async (id) => this.activeRun(id),
       changed: (active) => this.changed(active),
@@ -80,13 +87,7 @@ export class CollaborationService {
     this.execution.reserve(params.initiator.sessionKey, snapshot.id, params.initiator.resumeSessionId ? `${params.initiator.agent}:${params.initiator.resumeSessionId}` : undefined);
     let active: ActiveRun;
     try {
-      if (params.code) {
-        const admission = await inspectCodeProject(root);
-        if (admission.hash !== params.code.admissionHash) throw new Error("项目已变化，请重新确认验证计划");
-        const checks = params.code.checks.map((id) => { const check = admission.checks.find((entry) => entry.id === id); if (!check) throw new Error("检查不属于本次项目配置"); return check; });
-        const workspace = await this.workspaces.create(root, snapshot.id, { ...admission, checks });
-        snapshot.code = { workspace, versions: [], validations: [], phase: "execution" };
-      }
+      await this.codeRuns.initialize(snapshot,params,capabilities);
       active = this.activate(snapshot);
       await this.changed(active);
     }
@@ -107,14 +108,24 @@ export class CollaborationService {
     await this.adoption.decorate(active.snapshot);
     return active;
   }
-  adoptionPreview = async (id:string,versionId:string) => this.adoption.preview(await this.get(id),versionId);
+  adoptionPreview = async (id:string,versionId:string) => this.adoptionPreviewForVersion(await this.get(id),versionId);
+  private adoptionPreviewForVersion(snapshot:CollaborationSnapshot,versionId:string) {
+    return this.adoption.preview(candidateSnapshot(snapshot,candidateForVersion(snapshot,versionId)),versionId);
+  }
   async applyCandidate(id:string,request:AdoptionRequest) {
+    return this.operations.execute(id,async()=>{
     const active=await this.activeRun(id);await active.done;
-    const result=await this.adoption.apply(active.snapshot,request);await this.changed(active);return result;
+    const target=candidateForVersion(active.snapshot,request.versionId);
+    const result=await this.adoption.apply(candidateSnapshot(active.snapshot,target),request);await this.changed(active);return result;
+    });
   }
   async recoverAdoption(id:string,adoptionId:string) {
+    return this.operations.execute(id,async()=>{
     const active=await this.activeRun(id);await active.done;
-    const result=await this.adoption.recover(active.snapshot,adoptionId);await this.changed(active);return result;
+    const target=codeCandidates(active.snapshot).find(entry=>entry.code.adoption?.id===adoptionId);
+    if(!target)throw new Error('采纳恢复记录不属于本次代码任务');
+    const result=await this.adoption.recover(candidateSnapshot(active.snapshot,target),adoptionId);await this.changed(active);return result;
+    });
   }
 
   /** 冻结专家配置后启动；首轮上下文不携带其他专家产物。 */
@@ -169,35 +180,19 @@ export class CollaborationService {
   }
 
 
-  /** 已停止的候选可接管或丢弃；未确认停止不开放人工写入。 */
-  async candidateAction(id: string, action: "manual" | "discard") {
-    z.enum(["manual", "discard"]).parse(action);
+  /** 操作绑定所选独立任务；先等待所有模型回合停止，副本和原项目不会混用。 */
+  async candidateAction(id: string, action: "manual" | "discard" | "cleanup", deliveryId?: string) {
+    return this.operations.execute(id,async()=>{
+    z.enum(["manual", "discard", "cleanup"]).parse(action);
     const active = await this.activeRun(id);
     if (["running", "stopping"].includes(active.snapshot.status)) throw new Error("先暂停并等待原生停止确认");
     await active.done;
-    const code = active.snapshot.code;
-    if (!code || code.workspace.state === "discarded") throw new Error("没有可操作的候选工作区");
-    if (adoptionBlocksEdits(code.adoption)) throw new Error("候选已应用或采纳尚需恢复，不能接管或丢弃");
-    if (code.stopUnconfirmed || this.workspaces.isLeased(code.workspace.id)) throw new Error("工作区停止尚未确认，租约保持锁定");
-    if (action === "discard") { await this.workspaces.discard(code.workspace); code.phase = "discarded"; active.snapshot.status = "cancelled"; }
-    else { code.workspace.state = "manual"; code.phase = "manual"; active.snapshot.status = "awaitingUser"; }
-    for (const delivery of active.snapshot.deliveries) { delivery.status = action === "discard" ? "cancelled" : "awaitingUser"; delivery.error = action === "discard" ? "用户已丢弃可写副本，冻结历史仍保留" : "用户已接管候选目录，旧通过结论失效；人工编辑后重新执行验证和审查"; }
-    delete active.snapshot.summary;
-    await this.changed(active);
-    return code.workspace.path;
+    const path=await this.codeRuns.action(active.snapshot,action,deliveryId);
+    await this.changed(active);return path;
+    });
   }
   async candidatePreview(id: string, versionId: string) {
-    const snapshot = await this.get(id), code = snapshot.code;
-    if (!code) throw new Error("此协作不是代码交付");
-    const version = code.versions.find((entry) => entry.id === z.string().uuid().parse(versionId));
-    if (!version) throw new Error("候选版本不属于本次协作");
-    return this.workspaces.preview(code.workspace, version);
-  }
-  private async assertCodeAccepted(snapshot: CollaborationSnapshot) {
-    const code = snapshot.code!, version = code.versions.at(-1);
-    if (!version || code.workspace.state !== "candidate") throw new Error("代码候选已接管或丢弃，需要重新验证");
-    await this.workspaces.assertCurrent(code.workspace, version);
-    if (!code.workspace.admission.checks.length || !code.workspace.admission.checks.every((check) => code.validations.findLast((entry) => entry.versionId === version.id && entry.checkId === check.id)?.status === "passed")) throw new Error("代码候选没有同版本必需检查通过证据");
+    return this.codeRuns.preview(await this.get(id),versionId);
   }
 
   private async changed(active: ActiveRun) {
@@ -226,8 +221,10 @@ export class CollaborationService {
   private async revalidateDeliveries(active: ActiveRun) {
     for (const delivery of active.snapshot.deliveries.filter((entry) => entry.status === "accepted")) {
       const version = delivery.versions.at(-1)!;
-      try { await this.repository.readReport(active.snapshot.id, version); await assertEvidenceCurrent(active.snapshot.code?.workspace.path ?? active.snapshot.params.initiator.projectPath, version.evidence);
-        if (active.snapshot.code) await this.assertCodeAccepted(active.snapshot); }
+      try { await this.repository.readReport(active.snapshot.id, version);
+        if(deliveryCode(active.snapshot,delivery)?.adoption?.status==="applied")continue;
+        await assertEvidenceCurrent(deliveryCode(active.snapshot,delivery)?.workspace.path ?? active.snapshot.params.initiator.projectPath, version.evidence);
+        await this.codeRuns.assertAccepted(active.snapshot,delivery); }
       catch (error) { delivery.status = "awaitingUser"; delivery.error = String(error); active.snapshot.error = "报告或源码证据已变化，需要重新调研和审查"; }
     }
   }
@@ -235,9 +232,16 @@ export class CollaborationService {
   private async delegate(active: ActiveRun, requestKey: string, objective: string) {
     if(active.snapshot.params.mode==='experts')throw new Error('专家流程由宿主固定调度，不允许自由委派');
     if (active.snapshot.stage !== "planning" || active.executor.abort.signal.aborted) throw new Error("本次协作已停止派发");
-    if (active.snapshot.code) objective = active.snapshot.params.objective;
+    const configured='code' in active.snapshot.params?active.snapshot.params.code?.tasks:undefined;
+    if(configured && !configured.some(task=>task.requestKey===requestKey))throw new Error('任务不在用户确认的并行计划中');
+    if(configured)objective=configured.find(task=>task.requestKey===requestKey)!.objective;
+    else if (active.snapshot.code) objective = active.snapshot.params.objective;
     const existing = active.snapshot.deliveries.find((delivery) => delivery.requestKey === requestKey);
-    if (existing) { if (existing.objective !== objective) throw new Error("相同幂等键对应不同任务"); return { taskId: existing.id }; }
+    if (existing) {
+      if (existing.objective !== objective) throw new Error("相同幂等键对应不同任务");
+      if(configured && existing.status==='queued' && !active.jobs.has(existing.id))this.launchDelivery(active,existing);
+      return { taskId: existing.id };
+    }
     if (active.snapshot.code && active.snapshot.deliveries.length) throw new Error("隔离代码首版只允许一个完整交付");
     if (active.snapshot.deliveries.length >= MAX_DELIVERIES || !active.executor.canAddDelivery()) throw new Error("任务/回合预算不足，无法为新任务预留审查与汇总");
     const delivery: DeliverySnapshot = { id: randomUUID(), requestKey, objective, executor: active.snapshot.params.executor, status: "queued", versions: [], reviews: [] };
@@ -251,7 +255,8 @@ export class CollaborationService {
     delivery.workerSessionKey ??= active.snapshot.tasks.findLast((task) => task.deliveryId === delivery.id && task.role === "execution")?.sessionKey ?? randomUUID();
     delete delivery.error;
     const workflow = new DeliveryWorkflow({ runId: active.snapshot.id, root: active.snapshot.params.initiator.projectPath, repository: this.repository, pauseRequested: () => active.snapshot.stopIntent === "pause", questionCount: (id) => (active.snapshot.messages ?? []).filter((entry) => entry.deliveryId === id && entry.type === "clarification").length, pendingContext: (id) => active.messages.pending(id).length > 0, context: (id) => active.messages.context(id), changed: () => this.changed(active), execute: (role, key, text, schema, target) => active.executor.execute(role, key, text, schema, target, role === "execution" ? active.messages.workerTools(target, key) : undefined) });
-    const codeWorkflow = active.snapshot.code ? new CodeDeliveryWorkflow({ runId: active.snapshot.id, root: active.snapshot.code.workspace.path, repository: this.repository, code: active.snapshot.code, workspaces: this.workspaces, signal: active.executor.deliverySignal(delivery.id), changed: () => this.changed(active), questionCount: (id) => (active.snapshot.messages ?? []).filter((entry) => entry.deliveryId === id && entry.type === "clarification").length, pendingContext: (id) => active.messages.pending(id).length > 0, context: (id) => active.messages.context(id), execute: (role, key, text, schema, target, tools) => active.executor.execute(role, key, text, schema, target, role === "execution" ? [...active.messages.workerTools(target, key), ...(tools ?? [])] : tools) }) : undefined;
+    const code=deliveryCode(active.snapshot,delivery);
+    const codeWorkflow = code ? new CodeDeliveryWorkflow({ runId: active.snapshot.id, root: code.workspace.path, repository: this.repository, code, workspaces: this.workspaces, signal: active.executor.deliverySignal(delivery.id), changed: () => this.changed(active), questionCount: (id) => (active.snapshot.messages ?? []).filter((entry) => entry.deliveryId === id && entry.type === "clarification").length, pendingContext: (id) => active.messages.pending(id).length > 0, context: (id) => active.messages.context(id), execute: (role, key, text, schema, target, tools) => active.executor.execute(role, key, text, schema, target, role === "execution" ? [...active.messages.workerTools(target, key), ...(tools ?? [])] : tools) }) : undefined;
     const job = (codeWorkflow ?? workflow).run(delivery, delivery.workerSessionKey!, reviewOnly).catch(async (error: unknown) => { delivery.status = active.executor.abort.signal.aborted && active.snapshot.stopIntent === "pause" ? "interrupted" : active.executor.abort.signal.aborted || /取消/.test(String(error)) ? "cancelled" : "awaitingUser"; delivery.error = error instanceof Error ? error.message : String(error); await this.changed(active); });
     // 立即登记拒绝观察；run() 会统一收集失败，避免 detached promise 静默失败。
     void job.catch((error: unknown) => { active.snapshot.persistenceError = String(error); active.executor.abort.abort(); });
@@ -285,6 +290,7 @@ export class CollaborationService {
 
   private recovered(snapshot: CollaborationSnapshot): CollaborationSnapshot {
     if (!["running", "stopping"].includes(snapshot.status)) return snapshot;
+    for(const target of codeCandidates(snapshot))if(target.code.phase==='validation'||snapshot.tasks.some(task=>task.deliveryId===target.deliveryId&&task.status==='running'))target.code.stopUnconfirmed=true;
     for(const expert of snapshot.experts?.participants??[])if(expert.status==='researching')expert.status='interrupted';
     for(const review of snapshot.experts?.reviews??[])if(review.status==='reviewing')review.status='interrupted';
     return { ...snapshot, ...(snapshot.code && snapshot.code.phase === "validation" ? { code: { ...snapshot.code, stopUnconfirmed: true } } : {}), status: "interrupted", stage: "finished", error: "应用重启，原执行状态未知；未自动重跑", tasks: snapshot.tasks.map((task) => task.status === "running" ? { ...task, status: "interrupted" } : task), deliveries: snapshot.deliveries.map((delivery) => ["queued", "executing", "reviewing", "revising"].includes(delivery.status) ? { ...delivery, status: "interrupted" } : delivery) };

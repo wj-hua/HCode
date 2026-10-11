@@ -45,7 +45,7 @@ export async function adoptionArtifacts(
   workspace: CodeWorkspace,
   version: CodeVersion,
 ): Promise<AdoptionArtifacts> {
-  const directory = workspaces.directory(workspace.id);
+  const directory = workspaces.directory(workspace.id,workspace.runId);
   const baseline = await frozenManifest(
     join(directory, "baseline.json"),
     workspace.baselineHash,

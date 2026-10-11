@@ -10,6 +10,7 @@ export type AdoptionStatus =
 export interface AdoptionState {
   id: string;
   runId: string;
+  workspaceId?: string;
   versionId: string;
   versionHash: string;
   previewHash: string;

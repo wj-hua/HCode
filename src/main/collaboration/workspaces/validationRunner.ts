@@ -40,7 +40,7 @@ export class ValidationRunner {
         if (signal.aborted) throw new Error('验证已取消');
         const result = await this.check(workspace, version, check, signal);
         results.push(result);
-        await writeFile(join(this.workspaces.directory(workspace.id), version.id, `${check.id}.json`), JSON.stringify(result), { mode: 0o600 });
+        await writeFile(join(this.workspaces.directory(workspace.id,workspace.runId), version.id, `${check.id}.json`), JSON.stringify(result), { mode: 0o600 });
         if (record) await record(result);
         await this.workspaces.assertCurrent(workspace, version);
         if (result.status !== 'passed') break;
@@ -55,7 +55,7 @@ export class ValidationRunner {
       const actual = Object.fromEntries([`pre${check.id}`, check.id, `post${check.id}`].filter((key) => packageJson.scripts?.[key]).map((key) => [key, packageJson.scripts![key]!]));
       if (JSON.stringify(actual) !== JSON.stringify(check.scripts)) throw new Error('用户授权的验证脚本已变化，不能自动运行新命令；请人工处理验证计划');
     }
-    const scratch = join(this.workspaces.directory(workspace.id), 'scratch', version.id, check.id);
+    const scratch = join(this.workspaces.directory(workspace.id,workspace.runId), 'scratch', version.id, check.id);
     await mkdir(scratch, { recursive: true, mode: 0o700 });
     const command = await normalizeValidationCommand(check.executable, check.args);
     const shim = await validationShim();

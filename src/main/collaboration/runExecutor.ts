@@ -1,4 +1,5 @@
 // 一个 Run 的执行并发与硬回合预算；主持不占工作者槽，取消排队项不会启动 CLI。
+import { deliveryCode } from '../../shared/codeCandidates.js';
 import { randomUUID } from "node:crypto";
 import type { ChatSendParams } from "../../shared/types.js";
 import type { CollaborationSnapshot, CollaborationTask, DeliverySnapshot, TurnOutcome, CollaborationBackend } from "../../shared/collaboration.js";
@@ -89,7 +90,7 @@ export class RunExecutor {
     this.snapshot.tasks.push(task);
     await this.changed();
     const nativeSessionId = this.snapshot.tasks.findLast((entry) => entry.sessionKey === key && entry.nativeSessionId)?.nativeSessionId;
-    const root = delivery && this.snapshot.code ? this.snapshot.code.workspace.path : initiator.projectPath;
+    const root = delivery ? deliveryCode(this.snapshot,delivery)?.workspace.path ?? initiator.projectPath : initiator.projectPath;
     const params: ChatSendParams = { ...initiator, projectPath: root, sessionKey: key, agent, text, permissionMode: agent === "claude" ? "default" : "read-only", ...(model ? { model } : { model: undefined }), ...(role === "planning" || role === "synthesis" ? {} : { resumeSessionId: nativeSessionId, effort: undefined }) };
     let runtime = this.runtimes.get(key);
     if (!runtime) { runtime = { root, tools, outputSchema: schema }; this.runtimes.set(key, runtime); }

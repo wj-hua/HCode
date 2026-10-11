@@ -82,7 +82,7 @@ export class AdoptionJournalRepository {
     return journal;
   }
   /** 查找此 Run 最新记录；只在目录不存在时返回无记录。 */
-  async latest(runId: string) {
+  async latest(runId: string, workspaceId?: string, allowLegacy = true) {
     const root = join(
       this.storage,
       z.string().uuid().parse(runId),
@@ -100,7 +100,7 @@ export class AdoptionJournalRepository {
         .filter((e) => e.isDirectory())
         .map((e) => this.load(runId, e.name)),
     );
-    return journals.sort(
+    return journals.filter(journal=>workspaceId ? journal.state.workspaceId===workspaceId || allowLegacy && !journal.state.workspaceId : true).sort(
       (left, right) => right.state.createdAt - left.state.createdAt,
     )[0];
   }

@@ -45,7 +45,7 @@ export interface InvokeMap {
   "collaboration:adoptionPreview": [[id: string, versionId: string], AdoptionPreview];
   "collaboration:applyCandidate": [[id: string, request: AdoptionRequest], AdoptionState];
   "collaboration:recoverAdoption": [[id: string, adoptionId: string], AdoptionState];
-  "collaboration:candidateAction": [[id: string, action: "manual" | "discard"], string];
+  "collaboration:candidateAction": [[id: string, action: "manual" | "discard" | "cleanup", deliveryId?: string], string];
   "collaboration:capabilities": [[source?: import("./collaboration.js").CollaborationSource], CollaborationCapabilities[]];
   "collaboration:start": [[params: CollaborationStartParams], CollaborationSnapshot];
   "collaboration:expertProfiles": [[projectPath:string], ExpertProfilePreview[]];

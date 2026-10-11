@@ -1,4 +1,5 @@
 // 将用户的接管、澄清与续跑动作交给主进程；本组件不推断原生停止状态。
+import { codeCandidates, deliveryCode } from "@hcode/shared/codeCandidates";
 import { useState } from "react";
 import { COLLABORATION_LIMITS } from "@hcode/shared/collaboration";
 import type { CollaborationSnapshot, TaskMessage } from "@hcode/shared/collaboration";
@@ -31,6 +32,7 @@ export function CollaborationControls({ run }: { run: CollaborationSnapshot }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const active = run.status === "running" || run.status === "stopping";
+  const isCode=codeCandidates(run).length>0;
   const resumable = !active && run.status !== "cancelled" && !adoptionBlocksEdits(run.code?.adoption);
   const pending = (run.messages ?? []).filter((entry) => entry.type === "clarification" && !run.messages?.some((reply) => reply.replyTo === entry.id));
   const act = async (operation: () => Promise<unknown>) => {
@@ -53,15 +55,15 @@ export function CollaborationControls({ run }: { run: CollaborationSnapshot }) {
     </div> : null}
     {run.status !== "cancelled" && run.status !== "stopping" ? pending.map((question) => <ContextReply key={question.id} runId={run.id} question={question} />) : null}
     {resumable && run.deliveries.length ? <>
-      <label className="flex flex-col gap-1">补充上下文（可选）<textarea value={context} maxLength={COLLABORATION_LIMITS.maxContextLength} onChange={(event) => setContext(event.target.value)} rows={2} placeholder={run.code ? "说明需要修订的候选内容；原项目保持不变" : "说明需要修订的内容；仍限于只读调研"} className="rounded-md border border-border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring" /></label>
+      <label className="flex flex-col gap-1">补充上下文（可选）<textarea value={context} maxLength={COLLABORATION_LIMITS.maxContextLength} onChange={(event) => setContext(event.target.value)} rows={2} placeholder={isCode ? "说明需要修订的候选内容；原项目保持不变" : "说明需要修订的内容；仍限于只读调研"} className="rounded-md border border-border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring" /></label>
       <p className="text-ui-sm text-foreground-subtle">保存回复后选择具体任务继续。续跑保留历史与累计预算，先核对源码及报告；重启后不会自动执行。</p>
     </> : null}
     {run.deliveries.map((delivery, index) => <div key={delivery.id} className="flex flex-wrap items-center gap-2">
       <span className="text-ui-sm">任务 {index + 1} · {delivery.requestKey}</span>
       {active && ["queued", "executing", "reviewing", "revising"].includes(delivery.status) ? <Button variant="outline" disabled={busy} onClick={() => void act(() => hcode.invoke("collaboration:cancelDelivery", run.id, delivery.id))}>停止此任务</Button> : null}
-      {resumable && delivery.status !== "cancelled" ? <>
-        <Button variant="outline" disabled={busy || pending.some((message) => message.deliveryId === delivery.id)} onClick={() => void resume(delivery.id, "execute")}>{run.code ? "重新实现 / 修订" : delivery.status === "accepted" ? "重新调研" : "恢复 / 重新执行"}</Button>
-        <Button variant="outline" disabled={busy || !delivery.versions.length || pending.some((message) => message.deliveryId === delivery.id)} onClick={() => void resume(delivery.id, "review")}>{run.code ? "重新验证并审查候选" : "重新审查最新报告"}</Button>
+      {resumable && delivery.status !== "cancelled" && !adoptionBlocksEdits(deliveryCode(run,delivery)?.adoption) && deliveryCode(run,delivery)?.workspace.state!=="discarded" ? <>
+        <Button variant="outline" disabled={busy || pending.some((message) => message.deliveryId === delivery.id)} onClick={() => void resume(delivery.id, "execute")}>{isCode ? "重新实现 / 修订" : delivery.status === "accepted" ? "重新调研" : "恢复 / 重新执行"}</Button>
+        <Button variant="outline" disabled={busy || !delivery.versions.length || pending.some((message) => message.deliveryId === delivery.id)} onClick={() => void resume(delivery.id, "review")}>{isCode ? "重新验证并审查候选" : "重新审查最新报告"}</Button>
       </> : null}
     </div>)}
     {run.messages?.length ? <details><summary className="cursor-pointer">澄清与回复记录（{run.messages.length}）</summary>{run.messages.map((message) => <p key={message.id} className="mt-2 whitespace-pre-wrap"><span className="font-medium">{message.sender === "worker" ? "执行者提问" : message.sender === "user" ? "用户" : "发起 AI"}：</span>{message.text}</p>)}</details> : null}

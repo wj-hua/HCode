@@ -1,4 +1,5 @@
 // 从冻结候选到原项目的用户采纳；权限来自 IPC 用户动作，模型没有采纳工具。
+import { assertCandidateScope, codeCandidates } from '../../../shared/codeCandidates.js';
 import { lstat, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -36,9 +37,9 @@ export class CodeAdoptionService {
   }
   /** 读到未终结日志仅展示需要恢复；不写原项目，也不自动重跑。 */
   async decorate(snapshot: CollaborationSnapshot) {
-    if (snapshot.code) {
-      const latest = await this.journals.latest(snapshot.id);
-      if (latest) snapshot.code.adoption = structuredClone(latest.state);
+    for(const {code} of codeCandidates(snapshot)){
+      const latest=await this.journals.latest(snapshot.id,code.workspace.id,!code.workspace.runId);
+      if(latest)code.adoption=structuredClone(latest.state);
     }
     return snapshot;
   }
@@ -102,7 +103,7 @@ export class CodeAdoptionService {
     )
       reasons.push("原项目有采纳锁，请先完成已有任务的恢复或清理");
     try {
-      if (version) await this.workspaces.assertCurrent(code.workspace, version);
+      if (version) { assertCandidateScope(code,version); await this.workspaces.assertCurrent(code.workspace, version); }
       if (report) await this.repository.readReport(snapshot.id, report);
     } catch (error) {
       reasons.push(String(error));
@@ -190,7 +191,7 @@ export class CodeAdoptionService {
   async apply(snapshot: CollaborationSnapshot, input: AdoptionRequest) {
     const request = adoptionRequestSchema.parse(input);
     return this.exclusive(snapshot.id, async () => {
-      const prior = await this.journals.latest(snapshot.id);
+      const prior = await this.journals.latest(snapshot.id,snapshot.code?.workspace.id,!snapshot.code?.workspace.runId);
       if (
         prior?.state.status === "applied" &&
         prior.state.versionId === request.versionId &&
@@ -229,6 +230,7 @@ export class CodeAdoptionService {
           state: {
             id: randomUUID(),
             runId: snapshot.id,
+            workspaceId: code.workspace.id,
             versionId: preview.version.id,
             versionHash: preview.version.hash,
             previewHash: preview.hash,
@@ -269,12 +271,12 @@ export class CodeAdoptionService {
       )
         throw new Error("候选被占用或停止未确认");
       const journal = await this.journals.load(snapshot.id, adoptionId),
-        latest = await this.journals.latest(snapshot.id);
+        latest = await this.journals.latest(snapshot.id,snapshot.code?.workspace.id,!snapshot.code?.workspace.runId);
       if (latest?.state.id !== adoptionId)
         throw new Error("只能恢复最新采纳记录");
       if (
         !snapshot.code ||
-        journal.originalPath !== snapshot.code.workspace.originalPath
+        journal.originalPath !== snapshot.code.workspace.originalPath || journal.state.workspaceId && journal.state.workspaceId !== snapshot.code.workspace.id
       )
         throw new Error("恢复记录的原项目不一致");
       try {
