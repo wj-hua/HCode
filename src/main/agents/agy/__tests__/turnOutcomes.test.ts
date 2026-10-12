@@ -15,9 +15,9 @@ it('协议失败后新回合清空旧错误与响应指标，真实成功结果�
   await writeFile(program, `const fs=require('node:fs');const send=e=>process.stdout.write(JSON.stringify(e)+'\\n');
 send({event:'init',conversation_id:'retry-test',init:{}});
 process.stdin.once('data',()=>{
-  send({event:'step_update',step_update:{step_type:'agent_response',text_delta:'first',state:'RUNNING'}});
+  send({event:'step_update',step_update:{step_type:'agent_response',step_index:1,text_delta:'first',state:'RUNNING'}});
   setTimeout(()=>{
-    send({event:'step_update',step_update:{step_type:'agent_response',text_delta:'second',state:'DONE'}});
+    send({event:'step_update',step_update:{step_type:'agent_response',step_index:1,text_delta:'second',state:'DONE',duration_seconds:0.04,usage:{output_tokens:30}}});
     if(!fs.existsSync('retried')){fs.writeFileSync('retried','yes');process.stdout.write('{malformed\\n');return;}
     send({event:'result',result:{conversation_id:'retry-test',num_turns:1,status:'SUCCESS',response:'done',usage:{input_tokens:20,cache_read_tokens:0,output_tokens:30}}});
   },40);

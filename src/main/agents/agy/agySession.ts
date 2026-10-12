@@ -23,10 +23,10 @@ import type {
   RowOp,
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
-import { ResponseMetrics } from "../responseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { withProjectFilePaths } from "../../projectFiles.js";
 import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
+import { AgyResponseMetrics } from "./agyResponseMetrics.js";
 
 /** agy CLI 的数据目录（会话、transcript、上传的图片都在这里）。 */
 export const AGY_DATA_DIR = join(homedir(), ".gemini/antigravity-cli");
@@ -68,7 +68,7 @@ export class AgySession {
   private reportedModel: string | undefined;
 
   private usage: ChatUsage | undefined;
-  private readonly responseMetrics = new ResponseMetrics();
+  private readonly responseMetrics = new AgyResponseMetrics();
   /** 上一次 result 里的累计用量（整个 conversation 累计，跨进程重启也连续），用来相减得到本轮用量。 */
   private lastTotals: { input: number; output: number } | undefined;
   private readonly projector = new AgyRowProjector();
@@ -234,17 +234,11 @@ export class AgySession {
   // ───────────────────────── 事件处理 ─────────────────────────
 
   private handleEvent(event: JsonRecord) {
+    if (!this.isBusy) return;
     const now = Date.now();
     if (event.event === "step_update" && isRecord(event.step_update)) {
       const update = event.step_update;
-      if (update.step_type === "agent_response") {
-        const first = this.responseMetrics.output(update.thinking_delta);
-        const firstText = this.responseMetrics.output(update.text_delta);
-        if (first || firstText) this.emitState();
-        if (update.state === "DONE") this.responseMetrics.endSegment();
-      } else {
-        this.responseMetrics.endSegment();
-      }
+      if (this.responseMetrics.consumeStep(update)) this.emitState();
       this.projector.streamStep(update, now);
       this.scheduleFlush();
     } else if (event.event === "result") {
@@ -256,6 +250,7 @@ export class AgySession {
         this.error = native.error;
         if (this.error) this.projector.notice(`Antigravity 出错：${this.error}`, now, true);
         this.recordUsage(native.result);
+        this.responseMetrics.finishResult(native.outcome === "succeeded" ? native.result.status : "ERROR");
         if (!this.interruptRequested) this.settle(now, native);
       } catch (error) { this.protocolError = `agy stream-json 结果无效：${error instanceof Error ? error.message : String(error)}`; this.bounded?.stop(); this.process?.dispose(); }
     }

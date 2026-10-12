@@ -213,7 +213,7 @@ export interface ChatUsage {
   ttftMs?: number;
   /** 本轮完成后，按 CLI 输出 Token 和分段流式输出耗时估算的速度。 */
   outputTokensPerSecond?: number;
-  /** response：完整响应与 Token 增量配对；activeTurn：整轮耗时扣除工具/审批；未指定为流式片段估算。 */
+  /** response：完整响应用量与对应耗时配对；activeTurn：整轮耗时扣除工具/审批；未指定为流式片段估算。 */
   outputSpeedBasis?: "response" | "activeTurn";
   /** 计算速度使用的时间区间，便于核对平均吞吐；毫秒。 */
   outputSpeedDurationMs?: number;
