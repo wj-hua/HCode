@@ -105,9 +105,10 @@ export class CollaborationRunner {
     snapshot.stage = "awaitingWorkers";
     await this.host.changed(active);
     await Promise.all([...active.jobs.values()]);
-    // 父 AI 在 wait_tasks 释放后可先回答已有上下文；执行者只在原回合结束后续跑。
+    // 首轮父 AI 可回答已有上下文；显式续跑只恢复本次选定任务，不能重开其他已回复交付。
     for (const delivery of snapshot.deliveries.filter(
       (entry) =>
+        (!delegationResume || active.jobs.has(entry.id)) &&
         entry.error?.startsWith("执行者需要澄清") &&
         !active.messages.pending(entry.id).length,
     ))

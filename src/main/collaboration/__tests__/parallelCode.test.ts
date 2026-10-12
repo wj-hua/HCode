@@ -7,6 +7,30 @@ import { CollaborationService } from '../collaborationService.js';
 import { CodeAdoptionService } from '../adoption/codeAdoptionService.js';
 import { candidateSnapshot } from '../../../shared/codeCandidates.js';
 import { manifest } from '../workspaces/fileManifest.js';
+it.skipIf(process.platform !== 'darwin')('显式续跑一项已澄清任务，不执行另一项已回复任务或消耗其预算',async()=>{
+  const data=await parallelFixture('answeredScopes');
+  try{
+    const admission=await data.service.inspectCodeProject(data.project);
+    const run=await data.service.start({initiator:{agent:'codex',sessionKey:data.sourceKey,projectPath:data.project,permissionMode:'default'},executor:{agent:'claude'},objective:'逐任务澄清与显式恢复',code:{admissionHash:admission.hash,checks:['node-test'],tasks:[{requestKey:'one',objective:'任务一',executor:{agent:'claude'},allowedPaths:['value.mjs']},{requestKey:'two',objective:'任务二',executor:{agent:'codex'},allowedPaths:['other.mjs']}]}});
+    await vi.waitFor(()=>expect(data.snapshots.at(-1)?.stage).toBe('finished'),{timeout:15_000});
+    const before=await data.service.get(run.id),[first,second]=before.deliveries;
+    expect(before.status).toBe('awaitingUser');
+    expect(before.messages?.filter(message=>message.type==='clarification')).toHaveLength(2);
+    for(const message of before.messages??[])await data.service.controls.reply(run.id,message.id,'确认各自原授权范围');
+    const otherTasks=before.tasks.filter(task=>task.deliveryId===second!.id).length;
+    const beforeTurns=before.tasks.length;
+    const otherHash=(await manifest(second!.code!.workspace.path)).hash;
+    await data.service.controls.resume(run.id,{deliveryId:first!.id,action:'review'});
+    await vi.waitFor(()=>expect(data.snapshots.at(-1)?.stage).toBe('finished'),{timeout:15_000});
+    const result=await data.service.get(run.id);
+    expect(result.tasks.filter(task=>task.deliveryId===second!.id)).toHaveLength(otherTasks);
+    expect(result.tasks).toHaveLength(beforeTurns+2);
+    expect(result.deliveries.map(delivery=>delivery.status)).toEqual(['accepted','awaitingUser']);
+    expect((await manifest(second!.code!.workspace.path)).hash).toBe(otherHash);
+    expect((await manifest(data.project)).hash).toBe(data.original);
+  }finally{data.service.dispose();await rm(data.root,{recursive:true,force:true});}
+});
+
 it.skipIf(process.platform !== 'darwin')('并行审查收到当前任务目标和文件范围，整体参考需求不会替代逐任务契约',async()=>{
   const data=await parallelFixture('reviewScope');
   try{

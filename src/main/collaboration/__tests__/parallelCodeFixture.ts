@@ -29,6 +29,7 @@ export async function parallelFixture(scenario: string) {
   const original = (await manifest(project)).hash, sourceKey = randomUUID();
   const snapshots: CollaborationSnapshot[] = [];
   let sourceTurns = 0, workerCount = 0, failed = false, sends=0;
+  const workerAttempts=new Map<string,number>();
   let openBarrier!: () => void;
   const barrier = new Promise<void>(resolve => { openBarrier = resolve; });
   const provider = (kind: 'claude'|'codex') => ({kind, getStatus:async()=>({kind,found:true,version:kind==='codex'?'0.162.0':'test'}),hasSession:()=>true,endResearch:async()=>{}});
@@ -48,9 +49,14 @@ export async function parallelFixture(scenario: string) {
         text='已派发';
       }else{text='两个独立候选已审查，等待用户逐任务采纳。';}
     }else if(input.research!.tools?.some(tool=>tool.name==='write_file')){
+      const attempt=(workerAttempts.get(input.sessionKey)??0)+1;workerAttempts.set(input.sessionKey,attempt);
       if(++workerCount===2)openBarrier(); await barrier;
+      if(scenario==='answeredScopes'&&attempt===2){
+        await input.research!.tools!.find(tool=>tool.name==='request_context')!.execute({requestKey:'scope',question:'确认本任务的独立范围',requiresUser:true});
+        execution.acceptOutcome({sessionKey:input.sessionKey,agent:input.agent,executionTurnId:input.executionTurnId!,nativeSessionId:`native-${input.sessionKey}`,outcome:'succeeded',text:'已请求澄清'});return {sessionKey:input.sessionKey};
+      }
       if(scenario==='transportFailure' && input.agent==='codex' && !failed){failed=true;execution.acceptOutcome({sessionKey:input.sessionKey,agent:input.agent,executionTurnId:input.executionTurnId!,nativeSessionId:`native-${input.sessionKey}`,outcome:'failed',text:'',error:'真实传输边界的受控失败'});return {sessionKey:input.sessionKey};}
-      const path=['disjoint','reviewScope'].includes(scenario)&&input.agent==='codex'?'other.mjs':'value.mjs';
+      const path=['disjoint','reviewScope','answeredScopes'].includes(scenario)&&input.agent==='codex'?'other.mjs':'value.mjs';
       const content=`export const value = ${input.agent==='claude'?1:2};\n`;
       const write=input.research!.tools!.find(tool=>tool.name==='write_file')!;
       await expect(write.execute({path:'unauthorized.mjs',expectedHash:null,content:'outside'})).rejects.toThrow(/范围/);
@@ -59,6 +65,10 @@ export async function parallelFixture(scenario: string) {
       await write.execute({path,expectedHash:createHash('sha256').update(current).digest('hex'),content});
       if(scenario==='outsideScope' && input.agent==='codex' && !failed){failed=true;await writeFile(join(input.projectPath,'outside.txt'),'manual outside change');}
       text=JSON.stringify({summary:'独立修改',findings:[{id:'value',title:'值',detail:'当前候选',evidence:[{path,startLine:1,endLine:1,quote:content.trimEnd()}]}],limitations:[]});
+    }else if(scenario==='answeredScopes'){
+      const data=JSON.parse(input.text.slice(input.text.indexOf('{')));
+      const answered=JSON.parse(data.context??'[]').some((message:{type:string})=>message.type==='answer');
+      text=JSON.stringify({verdict:answered?'approved':'changesRequested',summary:'核对本任务上下文',issues:answered?[]:[{id:'scope',blocking:true,location:'任务范围',reason:'需要澄清',evidence:'尚未收到当前任务回复',suggestion:'请求范围确认后再审查'}]});
     }else if(scenario==='reviewScope'){
       // 外部审查传输读取宿主任务契约，不以整个参考文件替代本任务范围。
       const data=JSON.parse(input.text.slice(input.text.indexOf('{')));
