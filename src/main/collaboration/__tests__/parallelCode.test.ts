@@ -7,6 +7,20 @@ import { CollaborationService } from '../collaborationService.js';
 import { CodeAdoptionService } from '../adoption/codeAdoptionService.js';
 import { candidateSnapshot } from '../../../shared/codeCandidates.js';
 import { manifest } from '../workspaces/fileManifest.js';
+it.skipIf(process.platform !== 'darwin')('并行审查收到当前任务目标和文件范围，整体参考需求不会替代逐任务契约',async()=>{
+  const data=await parallelFixture('reviewScope');
+  try{
+    const admission=await data.service.inspectCodeProject(data.project);
+    const run=await data.service.start({initiator:{agent:'codex',sessionKey:data.sourceKey,projectPath:data.project,permissionMode:'default'},executor:{agent:'claude'},objective:'两项独立任务共享整体需求参考',code:{admissionHash:admission.hash,checks:['node-test'],tasks:[{requestKey:'one',objective:'任务一',executor:{agent:'claude'},allowedPaths:['value.mjs']},{requestKey:'two',objective:'任务二',executor:{agent:'codex'},allowedPaths:['other.mjs']}]}});
+    await vi.waitFor(()=>expect(data.snapshots.at(-1)?.stage).toBe('finished'),{timeout:15_000});
+    const result=await data.service.get(run.id);
+    expect(result.status).toBe('completed');
+    expect(result.deliveries.map(delivery=>delivery.status)).toEqual(['accepted','accepted']);
+    expect(result.tasks.filter(task=>task.role==='execution')).toHaveLength(2);
+    expect((await manifest(data.project)).hash).toBe(data.original);
+  }finally{data.service.dispose();await rm(data.root,{recursive:true,force:true});}
+});
+
 it.skipIf(process.platform !== 'darwin').each(['success','transportFailure','outsideScope','disjoint','unknownStop','needsRecovery','lifecycleRace'])('并行写入隔离、失败任务独立续跑、逐任务采纳与冲突拒绝（%s）', async scenario => {
   const {root,project,original,sourceKey,snapshots,repository,service,execution,agents}=await parallelFixture(scenario);
   try{

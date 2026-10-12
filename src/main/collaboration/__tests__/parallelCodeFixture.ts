@@ -23,6 +23,7 @@ export async function parallelFixture(scenario: string) {
   await writeFile(join(project, 'other.mjs'), 'export const value = 0;\n');
   await writeFile(join(project, 'value.mjs'), 'export const value = 0;\n');
   await writeFile(join(project, 'value.test.mjs'), "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport { value } from './value.mjs';\ntest('value',()=>assert.ok(value >= 0));\n");
+  if(scenario==='reviewScope')await writeFile(join(project,'review-context.md'),'整体需求含任务一 value.mjs 和任务二 other.mjs；每项只审查自身交付。\n');
   await exec('git', ['init', project]); await exec('git', ['-C', project, 'add', '.']);
   await exec('git', ['-C', project, '-c', 'user.name=Fixture', '-c', 'user.email=test@invalid.local', '-c', 'commit.gpgsign=false', 'commit', '-m', 'baseline']);
   const original = (await manifest(project)).hash, sourceKey = randomUUID();
@@ -49,7 +50,7 @@ export async function parallelFixture(scenario: string) {
     }else if(input.research!.tools?.some(tool=>tool.name==='write_file')){
       if(++workerCount===2)openBarrier(); await barrier;
       if(scenario==='transportFailure' && input.agent==='codex' && !failed){failed=true;execution.acceptOutcome({sessionKey:input.sessionKey,agent:input.agent,executionTurnId:input.executionTurnId!,nativeSessionId:`native-${input.sessionKey}`,outcome:'failed',text:'',error:'真实传输边界的受控失败'});return {sessionKey:input.sessionKey};}
-      const path=scenario==='disjoint'&&input.agent==='codex'?'other.mjs':'value.mjs';
+      const path=['disjoint','reviewScope'].includes(scenario)&&input.agent==='codex'?'other.mjs':'value.mjs';
       const content=`export const value = ${input.agent==='claude'?1:2};\n`;
       const write=input.research!.tools!.find(tool=>tool.name==='write_file')!;
       await expect(write.execute({path:'unauthorized.mjs',expectedHash:null,content:'outside'})).rejects.toThrow(/范围/);
@@ -58,6 +59,13 @@ export async function parallelFixture(scenario: string) {
       await write.execute({path,expectedHash:createHash('sha256').update(current).digest('hex'),content});
       if(scenario==='outsideScope' && input.agent==='codex' && !failed){failed=true;await writeFile(join(input.projectPath,'outside.txt'),'manual outside change');}
       text=JSON.stringify({summary:'独立修改',findings:[{id:'value',title:'值',detail:'当前候选',evidence:[{path,startLine:1,endLine:1,quote:content.trimEnd()}]}],limitations:[]});
+    }else if(scenario==='reviewScope'){
+      // 外部审查传输读取宿主任务契约，不以整个参考文件替代本任务范围。
+      const data=JSON.parse(input.text.slice(input.text.indexOf('{')));
+      const path=data.version.changes[0].path;
+      const expectedObjective=path==='value.mjs'?'任务一':'任务二';
+      const bounded=data.scope?.objective===expectedObjective&&JSON.stringify(data.scope?.allowedPaths)===JSON.stringify([path]);
+      text=JSON.stringify({verdict:bounded?'approved':'inconclusive',summary:bounded?'仅审查本任务，其他任务保留为组合验收':'宿主缺少当前任务目标与授权范围',issues:[]});
     }else{text=JSON.stringify({verdict:'approved',summary:'范围和检查通过',issues:[]});}
     execution.acceptOutcome({sessionKey:input.sessionKey,agent:input.agent,executionTurnId:input.executionTurnId!,nativeSessionId:`native-${input.sessionKey}`,outcome:'succeeded',text});
     return {sessionKey:input.sessionKey};
