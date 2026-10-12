@@ -87,6 +87,8 @@ export interface AppState {
   settings: Settings;
   agentStatuses: AgentStatus[] | null;
   models: Partial<Record<AgentKind, ModelOption[]>>;
+  modelsLoading: Partial<Record<AgentKind, boolean>>;
+  modelErrors: Partial<Record<AgentKind, string | undefined>>;
   projects: Project[];
   sessions: Record<string, SessionSummary[]>;
   sessionErrors: Record<string, string | undefined>;
@@ -116,7 +118,7 @@ export interface AppState {
   setDraftAgent(agent: AgentKind): void;
   /** 草稿会话切换工作目录。 */
   setDraftProject(projectPath: string): void;
-  loadModels(agent: AgentKind): Promise<void>;
+  loadModels(agent: AgentKind, refresh?: boolean): Promise<void>;
   send(text: string, images?: ImageInput[], files?: FileInput[]): Promise<boolean>;
   /** 草稿会话与 agents 中的其他 CLI 组成对比组，同一消息同时发给每个 CLI。 */
   startCompare(agents: AgentKind[], text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
@@ -451,6 +453,8 @@ export const useAppStore = create<AppState>((set, get) => {
     settings: DEFAULT_SETTINGS,
     agentStatuses: null,
     models: {},
+    modelsLoading: {},
+    modelErrors: {},
     projects: [],
     sessions: {},
     sessionErrors: {},
@@ -609,14 +613,18 @@ export const useAppStore = create<AppState>((set, get) => {
       get().toggleProject(projectPath, true);
     },
 
-    async loadModels(agent) {
-      if (get().models[agent]) return;
-      set((state) => ({ models: { ...state.models, [agent]: AGENTS[agent].models } }));
+    async loadModels(agent, refresh = false) {
+      if (get().modelsLoading[agent] || !refresh && get().models[agent]) return;
+      const path = get().settings.agentPaths[agent];
+      set((state) => ({ modelsLoading: { ...state.modelsLoading, [agent]: true }, modelErrors: { ...state.modelErrors, [agent]: undefined } }));
       try {
         const list = await hcode.invoke("agent:models", agent);
-        set((state) => ({ models: { ...state.models, [agent]: list } }));
-      } catch {
-        // 保留内置选项
+        if (get().settings.agentPaths[agent] === path) set((state) => ({ models: { ...state.models, [agent]: list } }));
+      } catch (error) {
+        if (get().settings.agentPaths[agent] === path) set((state) => ({ modelErrors: { ...state.modelErrors, [agent]: error instanceof Error ? error.message : String(error) } }));
+      } finally {
+        set((state) => ({ modelsLoading: { ...state.modelsLoading, [agent]: false } }));
+        if (get().settings.agentPaths[agent] !== path) void get().loadModels(agent, true);
       }
     },
 
@@ -846,7 +854,14 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = await hcode.invoke("settings:set", patch);
       set({ settings });
       if (patch.theme) useUiStore.getState().setTheme(patch.theme);
-      if (patch.agentPaths !== undefined) set({ agentStatuses: await hcode.invoke("agent:status") });
+      if (patch.agentPaths !== undefined) {
+        set((state) => {
+          const models = { ...state.models }, modelErrors = { ...state.modelErrors };
+          for (const agent of Object.keys(patch.agentPaths!) as AgentKind[]) { delete models[agent]; delete modelErrors[agent]; }
+          return { models, modelErrors };
+        });
+        set({ agentStatuses: await hcode.invoke("agent:status") });
+      }
     },
 
     setSidebarCollapsed(collapsed) {

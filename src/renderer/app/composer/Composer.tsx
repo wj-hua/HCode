@@ -10,6 +10,7 @@ import {
   ShieldCheckIcon,
   ShieldOffIcon,
   SquareIcon,
+  RefreshCwIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ZCodeConfigOption } from "@zcode/shared";
@@ -123,6 +124,8 @@ export function Composer({
   const setEffort = useAppStore((state) => state.setEffort);
   const setDraftAgent = useAppStore((state) => state.setDraftAgent);
   const loadModels = useAppStore((state) => state.loadModels);
+  const modelError = useAppStore((state) => state.modelErrors[conversation.agent]);
+  const modelsLoading = useAppStore((state) => state.modelsLoading[conversation.agent]);
   const agentStatuses = useAppStore((state) => state.agentStatuses);
   const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
@@ -745,6 +748,9 @@ export function Composer({
                 triggerLabelClassName="block min-w-0 max-w-48 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate"
                 focusSelectorOnClose={COMPOSER_INPUT_SELECTOR}
               />
+              {modelError && <button type="button" onClick={() => void loadModels(conversation.agent, true)} disabled={modelsLoading} title={modelError} className="flex shrink-0 items-center gap-1 text-ui-xs text-destructive disabled:opacity-50">
+                <RefreshCwIcon className={cn("size-3", modelsLoading && "animate-spin")} />模型读取失败，重试
+              </button>}
               {thoughtOption ? (
                 <ThoughtLevelCycleControl
                   composerCollapsePriority={3}

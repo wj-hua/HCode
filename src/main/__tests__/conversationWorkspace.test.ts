@@ -42,14 +42,14 @@ describe("非项目对话工作目录", () => {
     await workspace.ensure();
     const store = new AppStore(dataDirectory);
     store.updateProjects((preferences) => ({ ...preferences, manual: ["/user/project"], ordered: true }));
-    const sessions: SessionSummary[] = ["claude", "codex", "step", "agy", "pi"].map((agent, index) => ({
+    const sessions: SessionSummary[] = ["claude", "codex", "agy"].map((agent, index) => ({
       id: `session-${agent}`, agent: agent as SessionSummary["agent"], projectPath: workspace.path,
       title: "对话", createdAt: 1, updatedAt: index + 2,
     }));
     const projects = buildProjects(sessions, new AppStore(dataDirectory), workspace.path);
     expect(projects.filter((project) => project.purpose !== "conversation").map((project) => project.path)).toEqual(["/user/project"]);
     expect(projects.find((project) => project.purpose === "conversation")).toMatchObject({
-      path: workspace.path, name: "对话", sessionCount: 5, lastActiveAt: 6, exists: true,
+      path: workspace.path, name: "对话", sessionCount: 3, lastActiveAt: 4, exists: true,
     });
     expect(new AppStore(dataDirectory).projects.manual).toEqual(["/user/project"]);
   });

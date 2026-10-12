@@ -63,7 +63,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
   general: ["常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "theme", "wallpaper", "blur"],
-  agents: ["模型", "cli", "agent", "claude", "codex", "step", "antigravity", "gemini", "pi", "权限", "路径", "版本", "思考", "effort", "model", "path"],
+  agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "cline", "权限", "路径", "版本", "思考", "effort", "model", "path"],
   notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify", "sleep"],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
 };
@@ -436,6 +436,8 @@ function AgentSection({ kind }: { kind: AgentKind }) {
   const status = useAppStore((state) => state.agentStatuses?.find((item) => item.kind === kind));
   const models = useAppStore((state) => state.models[kind]) ?? AGENTS[kind].models;
   const loadModels = useAppStore((state) => state.loadModels);
+  const modelError = useAppStore((state) => state.modelErrors[kind]);
+  const modelsLoading = useAppStore((state) => state.modelsLoading[kind]);
   const open = useAppStore((state) => state.settingsOpen);
   const [path, setPath] = useState(settings.agentPaths[kind]);
   const [saved, setSaved] = useState(false);
@@ -522,6 +524,11 @@ function AgentSection({ kind }: { kind: AgentKind }) {
               </option>
             ))}
           </StyledSelect>
+          {modelError && <p className="text-ui-xs text-destructive">{modelError}</p>}
+          <button type="button" onClick={() => void loadModels(kind, true)} disabled={modelsLoading} className="flex items-center gap-1 self-start text-ui-xs text-foreground-subtle hover:text-foreground disabled:opacity-50">
+            <RefreshCw className={cn("size-3", modelsLoading && "animate-spin")} />
+            {modelsLoading ? "正在读取模型…" : modelError ? "重试读取模型" : "刷新模型列表"}
+          </button>
         </div>
 
         {/* 若为 Claude Code，展示默认思考强度 (Effort) */}
@@ -617,7 +624,7 @@ function AgentsTab() {
         title="新建会话默认 CLI"
         subtitle="快速创建新会话或运行后台任务时优先选用的智能体引擎"
       >
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-4">
           {AGENT_KINDS.map((kind) => {
             const isSelected = settings.defaultAgent === kind;
             return (
@@ -645,7 +652,7 @@ function AgentsTab() {
         </div>
       </CardGroup>
 
-      {/* 5 个 Agent 独立详细卡片 */}
+      {/* 各 Agent 独立详细卡片 */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between px-1">
           <div>

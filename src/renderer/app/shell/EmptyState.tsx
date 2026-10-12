@@ -21,12 +21,12 @@ export function EmptyState() {
         <div className="flex flex-col gap-1.5">
           <h1 className="text-ui-xl font-semibold text-foreground">开始一个新会话</h1>
           <p className="text-ui-base text-foreground-subtle">
-            选择项目或不在项目中工作，用 Claude Code、Codex、StepCode、Antigravity 或 pi 开始对话。
+            选择项目或不在项目中工作，用 Claude Code、Codex、Antigravity 或 Cline 开始对话。
           </p>
         </div>
         {noAgent ? (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base">
-            <span className="text-foreground">没有找到 claude、codex、step、agy 或 pi 命令。请先安装，或在设置里指定路径。</span>
+            <span className="text-foreground">没有找到 claude、codex、agy 或 cline 命令。请先安装，或在设置里指定路径。</span>
             <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true, "agents")}>
               打开设置并配置
             </Button>

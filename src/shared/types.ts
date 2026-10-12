@@ -3,8 +3,8 @@ import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
 
 export type { ConversationRow };
 
-/** 以后接入 pi 等 CLI 时在这里扩展。 */
-export type AgentKind = "claude" | "codex" | "step" | "agy" | "pi";
+/** 以后接入其他 CLI 时在这里扩展。 */
+export type AgentKind = "claude" | "codex" | "agy" | "cline";
 
 /** 各 CLI 的权限模式取值不同，可选值见 shared/agents.ts 的 AGENTS[kind].permissionModes。 */
 export type PermissionMode = string;
@@ -377,10 +377,10 @@ export const DEFAULT_SETTINGS: Settings = {
   locale: "zh-CN",
   interfaceMode: "coding",
   defaultAgent: "claude",
-  agentPaths: { claude: "", codex: "", step: "", agy: "", pi: "" },
-  defaultPermissionModes: { claude: "default", codex: "on-request", step: "ask", agy: "default", pi: "default" },
-  defaultModels: { claude: "", codex: "", step: "", agy: "", pi: "" },
-  defaultEfforts: { claude: "", codex: "", step: "", agy: "", pi: "" },
+  agentPaths: { claude: "", codex: "", agy: "", cline: "" },
+  defaultPermissionModes: { claude: "default", codex: "on-request", agy: "default", cline: "default" },
+  defaultModels: { claude: "", codex: "", agy: "", cline: "" },
+  defaultEfforts: { claude: "", codex: "", agy: "", cline: "" },
   pinnedSessions: [],
   preventSleepWhileRunning: true,
   notifyOnFinish: true,

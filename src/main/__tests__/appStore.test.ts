@@ -12,9 +12,9 @@ describe("mergeSettings", () => {
       agentPaths: { ...DEFAULT_SETTINGS.agentPaths, claude: "/opt/claude" },
       defaultModels: { ...DEFAULT_SETTINGS.defaultModels, codex: "gpt-x" },
     };
-    const next = mergeSettings(current, { agentPaths: { codex: "/opt/codex" }, defaultModels: { step: "step-1" } });
+    const next = mergeSettings(current, { agentPaths: { codex: "/opt/codex" }, defaultModels: { cline: "cline-1" } });
     expect(next.agentPaths).toEqual({ ...DEFAULT_SETTINGS.agentPaths, claude: "/opt/claude", codex: "/opt/codex" });
-    expect(next.defaultModels).toEqual({ ...DEFAULT_SETTINGS.defaultModels, codex: "gpt-x", step: "step-1" });
+    expect(next.defaultModels).toEqual({ ...DEFAULT_SETTINGS.defaultModels, codex: "gpt-x", cline: "cline-1" });
     expect(next.defaultPermissionModes).toEqual(DEFAULT_SETTINGS.defaultPermissionModes);
   });
 
@@ -49,7 +49,7 @@ describe("AppStore.updateSettings", () => {
     const store = new AppStore(dir);
     store.updateSettings({ defaultModels: { claude: "opus" } });
     store.updateSettings({ defaultModels: { codex: "gpt-x" } });
-    store.updateSettings({ defaultPermissionModes: { step: "auto" } });
+    store.updateSettings({ defaultPermissionModes: { cline: "auto" } });
 
     const expected = {
       ...DEFAULT_SETTINGS.defaultModels,
@@ -57,7 +57,7 @@ describe("AppStore.updateSettings", () => {
       codex: "gpt-x",
     };
     expect(store.settings.defaultModels).toEqual(expected);
-    expect(store.settings.defaultPermissionModes.step).toBe("auto");
+    expect(store.settings.defaultPermissionModes.cline).toBe("auto");
     expect(store.settings.defaultPermissionModes.claude).toBe(DEFAULT_SETTINGS.defaultPermissionModes.claude);
 
     const saved = JSON.parse(readFileSync(join(dir, "settings.json"), "utf8"));
@@ -104,7 +104,7 @@ describe("AppStore.updateSettings", () => {
   it("置顶记录重启后保留，删除时只清理对应 CLI 的会话并持久化", () => {
     dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
     const store = new AppStore(dir);
-    const pinnedSessions = ["claude:same", "codex:same", "step:other", "pi:other", "agy:other"];
+    const pinnedSessions = ["claude:same", "codex:same", "agy:other", "cline:other"];
     store.updateSettings({ pinnedSessions });
     store.updateSettings({ theme: "dark" });
 

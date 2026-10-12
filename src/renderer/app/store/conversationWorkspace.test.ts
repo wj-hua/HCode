@@ -113,7 +113,7 @@ describe("不在项目中工作", () => {
     expect(useAppStore.getState().activeViewId).toBe(outside);
   });
 
-  it.each(["claude", "codex", "step", "agy", "pi"] as const)("%s 在非项目目录发送和续聊沿用现有 IPC", async (agent) => {
+  it.each(["claude", "codex", "agy", "cline"] as const)("%s 在非项目目录发送和续聊沿用现有 IPC", async (agent) => {
     await useAppStore.getState().workOutsideProject();
     useAppStore.getState().setDraftAgent(agent);
     expect(await useAppStore.getState().send("你好")).toBe(true);
