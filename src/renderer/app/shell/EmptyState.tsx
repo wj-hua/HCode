@@ -27,8 +27,8 @@ export function EmptyState() {
         {noAgent ? (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base">
             <span className="text-foreground">没有找到 claude、codex、step、agy 或 pi 命令。请先安装，或在设置里指定路径。</span>
-            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
-              打开设置
+            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true, "agents")}>
+              打开设置并配置
             </Button>
           </div>
         ) : null}

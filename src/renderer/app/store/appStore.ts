@@ -98,6 +98,7 @@ export interface AppState {
   permissions: Record<string, PermissionRequestEvent>;
   sidebarCollapsed: boolean;
   settingsOpen: boolean;
+  settingsTab: "general" | "agents" | "notifications" | "extensions";
   fullscreen: boolean;
   /** 编辑重发：待写入某个会话输入框的内容，输入框挂载后取走。 */
   composerPrefill: { viewId: string; text: string; images: ImageInput[]; files: FileInput[] } | null;
@@ -149,7 +150,7 @@ export interface AppState {
   editMessage(rowId: number): void;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
-  setSettingsOpen(open: boolean): void;
+  setSettingsOpen(open: boolean, tab?: "general" | "agents" | "notifications" | "extensions"): void;
   /** 关闭当前视图；会话记录仍保留在项目列表中。 */
   closeActiveView(): Promise<void>;
   activateView(viewId: string): void;
@@ -461,6 +462,7 @@ export const useAppStore = create<AppState>((set, get) => {
     permissions: {},
     sidebarCollapsed: false,
     settingsOpen: false,
+    settingsTab: "general",
     fullscreen: false,
     composerPrefill: null,
 
@@ -851,8 +853,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ sidebarCollapsed: collapsed });
     },
 
-    setSettingsOpen(open) {
-      set({ settingsOpen: open });
+    setSettingsOpen(open, tab) {
+      set({ settingsOpen: open, ...(tab ? { settingsTab: tab } : {}) });
     },
 
     async closeActiveView() {
