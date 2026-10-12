@@ -5,7 +5,44 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 import type { TurnOutcome } from '../../../../shared/collaboration.js';
+import type { ChatStateEvent } from '../../../../shared/types.js';
 import { AgySession } from '../agySession.js';
+
+it('协议失败后新回合清空旧错误与响应指标，真实成功结果仍可结算', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hcode-agy-metrics-retry-'));
+  const outcomes: TurnOutcome[] = [], states: ChatStateEvent[] = [];
+  const program = join(root, 'cli.cjs');
+  await writeFile(program, `const fs=require('node:fs');const send=e=>process.stdout.write(JSON.stringify(e)+'\\n');
+send({event:'init',conversation_id:'retry-test',init:{}});
+process.stdin.once('data',()=>{
+  send({event:'step_update',step_update:{step_type:'agent_response',text_delta:'first',state:'RUNNING'}});
+  setTimeout(()=>{
+    send({event:'step_update',step_update:{step_type:'agent_response',text_delta:'second',state:'DONE'}});
+    if(!fs.existsSync('retried')){fs.writeFileSync('retried','yes');process.stdout.write('{malformed\\n');return;}
+    send({event:'result',result:{conversation_id:'retry-test',num_turns:1,status:'SUCCESS',response:'done',usage:{input_tokens:20,cache_read_tokens:0,output_tokens:30}}});
+  },40);
+});`);
+  const session = new AgySession({
+    resolveLaunch: async () => ({ path: process.execPath, cwd: root, env: process.env as Record<string, string>, args: [program] }),
+    emitRows: () => {}, emitState: event => states.push(event), emitTurnOutcome: event => outcomes.push(event), onSettled: () => {},
+  }, { key: randomUUID(), projectPath: root, permissionMode: 'default' });
+  try {
+    await session.send('broken', [], [], 'failed-turn');
+    await vi.waitFor(() => expect(outcomes).toHaveLength(1));
+    expect(outcomes[0]).toMatchObject({ outcome: 'failed' });
+    expect(states.at(-1)?.usage?.ttftMs).toBeDefined();
+    const retry = session.send('retry', [], [], 'retry-turn');
+    expect(states.at(-1)).toMatchObject({ state: 'running' });
+    expect(states.at(-1)?.error).toBeUndefined();
+    expect(states.at(-1)?.usage?.ttftMs).toBeUndefined();
+    await retry;
+    await vi.waitFor(() => expect(outcomes).toHaveLength(2));
+    expect(outcomes[1]).toMatchObject({ executionTurnId: 'retry-turn', outcome: 'succeeded' });
+    expect(states.at(-1)).toMatchObject({ state: 'idle', usage: { outputTokens: 30 } });
+    expect(states.at(-1)?.usage?.ttftMs).toBeDefined();
+    expect(states.at(-1)?.usage?.outputTokensPerSecond).toBeGreaterThan(0);
+  } finally { session.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 it('原生结构化结果归属执行回合，拒绝操作和错误不能成为成功，重复结果只结算一次', async () => {
   const root = await mkdtemp(join(tmpdir(), 'hcode-agy-events-'));

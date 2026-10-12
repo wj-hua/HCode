@@ -209,22 +209,20 @@ export interface ChatStateEvent {
 
 /** 当前会话最近一轮的用量。 */
 export interface ChatUsage {
+  /** 从本轮发送到首个非空模型流式输出的时间，包含 CLI 启动；毫秒。 */
+  ttftMs?: number;
+  /** 本轮完成后，按 CLI 输出 Token 和分段流式输出耗时估算的速度。 */
+  outputTokensPerSecond?: number;
+  /** response：完整响应与 Token 增量配对；activeTurn：整轮耗时扣除工具/审批；未指定为流式片段估算。 */
+  outputSpeedBasis?: "response" | "activeTurn";
+  /** 计算速度使用的时间区间，便于核对平均吞吐；毫秒。 */
+  outputSpeedDurationMs?: number;
   contextUsedTokens?: number;
   contextWindowTokens?: number;
   contextUsedPercent?: number;
   inputTokens?: number;
   outputTokens?: number;
 }
-
-/** 某天、某 CLI、某模型累计的 Token 与完成的轮数。 */
-export interface UsageBucket {
-  input: number;
-  output: number;
-  turns: number;
-}
-
-/** 本地日期（YYYY-MM-DD）→ CLI → 模型 → 累计用量；只统计 HCode 内发起的轮次。 */
-export type UsageStats = Record<string, Partial<Record<AgentKind, Record<string, UsageBucket>>>>;
 
 export interface PermissionRequestEvent {
   sessionKey: string;
@@ -302,8 +300,8 @@ export interface QuotaGroup {
   windows: QuotaWindow[];
 }
 
-/** 额度来源：各 CLI，外加不属于某个 CLI 的 GLM Coding Plan（按 API key 读取）。 */
-export type QuotaSource = AgentKind | "glm";
+/** 额度来源：各 CLI。 */
+export type QuotaSource = AgentKind;
 
 export interface AgentQuota {
   agent: QuotaSource;

@@ -161,8 +161,6 @@ async function bootstrap() {
       else activeGitTurns.delete(event.sessionKey);
       if (wasActive && (event.state === "idle" || event.state === "error")) {
         finishTurn(event.sessionKey);
-        const { inputTokens = 0, outputTokens = 0 } = event.usage ?? {};
-        if (inputTokens + outputTokens > 0) store.recordUsage(event.agent, event.model || "未知模型", inputTokens, outputTokens);
       }
       syncSleepBlocker();
       send("chat:state", event);
@@ -185,7 +183,7 @@ async function bootstrap() {
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration")),
     pi: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.pi, PI_VARIANT),
   });
-  quota = new QuotaService(agents, buildAgentEnv, (snapshot) => send("quota:updated", snapshot));
+  quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const extensions = new ExtensionsService(claude, codex, buildAgentEnv);
   const requireSession = (sessionKey: string) => {
     const provider = agents.bySessionKey(sessionKey);
@@ -456,8 +454,6 @@ async function bootstrap() {
     return path;
   });
 
-  handle("usage:get", () => store.readUsage());
-  handle("usage:clear", () => store.clearUsage());
   handle("settings:get", () => store.settings);
   handle("settings:set", (patch) => {
     const settings = store.updateSettings(patch);
