@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { version as APP_VERSION } from "../../../../package.json";
 import type { AgentKind, NotificationEvent, SettingsPatch } from "@hcode/shared/types";
 import { isBackgroundVideo } from "@hcode/shared/types";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
@@ -901,7 +902,7 @@ export function SettingsDialog() {
 
             <div className="px-3 py-2 text-ui-xs text-foreground-subtle/70 border-t border-border/40 flex items-center justify-between">
               <span>HCode Desktop</span>
-              <span className="font-mono">v0.19.6</span>
+              <span className="font-mono">v{APP_VERSION}</span>
             </div>
           </nav>
 
