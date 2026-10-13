@@ -542,9 +542,8 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
       {open ? (
         <DropdownMenuContent
           className={cn(
-            shouldShowProviderLevel
-              ? "w-max min-w-48 max-w-[calc(100vw-2rem)]"
-              : "w-48 max-h-72 overflow-y-auto",
+            "w-max min-w-48 max-w-[calc(100vw-2rem)]",
+            !shouldShowProviderLevel && "max-h-72 overflow-y-auto",
           )}
           align={contentAlign}
           side={contentSide}
