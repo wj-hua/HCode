@@ -59,9 +59,11 @@ export class RunExecutor {
 
   private remainingTurns(delivery: DeliverySnapshot) {
     if (delivery.status === "queued") return 2;
+    const latest = this.snapshot.tasks.findLast(task => task.deliveryId === delivery.id);
     const active = this.snapshot.tasks.findLast((task) => task.deliveryId === delivery.id && task.status === "running");
-    if (delivery.status === "executing" || delivery.status === "revising") return active?.role === "execution" ? 1 : 2;
-    if (delivery.status === "reviewing") return active?.role === "review" ? 0 : 1;
+    // 实现/审查回合结束后宿主仍在异步验证或保存；预留剩余阶段，不能再次计算已消耗回合。
+    if (delivery.status === "executing" || delivery.status === "revising") return active?.role === "execution" || latest?.role === "execution" && latest.status === "succeeded" ? 1 : 2;
+    if (delivery.status === "reviewing") return active?.role === "review" || latest?.role === "review" && latest.status === "succeeded" ? 0 : 1;
     return 0;
   }
 

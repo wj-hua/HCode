@@ -1,0 +1,10 @@
+// 独立审查配置与代码写入分离；Gemini 只能作为已准入的只读审查者且必须选择可用模型。
+import type { CodeDraftEdit } from '@hcode/shared/codeDraft';
+import type { CollaborationCapabilities } from '@hcode/shared/collaboration';
+const INPUT_CLASS = 'min-w-0 rounded-md border border-border bg-background p-2 focus-visible:ring-2 focus-visible:ring-ring';
+export function CodeDraftReview({ edit, capabilities, disabled, onChange }: { edit: CodeDraftEdit; capabilities: CollaborationCapabilities[]; disabled: boolean; onChange(value: CodeDraftEdit): void }) {
+  return <fieldset disabled={disabled} className="flex flex-col gap-2"><legend className="mb-2 font-medium">独立审查</legend>
+    <label className="flex flex-col gap-1">审查 AI<select className={INPUT_CLASS} value={edit.reviewer?.agent ?? 'default'} onChange={event => onChange({ ...edit, reviewer: event.target.value === 'default' ? undefined : { agent: event.target.value as 'claude' | 'codex' | 'agy' } })}><option value="default">沿用当前 AI 配置，使用新的独立审查会话</option>{(['claude', 'codex', 'agy'] as const).map(agent => <option key={agent} value={agent} disabled={!capabilities.find(value => value.agent === agent)?.canReview}>{agent === 'agy' ? 'Antigravity / Gemini（只读）' : agent === 'claude' ? 'Claude' : 'Codex'}</option>)}</select></label>
+    {edit.reviewer ? <details open={edit.reviewer.agent === 'agy'}><summary className="cursor-pointer text-ui-sm">审查模型</summary>{edit.reviewer.agent === 'agy' ? <select aria-label="Gemini 审查模型" className={`${INPUT_CLASS} mt-2 w-full`} value={edit.reviewer.model ?? ''} onChange={event => onChange({ ...edit, reviewer: { agent: 'agy', model: event.target.value } })}><option value="">选择账号可用 Gemini 模型</option>{capabilities.find(value => value.agent === 'agy')?.models?.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}</select> : <input aria-label="独立审查模型" className={`${INPUT_CLASS} mt-2 w-full`} value={edit.reviewer.model ?? ''} placeholder="留空使用 CLI 默认模型" onChange={event => onChange({ ...edit, reviewer: { ...edit.reviewer!, model: event.target.value || undefined } })} />}</details> : null}
+  </fieldset>;
+}

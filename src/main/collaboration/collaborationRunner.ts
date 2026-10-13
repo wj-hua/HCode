@@ -86,10 +86,11 @@ export class CollaborationRunner {
           delegationResume.action === "review",
         );
     } else if (snapshot.approvedPlan) {
-      // 规划回合已在原会话生成并计入累计预算；确认后仅执行冻结的一项只读任务。
+      // 原会话的草案已经确认并计入预算；按冻结分工派发，不再让模型改变任务。
       const delegate = tools.find(tool => tool.name === "delegate_task");
       if (!delegate) throw new Error("确认计划缺少宿主派发工具");
-      await delegate.execute({ requestKey: "confirmed-plan", objective: snapshot.params.objective });
+      const confirmed = parallel ?? [{ requestKey: "confirmed-plan", objective: snapshot.params.objective }];
+      for (const task of confirmed) await delegate.execute({ requestKey: task.requestKey, objective: task.objective });
     } else {
       const planning = await executor.execute(
         "planning",

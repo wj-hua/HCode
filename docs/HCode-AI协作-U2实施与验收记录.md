@@ -1,6 +1,6 @@
 # HCode AI 协作 U2 实施与验收记录
 
-日期：2026-10-13。分支：`codex/ai-collaboration-interaction-plan`。本轮先按用户授权提交 U1：`55db781`，提交说明为 `feat(协作): 统一工作方式入口并复用当前输入完成只读协作`。U2 已实现并通过下述验收，仍在工作区，尚未提交、推送、合入 main 或替换 `/Applications/HCode.app`。
+日期：2026-10-13。分支：`codex/ai-collaboration-interaction-plan`。本轮先按用户授权提交 U1：`55db781`，提交说明为 `feat(协作): 统一工作方式入口并复用当前输入完成只读协作`。U2 已实现并通过下述验收，2026-10-13 按用户授权中文提交为 `ff0425d`（`feat(协作): 推荐专家团队并打通独立研究与互审闭环`）；尚未推送、合入 main 或替换 `/Applications/HCode.app`。
 
 ## 完成行为
 

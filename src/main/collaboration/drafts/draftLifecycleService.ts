@@ -1,4 +1,4 @@
-// 只读与专家草案共用版本、停止确认、预算预留和幂等启动；分工规则由各自 Policy 管理。
+// 只读、专家与代码草案共用版本、停止确认、预算预留和幂等启动；分工规则由各自 Policy 管理。
 import { realpath, stat } from "node:fs/promises";
 import type { SessionExecutionService } from "../../sessions/sessionExecutionService.js";
 import { DraftRepository } from "./draftRepository.js";

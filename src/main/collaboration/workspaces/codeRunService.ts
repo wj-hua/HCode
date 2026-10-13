@@ -39,7 +39,7 @@ export class CodeRunService {
     }
   }
   /** 文件清单逐层核验实际目录；新文件允许不存在，已有目录、链接或大小写别名拒绝。 */
-  private async assertFiles(root:string,paths:string[]) {
+  async assertFiles(root:string,paths:string[]) {
     for(const path of paths){
       const target=join(root,path);
       let current=target;

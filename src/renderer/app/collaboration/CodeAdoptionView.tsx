@@ -76,7 +76,7 @@ export function CodeAdoptionView({
           ) : null}
           {state.preview.conflicts.length ? (
             <div role="alert">
-              <p>以下文件有冲突，原项目未写入：</p>
+              <p>以下文件有冲突，本次候选未写入：</p>
               <ul className="list-disc pl-5">
                 {state.preview.conflicts.map((conflict) => (
                   <li key={conflict.path} className="break-all">

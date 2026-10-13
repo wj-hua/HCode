@@ -36,6 +36,7 @@ import { sourceTools } from "./sourceTools.js";
 import type { ApprovedResearchPlan } from "../../shared/researchDraft.js";
 import type { CollaborationTask } from "../../shared/collaboration.js";
 import { approvedPlanSchema } from "./collaborationSchemas.js";
+import { codeDraftRemainingTurns } from "../../shared/codeDraft.js";
 export class CollaborationService {
   readonly adoption: CodeAdoptionService;
   private readonly runs = new Map<string, ActiveRun>();
@@ -82,6 +83,15 @@ export class CollaborationService {
     if (input.code) throw new Error("只读草案不能执行代码任务");
     return this.startFromApproved(input.initiator, approval, turns, 3, MAX_RUN_TURNS, prepared => this.startRun(input, prepared));
   }
+
+  /** 明确确认的单/双代码任务复用隔离交付；文件范围由草案冻结，原会话不再二次规划。 */
+  async startPreparedCode(input: CollaborationStartParams, approval: ApprovedResearchPlan, turns: CollaborationTask[]) {
+    const params = startSchema.parse(input);
+    if (!params.code?.tasks?.length) throw new Error("代码计划缺少已确认任务和文件范围");
+    return this.startFromApproved(params.initiator, approval, turns, codeDraftRemainingTurns(params.code.tasks.length), MAX_RUN_TURNS, prepared => this.startRun(params, prepared));
+  }
+
+  assertCodePaths(project: string, paths: string[]) { return this.codeRuns.assertFiles(project, paths); }
 
   async startPreparedExperts(input: ExpertStartParams, approval: ApprovedResearchPlan, turns: CollaborationTask[]) {
     const params = expertStartSchema.parse(input);

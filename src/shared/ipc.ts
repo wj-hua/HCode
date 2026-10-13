@@ -34,6 +34,7 @@ import type {
 import type { AppCommand } from "./shortcuts.js";
 import type { CollaborationCapabilities, CollaborationSnapshot, CollaborationStartParams, CollaborationResumeParams, RecoveryIssue } from "./collaboration.js";
 import type { ResearchDraft, ResearchDraftInput, ResearchDraftEdit } from "./researchDraft.js";
+import type { CodeDraft, CodeDraftInput, CodeDraftEdit } from "./codeDraft.js";
 import type { ExpertDraft, ExpertDraftInput, ExpertDraftEdit } from "./expertDraft.js";
 import type { ExpertStartParams, ExpertResumeParams } from './experts.js';
 
@@ -41,6 +42,13 @@ import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "collaboration:codeDraftCreate": [[input: CodeDraftInput], CodeDraft];
+  "collaboration:codeDraftList": [[sessionKey?: string, nativeSessionId?: string], CodeDraft[]];
+  "collaboration:codeDraftUpdate": [[id: string, revision: number, edit: CodeDraftEdit], CodeDraft];
+  "collaboration:codeDraftPrepare": [[id: string, revision: number], CodeDraft];
+  "collaboration:codeDraftConfirm": [[id: string, revision: number], CollaborationSnapshot];
+  "collaboration:codeDraftCancel": [[id: string], void];
+  "collaboration:codeDraftAbandon": [[id: string, revision: number], CodeDraft];
   "collaboration:expertDraftCreate": [[input: ExpertDraftInput], ExpertDraft];
   "collaboration:expertDraftList": [[sessionKey?: string, nativeSessionId?: string], ExpertDraft[]];
   "collaboration:expertDraftUpdate": [[id: string, revision: number, edit: ExpertDraftEdit], ExpertDraft];
@@ -140,6 +148,7 @@ export interface InvokeMap {
 
 /** 主进程 → 渲染进程事件 */
 export interface EventMap {
+  "collaboration:codeDraftUpdated": CodeDraft;
   "collaboration:draftUpdated": ResearchDraft;
   "collaboration:expertDraftUpdated": ExpertDraft;
   "collaboration:updated": CollaborationSnapshot;
@@ -166,6 +175,7 @@ export interface HCodeBridge {
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
+  "collaboration:codeDraftCreate", "collaboration:codeDraftList", "collaboration:codeDraftUpdate", "collaboration:codeDraftPrepare", "collaboration:codeDraftConfirm", "collaboration:codeDraftCancel", "collaboration:codeDraftAbandon",
   "collaboration:expertDraftCreate", "collaboration:expertDraftList", "collaboration:expertDraftUpdate", "collaboration:expertDraftPrepare", "collaboration:expertDraftConfirm", "collaboration:expertDraftCancel", "collaboration:expertDraftAbandon",
   "collaboration:draftCreate", "collaboration:draftList", "collaboration:draftUpdate", "collaboration:draftPrepare", "collaboration:draftConfirm", "collaboration:draftCancel", "collaboration:draftAbandon",
   "collaboration:expertProfiles",
@@ -224,6 +234,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
+  "collaboration:codeDraftUpdated",
   "collaboration:draftUpdated", "collaboration:expertDraftUpdated",
   "collaboration:updated",
   "app:menuCommand",
