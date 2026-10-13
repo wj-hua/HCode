@@ -111,11 +111,12 @@ export class CollaborationRunner {
     snapshot.stage = "awaitingWorkers";
     await this.host.changed(active);
     await Promise.all([...active.jobs.values()]);
-    // 首轮父 AI 可回答已有上下文；显式续跑只恢复本次选定任务，不能重开其他已回复交付。
+    // 首轮父 AI 可回答已有上下文；用户保存回复只入记录，必须明确选择续跑。
     for (const delivery of snapshot.deliveries.filter(
       (entry) =>
         (!delegationResume || active.jobs.has(entry.id)) &&
         entry.error?.startsWith("执行者需要澄清") &&
+        !snapshot.messages?.some(message => message.deliveryId === entry.id && message.type === "answer" && message.sender === "user") &&
         !active.messages.pending(entry.id).length,
     ))
       this.host.launchDelivery(active, delivery);
@@ -257,7 +258,8 @@ export class CollaborationRunner {
     unconfirmed: boolean,
     error: unknown,
   ): ActiveRun["snapshot"]["status"] {
-    if (unconfirmed) return "interrupted";
+    // 调度器收尾不代表原生进程已停止；请求停止但未获确认时仍占用协作入口。
+    if (unconfirmed) return snapshot.stopIntent ? "stopping" : "interrupted";
     if (snapshot.stopIntent === "pause") return "paused";
     if (snapshot.stopIntent === "cancel") return "cancelled";
     if (snapshot.persistenceError) return "failed";

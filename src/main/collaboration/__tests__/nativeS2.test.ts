@@ -23,6 +23,7 @@ it.skipIf(process.env.HCODE_NATIVE_S2 !== "1")("S2 真实澄清、暂停接管�
     restarted = await nativeFixture("hcode-s2-restarted-", undefined, undefined, data.root);
     const recovered = await restarted.service.get(start.id);
     expect(recovered.status).toBe("paused");
+    await restarted.service.controls.takeover(start.id);
     expect(restarted.latest()).toBeUndefined();
     const question = recovered.messages!.find((entry) => entry.type === "clarification")!;
     expect(question.requiresUser).toBe(true);

@@ -60,7 +60,13 @@ export class SessionExecutionService {
   isReserved(sessionKey: string) { return this.reservationOwner(sessionKey) !== undefined; }
 
   assertIdle(sessionKey: string) {
-    if (this.busy.has(sessionKey)) throw new Error("会话仍有活动回合或原生停止状态未知，不能接管或续跑");
+    if (!this.isIdle(sessionKey)) throw new Error("会话仍有活动回合或原生停止状态未知，不能接管或续跑");
+  }
+
+  /** 进程内可信回合锁；只有匹配的原生终态释放，重启空表不能作为旧回合停止证据。 */
+  isIdle(sessionKey: string) {
+    const identity = this.sessionIdentities.get(sessionKey);
+    return !this.busy.has(sessionKey) && !(identity && this.nativeBusy.has(identity));
   }
 
   release(sessionKey: string, ownerId: string) {

@@ -60,7 +60,7 @@ export class CollaborationService {
     this.codeRuns = new CodeRunService(this.workspaces);
     this.adoption = new CodeAdoptionService(this.workspaces,repository);
     this.runner=new CollaborationRunner({repository,execution,agents,profiles,emit,changed:active=>this.changed(active),tools:active=>this.tools(active),launchDelivery:(active,delivery,reviewOnly)=>this.launchDelivery(active,delivery,reviewOnly),revalidateDeliveries:active=>this.revalidateDeliveries(active)});
-    this.expertControls=new ExpertControls({repository,execution,profiles,active:async id=>this.runs.get(z.string().uuid().parse(id))??this.activate(this.recovered(await repository.load(id))),assertSource:async (source,experts)=>{const capabilities=await this.capabilities(source);assertExpertBackends(experts,capabilities);const capability=capabilities.find(entry=>entry.agent===source.agent);if(!capability?.canInitiate)throw new Error(capability?.reason??'当前源会话不支持专家主持');},changed:active=>this.changed(active),continue:(active,params)=>{active.done=this.runner.run(active,params);}});
+    this.expertControls=new ExpertControls({exclusive:(id,action)=>this.operations.execute(id,action),repository,execution,profiles,active:async id=>this.runs.get(z.string().uuid().parse(id))??this.activate(this.recovered(await repository.load(id))),assertSource:async (source,experts)=>{const capabilities=await this.capabilities(source);assertExpertBackends(experts,capabilities);const capability=capabilities.find(entry=>entry.agent===source.agent);if(!capability?.canInitiate)throw new Error(capability?.reason??'当前源会话不支持专家主持');},changed:active=>this.changed(active),continue:(active,params)=>{active.done=this.runner.run(active,params);}});
     this.controls = new RunControls({
       workspaces: this.workspaces,
       exclusive:(id,action)=>this.operations.execute(id,action),
@@ -151,6 +151,7 @@ export class CollaborationService {
   async get(id: string) {
     const active=this.runs.get(z.string().uuid().parse(id));
     if(active?.snapshot.stage === "finished")await active.done;
+    if (active?.snapshot.status === "stopping" && active.snapshot.stage === "finished") await this.controls.refreshStop(id);
     return this.adoption.decorate(structuredClone(active?.snapshot ?? this.recovered(await this.repository.load(id))));
   }
 
@@ -332,7 +333,7 @@ export class CollaborationService {
     if(active.snapshot.experts){if(!active.snapshot.experts.participants.some(expert=>expert.id===id))throw new Error('专家不属于本次协作');return expertSummaryData(active.snapshot.id,active.snapshot.experts,this.repository);}
     const delivery = this.requireDelivery(active, id);
     const version = delivery.versions.at(-1);
-    return { ...delivery, deliveryId: delivery.id, contextRequests: active.messages.pending(delivery.id), ...(version ? { report: (await this.repository.readReport(active.snapshot.id, version)).text } : {}) };
+    return { ...delivery, deliveryId: delivery.id, messages: (active.snapshot.messages ?? []).filter(message => message.deliveryId === delivery.id), contextRequests: active.messages.pending(delivery.id), ...(version ? { report: (await this.repository.readReport(active.snapshot.id, version)).text } : {}) };
   }
 
   private async wait(active: ActiveRun, ids: string[]) {

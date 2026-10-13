@@ -22,7 +22,7 @@ interface ControlHost {
   continue(active: ActiveRun, params: CollaborationResumeParams): void;
 }
 
-import { adoptionBlocksEdits } from "../../shared/codeAdoption.js";
+import { adoptionBlocksEdits, adoptionNeedsRecovery } from "../../shared/codeAdoption.js";
 export class RunControls {
   constructor(private readonly host: ControlHost) {}
 
@@ -70,9 +70,68 @@ export class RunControls {
   }
 
   async reply(id: string, messageId: string, text: string) {
-    const active = await this.host.active(id);
-    if (["cancelled", "completed", "stopping"].includes(active.snapshot.status)) throw new Error("当前协作不能接收回复");
-    await active.messages.reply(z.string().uuid().parse(messageId), text, "user");
+    return this.host.exclusive(id, async () => {
+      const active = await this.host.active(id);
+      if (["cancelled", "completed", "stopping"].includes(active.snapshot.status)) throw new Error("当前协作不能接收回复");
+      await active.messages.reply(z.string().uuid().parse(messageId), text, "user");
+    });
+  }
+
+  /** 资料只保存到指定交付或专家的消息记录；不会派发模型或改写目标/权限。 */
+  async supplement(id: string, targetId: string, text: string) {
+    return this.host.exclusive(id, async () => {
+      const active = await this.host.active(id), snapshot = active.snapshot;
+      if (["running", "stopping", "cancelled"].includes(snapshot.status)) throw new Error("请先等待协作结束或确认暂停，再保存资料");
+      await active.done;
+      const target = z.string().uuid().parse(targetId);
+      const expert = snapshot.experts?.participants.find(entry => entry.id === target);
+      const delivery = snapshot.deliveries.find(entry => entry.id === target);
+      if (!expert && !delivery) throw new Error("资料目标不属于本次协作");
+      const code = delivery && deliveryCode(snapshot, delivery);
+      if (delivery?.status === "cancelled" || code?.workspace.state === "discarded" || adoptionBlocksEdits(code?.adoption)) throw new Error("此任务已停止、丢弃或采纳，不能补充执行资料");
+      await active.messages.supplement(target, text);
+      // 新资料不能被上一轮汇总冒充已核对；冻结报告与原生历史仍完整保留。
+      if (!snapshot.summary && !snapshot.experts?.summary && delivery?.status !== "accepted") return;
+      delete snapshot.summary;
+      if (snapshot.experts) delete snapshot.experts.summary;
+      if (delivery?.status === "accepted") {
+        delivery.status = "awaitingUser";
+        delivery.error = "补充资料尚未纳入此报告，请选择重新调研 / 修订或审查";
+      }
+      if (snapshot.status !== "paused") snapshot.status = "awaitingUser";
+      snapshot.error = "已保存新资料，旧汇总已失效；报告和审查历史保留，请明确选择续跑";
+      await this.host.changed(active);
+    });
+  }
+
+  /** 仅原生确认暂停且源会话已完成恢复时提供接管；请求停止不等于已停止。 */
+  async takeover(id: string) {
+    return this.host.exclusive(id, async () => {
+      const active = await this.host.active(id);
+      if (active.snapshot.status !== "paused") throw new Error("请先暂停并等待原生停止确认，再接管原会话");
+      await active.done;
+      if (active.snapshot.status !== "paused") throw new Error("恢复原会话失败，不能确认接管");
+      if (codeCandidates(active.snapshot).some(({ code }) => adoptionNeedsRecovery(code.adoption))) throw new Error("请先恢复原项目的未完成采纳，再接管原会话");
+      for (const task of active.snapshot.tasks) this.host.execution.assertIdle(task.sessionKey);
+      if (codeCandidates(active.snapshot).some(({ code }) => code.stopUnconfirmed)) throw new Error("候选停止未确认，不能接管");
+      this.host.execution.assertIdle(active.snapshot.params.initiator.sessionKey);
+    });
+  }
+
+  /** 核对本进程迟到终态并恢复源会话；磁盘恢复为 interrupted，不能凭空确认停止。 */
+  async refreshStop(id: string) {
+    return this.host.exclusive(id, async () => {
+      const active = await this.host.active(id), snapshot = active.snapshot;
+      if (snapshot.status !== "stopping" || snapshot.stage !== "finished") return;
+      await active.done;
+      if (codeCandidates(snapshot).some(({ code }) => code.stopUnconfirmed)) return;
+      if (!snapshot.tasks.every(task => this.host.execution.isIdle(task.sessionKey))) return;
+      const source = snapshot.params.initiator;
+      if (this.host.agents.get(source.agent).hasSession(source.sessionKey)) await this.host.agents.get(source.agent).endResearch?.(source.sessionKey, source.permissionMode);
+      snapshot.status = snapshot.stopIntent === "pause" ? "paused" : "cancelled";
+      snapshot.error = "原生迟到终态已确认；旧错误和回合记录保留，未自动续跑";
+      await this.host.changed(active);
+    });
   }
 
   /** 只重跑用户指定的交付；旧意见/旧版本保留，硬预算累计不重置。 */
@@ -85,7 +144,7 @@ export class RunControls {
     if (["running", "stopping", "cancelled"].includes(active.snapshot.status)) throw new Error("请先暂停或等待活动回合结束");
     await active.done;
     const snapshot = active.snapshot;
-    if(codeCandidates(snapshot).some(({code})=>code.adoption && (['prepared','applying','needsRecovery'].includes(code.adoption.status)||code.adoption.cleanupPending)))throw new Error('请先恢复原项目的未完成采纳，再续跑 AI');
+    if(codeCandidates(snapshot).some(({code})=>adoptionNeedsRecovery(code.adoption)))throw new Error('请先恢复原项目的未完成采纳，再续跑 AI');
     if(snapshot.experts)throw new Error("专家流程请使用专家续跑操作");
     const targets = params.deliveryId ? [this.delivery(active, params.deliveryId)] : snapshot.deliveries.filter((entry) => entry.status !== "accepted" && entry.status !== "cancelled");
     for(const delivery of targets){

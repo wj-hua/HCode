@@ -14,6 +14,7 @@ import { EXPERT_LIMITS } from "../../../shared/experts.js";
 import { expertResumeSchema } from "./expertContracts.js";
 import type {ExpertProfileService} from "./profiles/expertProfileService.js";
 interface ExpertControlHost {
+  exclusive<T>(id: string, action: () => Promise<T>): Promise<T>;
   profiles:ExpertProfileService;
   execution: SessionExecutionService;
   repository: CollaborationRepository;
@@ -29,6 +30,9 @@ export class ExpertControls {
   constructor(private readonly host: ExpertControlHost) {}
   /** 续跑先核对原生空闲、预算和冻结报告；原文与旧版本不清空。 */
   async resume(id: string, input: ExpertResumeParams) {
+    return this.host.exclusive(id, () => this.resumeRun(id, input));
+  }
+  private async resumeRun(id: string, input: ExpertResumeParams) {
     const params = expertResumeSchema.parse(input),
       active = await this.host.active(id),
       snapshot = active.snapshot,

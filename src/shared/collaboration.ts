@@ -104,6 +104,7 @@ export interface CollaborationTask {
 export interface TaskMessage {
   id: string;
   deliveryId: string;
+  // 澄清/回复绑定交付；context 也可绑定专家 id，旧记录保持兼容。
   requestKey: string;
   sender: "worker" | "initiator" | "user";
   recipient: "initiator" | "worker";

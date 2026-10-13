@@ -11,6 +11,7 @@ export function bindCollaborationSource(run: CollaborationSnapshot) {
   const views = Object.values(useAppStore.getState().conversations).filter(
     (view) =>
       view.agent === initiator.agent &&
+      view.projectPath === initiator.projectPath &&
       (view.sessionKey === initiator.sessionKey ||
         Boolean(sourceId && view.sessionId === sourceId)),
   );

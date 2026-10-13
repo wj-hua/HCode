@@ -5,7 +5,10 @@ import type { CollaborationPresentation } from '@hcode/shared/collaborationPrese
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('../bridge', () => ({ hcode: { invoke, on: vi.fn() } }));
 vi.mock('@/components/ui/toast.js', () => ({ toast: vi.fn() }));
-import { openPresentation } from './openPresentation';
+import { openPresentation, takeoverPresentation } from './openPresentation';
+import { useWorkMode } from '../composer/workMode';
+import { bindCollaborationSource } from './sourceConversation';
+import type { CollaborationSnapshot } from '@hcode/shared/collaboration';
 import { useAppStore } from '../store/appStore';
 import { useUiStore } from '../store/uiStore';
 
@@ -41,6 +44,27 @@ it('来源身份缺失时明确失败，不能创建替代会话', async () => {
   await expect(openPresentation({ ...entry, source: { ...entry.source, nativeSessionId: undefined } })).rejects.toThrow('尚未建立');
   expect(invoke).not.toHaveBeenCalled();
   expect(useAppStore.getState().conversations).toEqual({});
+});
+it('续跑绑定原会话时核对项目，不改写同原生 ID 的其他项目视图', async () => {
+  await openPresentation(entry);
+  const original = useAppStore.getState().conversations['source-id']!;
+  const other = { ...original, viewId: 'other', projectPath: '/other', sessionKey: 'other-key' };
+  useAppStore.setState({ conversations: { 'source-id': original, other } });
+  bindCollaborationSource({ params: { initiator: { agent: 'codex', sessionKey: 'new-source-key', projectPath: '/source', resumeSessionId: 'source-id' } }, tasks: [] } as unknown as CollaborationSnapshot);
+  expect(useAppStore.getState().conversations['source-id']!.sessionKey).toBe('new-source-key');
+  expect(useAppStore.getState().conversations.other).toEqual(other);
+});
+it('确认接管后返回普通对话；停止未确认时保留当前工作方式，不能发送消息', async () => {
+  await openPresentation(entry);
+  useWorkMode.getState().select('source-id', 'collaboration');
+  const run = { id: 'run', createdAt: 1, params: { initiator: { agent: 'codex', sessionKey: 'source-key', projectPath: '/source', resumeSessionId: 'source-id' }, objective: '核对' }, tasks: [], deliveries: [], status: 'paused', stage: 'finished' } as unknown as CollaborationSnapshot;
+  invoke.mockRejectedValueOnce(new Error('原生停止未确认'));
+  await expect(takeoverPresentation(run)).rejects.toThrow('未确认');
+  expect(useWorkMode.getState().views['source-id']?.mode).toBe('collaboration');
+  await takeoverPresentation(run);
+  expect(useWorkMode.getState().views['source-id']?.mode).toBe('chat');
+  expect(useUiStore.getState().sidePanel).toBeNull();
+  expect(invoke.mock.calls.some(call => call[0] === 'chat:send')).toBe(false);
 });
 it('证据预览返回保留指定 Run，跨会话切换撤销旧返回目标', async () => {
   await openPresentation(entry);

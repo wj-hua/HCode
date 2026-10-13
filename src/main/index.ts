@@ -356,6 +356,8 @@ async function bootstrap() {
   handle("collaboration:pause", (id) => collaboration.controls.stop(id, "pause"));
   handle("collaboration:resume", (id, params) => collaboration.controls.resume(id, params));
   handle("collaboration:reply", (id, messageId, text) => collaboration.controls.reply(id, messageId, text));
+  handle("collaboration:supplement", (id, targetId, text) => collaboration.controls.supplement(id, targetId, text));
+  handle("collaboration:takeover", (id) => collaboration.controls.takeover(id));
   handle("collaboration:cancelDelivery", (id, deliveryId) => collaboration.controls.cancelDelivery(id, deliveryId));
   handle("collaboration:recoveryIssues", () => collaboration.recoveryIssues());
   handle("collaboration:repair", (id) => collaboration.repair(id));

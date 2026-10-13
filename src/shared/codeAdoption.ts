@@ -38,3 +38,8 @@ export function adoptionBlocksEdits(state?: AdoptionState) {
     state && (state.status !== "rolledBack" || state.cleanupPending),
   );
 }
+
+/** 原项目可能已有部分写回或清理未完成；先恢复再让 AI 或人工继续。 */
+export function adoptionNeedsRecovery(state?: AdoptionState) {
+  return Boolean(state && (['prepared', 'applying', 'needsRecovery'].includes(state.status) || state.cleanupPending));
+}

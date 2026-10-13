@@ -52,3 +52,12 @@ it('验证期间重启保留停止未知锁，拒绝接管、丢弃和续跑', a
   await expect(data.service.controls.resume(data.snapshot.id, { action: 'review', deliveryId: data.snapshot.deliveries[0]!.id })).rejects.toThrow(/停止未确认/);
   expect(data.send).not.toHaveBeenCalled();
 });
+it('暂停后仍有未完成采纳时不能接管原会话，恢复前不启动普通模型', async () => {
+  const data = await fixture();
+  data.snapshot.seq++; data.snapshot.status = 'paused';
+  data.snapshot.code!.adoption = { id: randomUUID(), runId: data.snapshot.id, workspaceId: data.snapshot.code!.workspace.id, versionId: data.version.id, versionHash: data.version.hash, previewHash: 'a'.repeat(64), status: 'needsRecovery', cleanupPending: false, createdAt: Date.now(), updatedAt: Date.now(), changedPaths: ['source.js'] };
+  await data.repository.save(data.snapshot);
+  await expect(data.service.controls.takeover(data.snapshot.id)).rejects.toThrow('采纳');
+  expect(data.send).not.toHaveBeenCalled();
+  expect(await readFile(join(data.original, 'source.js'), 'utf8')).toBe('old\n');
+});

@@ -56,14 +56,15 @@ export class TaskMessages {
   }
 
   workerTools(delivery: DeliverySnapshot, _key: string): HostedTool[] {
-    return [{ name: "request_context", description: "向发起者请求本任务上下文；涉及产品规则/权限决定必须 requiresUser=true。立即返回并结束当前回合，不等待用户、不生成猜测报告。后续回复只在回合边界续跑。", schema: { requestKey: z.string().min(1).max(120), question: z.string().min(1).max(MAX_CONTEXT_LENGTH), requiresUser: z.boolean() }, execute: async (input) => {
+    return [{ name: "request_context", description: "向发起者请求本任务上下文；涉及产品规则/权限决定必须 requiresUser=true。新问题立即返回并结束当前回合，不等待用户、不生成猜测报告。幂等查询已回答的旧问题会返回 answered=true 和真实答案，可按宿主续跑阶段继续交付，不重复等待。", schema: { requestKey: z.string().min(1).max(120), question: z.string().min(1).max(MAX_CONTEXT_LENGTH), requiresUser: z.boolean() }, execute: async (input) => {
       if (this.snapshot.status !== "running") throw new Error("本次协作已停止派发");
       const text = String(input.question);
       const requestKey = String(input.requestKey);
       const previous = this.snapshot.messages?.find((entry) => entry.deliveryId === delivery.id && entry.type === "clarification" && entry.requestKey === requestKey);
       if (previous) {
         if (previous.text !== text || previous.requiresUser !== input.requiresUser) throw new Error("相同消息幂等键对应不同问题");
-        return { messageId: previous.id };
+        const answer = this.snapshot.messages?.find(entry => entry.replyTo === previous.id);
+        return { messageId: previous.id, ...(answer ? { answered: true, answer: { sender: answer.sender, text: answer.text } } : {}) };
       }
       if (this.pending(delivery.id).length) throw new Error("本任务已有待回答问题，请结束当前回合");
       const message: TaskMessage = { id: randomUUID(), deliveryId: delivery.id, requestKey, sender: "worker", recipient: "initiator", type: "clarification", text, requiresUser: input.requiresUser === true, createdAt: Date.now() };

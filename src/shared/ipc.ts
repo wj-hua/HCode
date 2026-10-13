@@ -81,6 +81,8 @@ export interface InvokeMap {
   "collaboration:pause": [[id: string], void];
   "collaboration:resume": [[id: string, params: CollaborationResumeParams], void];
   "collaboration:reply": [[id: string, messageId: string, text: string], void];
+  "collaboration:supplement": [[id: string, targetId: string, text: string], void];
+  "collaboration:takeover": [[id: string], void];
   "collaboration:cancelDelivery": [[id: string, deliveryId: string], void];
   "collaboration:recoveryIssues": [[], RecoveryIssue[]];
   "collaboration:repair": [[id: string], CollaborationSnapshot];
@@ -180,7 +182,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "collaboration:expertDraftCreate", "collaboration:expertDraftList", "collaboration:expertDraftUpdate", "collaboration:expertDraftPrepare", "collaboration:expertDraftConfirm", "collaboration:expertDraftCancel", "collaboration:expertDraftAbandon",
   "collaboration:draftCreate", "collaboration:draftList", "collaboration:draftUpdate", "collaboration:draftPrepare", "collaboration:draftConfirm", "collaboration:draftCancel", "collaboration:draftAbandon",
   "collaboration:expertProfiles",
-  "collaboration:presentation", "collaboration:adoptionPreview", "collaboration:applyCandidate", "collaboration:recoverAdoption", "collaboration:codeAdmission", "collaboration:candidatePreview", "collaboration:candidateAction", "collaboration:capabilities", "collaboration:start", "collaboration:startExperts", "collaboration:resumeExperts", "collaboration:get", "collaboration:list", "collaboration:cancel", "collaboration:artifact", "collaboration:pause", "collaboration:resume", "collaboration:reply", "collaboration:cancelDelivery", "collaboration:recoveryIssues", "collaboration:repair",
+  "collaboration:presentation", "collaboration:adoptionPreview", "collaboration:applyCandidate", "collaboration:recoverAdoption", "collaboration:codeAdmission", "collaboration:candidatePreview", "collaboration:candidateAction", "collaboration:capabilities", "collaboration:start", "collaboration:startExperts", "collaboration:resumeExperts", "collaboration:get", "collaboration:list", "collaboration:cancel", "collaboration:artifact", "collaboration:pause", "collaboration:resume", "collaboration:reply", "collaboration:supplement", "collaboration:takeover", "collaboration:cancelDelivery", "collaboration:recoveryIssues", "collaboration:repair",
   "agent:status",
   "agent:models",
   "agent:commands",

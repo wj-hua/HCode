@@ -10,6 +10,7 @@ import { AgentRegistry } from "../../agents/registry.js";
 import { SessionExecutionService } from "../../sessions/sessionExecutionService.js";
 import { CollaborationRepository } from "../collaborationRepository.js";
 import { CollaborationService } from "../collaborationService.js";
+import { EXPERT_LIMITS } from "../../../shared/experts.js";
 
 it.each([
   "complete",
@@ -24,6 +25,8 @@ it.each([
   "pause",
   "cancel",
   "budget",
+  "targetedContext",
+  "updatedContext",
 ] as const)("专家阶段、证据与恢复策略：%s", async (scenario) => {
   const root = await mkdtemp(join(tmpdir(), "hcode-experts-")),
     project = join(root, "project");
@@ -56,6 +59,7 @@ it.each([
     );
   const repository = new CollaborationRepository(join(root, "records"));
   const sourceTurns: AgentSendParams[] = [];
+  const researchInputs: AgentSendParams[] = [];
   let researchCount = 0,
     reviewCount = 0;
   let delayed: AgentSendParams | undefined;
@@ -131,7 +135,7 @@ it.each([
         latest!.tasks.findLast((task) => task.sessionKey === input.sessionKey)
           ?.role === "execution"
       ) {
-        if (input.text.startsWith("你是独立研究专家")) researchCount++;
+        if (input.text.startsWith("你是独立研究专家")) { researchCount++; researchInputs.push(input); }
         expect(input.text).not.toContain("peer-secret");
         expect(
           input.research!.tools?.some(
@@ -147,7 +151,7 @@ it.each([
         }
         const quote = "export const answer = 42;";
         text =
-          scenario === "partial" && input.agent === "agy"
+          (scenario === "partial" || scenario === "targetedContext" && !input.text.includes("指定专家资料：期望值42")) && input.agent === "agy"
             ? "invalid model output"
             : JSON.stringify({
                 summary: `peer-secret-${input.agent}`,
@@ -165,13 +169,13 @@ it.each([
               });
       } else {
         reviewCount++;
-        expect(researchCount).toBe(3);
+        expect(researchCount).toBe(scenario === "targetedContext" || scenario === "updatedContext" && researchCount > 3 ? 4 : 3);
         expect(
           latest!
             .experts!.participants.filter((participant) =>
               latest!.experts!.activeIds.includes(participant.id),
             )
-            .every((participant) => participant.versions.length === 1),
+            .every((participant) => participant.versions.length >= 1),
         ).toBe(true);
         if (scenario === "changedSource" && reviewCount === 1)
           await writeFile(
@@ -242,6 +246,7 @@ it.each([
         permissionMode: "default",
       },
       objective: "只读研究 source.ts 的正常与失败行为",
+      ...(scenario === "updatedContext" ? { turnLimit: EXPERT_LIMITS.maxTurns } : {}),
       experts: [
         { role: "architecture", backend: { agent: "claude" } },
         { role: "implementation", backend: { agent: "codex" } },
@@ -257,6 +262,45 @@ it.each([
     }
     await vi.waitFor(() => expect(latest?.stage).toBe("finished"));
     const result = await service.get(run.id);
+
+    if (scenario === "updatedContext") {
+      expect(result.status).toBe("completed");
+      const target = result.experts!.participants[0]!;
+      const others = result.experts!.participants.slice(1);
+      const before = researchInputs.length;
+      await service.controls.supplement(run.id, target.id, "新资料：只核对实际源码值42，不能冒称产品完整验收");
+      const saved = await service.get(run.id);
+      expect(saved.status).toBe("awaitingUser");
+      expect(saved.summary).toBeUndefined();
+      expect(saved.experts!.summary).toBeUndefined();
+      expect(saved.experts!.rawSummaries).toEqual(result.experts!.rawSummaries);
+      expect(saved.experts!.participants).toEqual(result.experts!.participants);
+      expect(researchInputs).toHaveLength(before);
+      await service.expertControls.resume(run.id, { action: "research", expertId: target.id });
+      await vi.waitFor(() => expect(latest?.status).toBe("completed"));
+      const final = await service.get(run.id);
+      expect(final.experts!.participants.slice(1)).toEqual(others);
+      expect(final.experts!.participants[0]!.versions).toHaveLength(2);
+      expect(researchInputs.at(-1)!.text).toContain("新资料：只核对实际源码值42");
+      return;
+    }
+
+    if (scenario === "targetedContext") {
+      expect(result.status).toBe("awaitingUser");
+      const target = result.experts!.participants.find(expert => expert.status === "failed")!;
+      const others = result.experts!.participants.filter(expert => expert.id !== target.id);
+      const before = result.tasks.length;
+      await service.controls.supplement(run.id, target.id, "指定专家资料：期望值42，只读核对 source.ts");
+      expect((await service.get(run.id)).tasks).toHaveLength(before);
+      await service.expertControls.resume(run.id, { action: "research", expertId: target.id });
+      await vi.waitFor(() => expect(latest?.stage).toBe("finished"));
+      const final = await service.get(run.id);
+      expect(final.status, JSON.stringify(final)).toBe("completed");
+      expect(researchInputs.filter(input => input.sessionKey !== target.sessionKey)).toHaveLength(2);
+      expect(final.experts!.participants.filter(expert => expert.id !== target.id)).toEqual(others);
+      expect(researchInputs.at(-1)!.text).toContain("指定专家资料：期望值42");
+      return;
+    }
 
     if (scenario === "pause" || scenario === "cancel") {
       expect(result.status).toBe(scenario === "pause" ? "paused" : "cancelled");
