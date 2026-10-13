@@ -4,15 +4,19 @@ import { performance } from "node:perf_hooks";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatStateEvent } from "../../../shared/types.js";
 
-const transport = vi.hoisted(() => ({ instance: null as EventEmitter | null, requests: [] as string[], turns: 0 }));
+const transport = vi.hoisted(() => ({ instance: null as EventEmitter | null, requests: [] as string[], params: [] as { method: string; params: Record<string, unknown> }[], turns: 0 }));
 vi.mock("../codex/appServerClient.js", () => ({
   AppServerClient: class extends EventEmitter {
     readonly running = true;
     constructor() { super(); transport.instance = this; }
     async ensureStarted() {}
     async call() { return { data: [], nextCursor: null }; }
-    async request(method: string) {
+    async request(method: string, params: Record<string, unknown>) {
       transport.requests.push(method);
+      transport.params.push({ method, params });
+      if (method === "config/read") return { config: { service_tier: "priority" } };
+      if (method === "thread/settings/update") return {};
+      if (method === "review/start") return { turn: { id: "review-turn" } };
       if (method === "thread/resume") return { model: "codex" };
       if (method === "turn/start") {
         const id = `turn-${++transport.turns}`;
@@ -50,9 +54,37 @@ const resume = (sessionKey: string) => ({
   permissionMode: "on-request" as const, text: "继续对话",
 });
 
-beforeEach(() => { transport.instance = null; transport.requests = []; transport.turns = 0; });
+beforeEach(() => { transport.instance = null; transport.requests = []; transport.params = []; transport.turns = 0; });
 
 describe("窗口重新连接同一个 Codex 历史线程", () => {
+  it("Fast 和标准速度随请求发送，回到 CLI 默认时恢复配置", async () => {
+    const { agent } = createAgent();
+    try {
+      const send = async (codexSpeed: "" | "fast" | "default") => {
+        await agent.send({ ...resume("speed-view"), codexSpeed });
+        await flushSend();
+        transport.instance!.emit("notification", "turn/completed", { threadId: THREAD, turn: { id: `turn-${transport.turns}`, status: "completed" } });
+        return transport.params.filter((item) => item.method === "turn/start").at(-1)!.params;
+      };
+      expect(await send("")).toHaveProperty("serviceTier", "priority");
+      expect(await send("fast")).toHaveProperty("serviceTier", "fast");
+      expect(await send("default")).toHaveProperty("serviceTier", "default");
+      expect(await send("")).toHaveProperty("serviceTier", "priority");
+      expect(await send("")).not.toHaveProperty("serviceTier");
+    } finally { agent.dispose(); }
+  });
+
+  it("Fast 也应用到 Codex 审查，而非作为提示词发送", async () => {
+    const { agent } = createAgent();
+    try {
+      await agent.send({ ...resume("review-speed-view"), text: "/review", codexSpeed: "fast" });
+      await flushSend();
+      expect(transport.params).toContainEqual({ method: "thread/settings/update", params: { threadId: THREAD, serviceTier: "fast" } });
+      expect(transport.requests.indexOf("thread/settings/update")).toBeLessThan(transport.requests.indexOf("review/start"));
+      expect(transport.requests).not.toContain("turn/start");
+    } finally { agent.dispose(); }
+  });
+
   it.each(["missing", "error"])("%s 终态保持失败且不显示成功吞吐", async (failure) => {
     let at = 0;
     const clock = vi.spyOn(performance, "now").mockImplementation(() => at);

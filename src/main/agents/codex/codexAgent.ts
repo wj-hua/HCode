@@ -437,6 +437,7 @@ export class CodexAgent implements AgentProvider {
       if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
     }
     session.effort = params.effort || undefined;
+    session.speed = params.codexSpeed;
     const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(params.text.trim());
     const skill = match && !["review", "compact"].includes(match[1]!.toLowerCase())
       ? (await this.listSkills(params.projectPath)).find((item) => item.name === match[1])

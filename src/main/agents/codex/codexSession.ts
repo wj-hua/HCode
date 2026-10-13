@@ -5,6 +5,7 @@ import { assertToolCatalog, readToolCatalog, sourceCatalogReason, type CodexTool
 import { randomUUID } from "node:crypto";
 import type {
   ChatRunState,
+  CodexSpeed,
   PermissionDecision,
   PermissionMode,
   RowOp,
@@ -89,6 +90,9 @@ export class CodexSession {
   model: string | undefined;
   /** 思考强度，随每轮 turn/start 发送。 */
   effort: string | undefined;
+  speed: CodexSpeed | undefined;
+  private speedOverridden = false;
+  private speedInitialized = false;
   /** app-server 实际使用的模型（thread/start、thread/resume 返回）。 */
   private reportedModel: string | undefined;
 
@@ -162,9 +166,15 @@ export class CodexSession {
         await this.host.client.request("thread/compact/start", { threadId: this.threadId });
         return;
       }
+      const speedParams = await this.speedParams();
       const review = /^\/review(?:\s+([\s\S]*))?$/i.exec(text.trim());
       if (review) {
         if (images.length || files.length) throw new Error("/review 不能附带文件或图片");
+        if ("serviceTier" in speedParams) {
+          await this.host.client.request("thread/settings/update", { threadId: this.threadId, ...speedParams });
+          this.speedOverridden = Boolean(this.speed);
+          this.speedInitialized = true;
+        }
         const instructions = review[1]?.trim();
         const result = await this.host.client.request<{ turn: { id: string } }>("review/start", {
           threadId: this.threadId,
@@ -188,15 +198,33 @@ export class CodexSession {
         ...(this.research ? { permissions: RESEARCH_PERMISSION_PROFILE } : { sandboxPolicy: sandboxPolicyObject(policy.sandbox) }),
         ...(this.model ? { model: this.model } : {}),
         ...(this.effort ? { effort: this.effort } : {}),
+        ...speedParams,
         ...(this.research?.outputSchema ? { outputSchema: this.research.outputSchema } : {}),
         summary: "auto",
       });
+      if ("serviceTier" in speedParams) {
+        this.speedOverridden = Boolean(this.speed);
+        this.speedInitialized = true;
+      }
       this.currentTurnId = result.turn.id;
       this.lifecycle.bindNativeTurn(result.turn.id);
       if (this.research && !this.toolsCancelled) this.hostedCalls.begin(this.threadId!, result.turn.id, this.research);
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /** serviceTier 会保留到后续轮次；回到 CLI 默认时必须恢复配置，不能只省略字段。 */
+  private async speedParams(): Promise<{ serviceTier?: string | null }> {
+    if (this.speed === undefined) return {};
+    if (this.speed) {
+      return { serviceTier: this.speed };
+    }
+    if (this.speedInitialized && !this.speedOverridden) return {};
+    const { config } = await this.host.client.request<{ config: { service_tier?: string | null } }>(
+      "config/read", { cwd: this.projectPath, includeLayers: false },
+    );
+    return { serviceTier: config.service_tier ?? null };
   }
 
   /** 新会话 thread/start；历史会话 thread/resume（只取元数据，历史已由 seedHistory 填充）。 */

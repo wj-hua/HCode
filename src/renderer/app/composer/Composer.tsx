@@ -11,6 +11,7 @@ import {
   ShieldOffIcon,
   SquareIcon,
   RefreshCwIcon,
+  ZapIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ZCodeConfigOption } from "@zcode/shared";
@@ -122,6 +123,7 @@ export function Composer({
   const setPermissionMode = useAppStore((state) => state.setPermissionMode);
   const setModel = useAppStore((state) => state.setModel);
   const setEffort = useAppStore((state) => state.setEffort);
+  const setCodexSpeed = useAppStore((state) => state.setCodexSpeed);
   const setDraftAgent = useAppStore((state) => state.setDraftAgent);
   const loadModels = useAppStore((state) => state.loadModels);
   const modelError = useAppStore((state) => state.modelErrors[conversation.agent]);
@@ -751,6 +753,24 @@ export function Composer({
               {modelError && <button type="button" onClick={() => void loadModels(conversation.agent, true)} disabled={modelsLoading} title={modelError} className="flex shrink-0 items-center gap-1 text-ui-xs text-destructive disabled:opacity-50">
                 <RefreshCwIcon className={cn("size-3", modelsLoading && "animate-spin")} />模型读取失败，重试
               </button>}
+              {conversation.agent === "codex" ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button type="button" aria-label="Codex 速度模式" title="Fast 模式加快回复，消耗更多额度；下一轮生效" className={cn("inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-ui-xs hover:bg-surface-hover", conversation.codexSpeed === "fast" ? "text-amber-500" : "text-foreground-subtle")}>
+                      <ZapIcon className="size-3.5" />
+                      {conversation.codexSpeed === "fast" ? "Fast" : conversation.codexSpeed === "default" ? "标准" : "速度"}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" onCloseAutoFocus={(event) => { event.preventDefault(); textareaRef.current?.focus(); }}>
+                    <DropdownMenuLabel>Codex 速度模式 · 下一轮生效</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup value={conversation.codexSpeed || "cli"} onValueChange={(value) => { if (value === "cli" || value === "fast" || value === "default") void setCodexSpeed(value === "cli" ? "" : value); }}>
+                      <DropdownMenuRadioItem value="cli">CLI 默认</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="default">标准速度</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="fast">Fast · 更快，消耗更多额度</DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
               {thoughtOption ? (
                 <ThoughtLevelCycleControl
                   composerCollapsePriority={3}

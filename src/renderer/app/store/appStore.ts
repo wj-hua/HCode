@@ -3,6 +3,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import type {
   AgentKind,
+  CodexSpeed,
   AgentStatus,
   ModelOption,
   ChatRunState,
@@ -75,6 +76,7 @@ export interface Conversation {
   turnPrompt?: string;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
+  codexSpeed: CodexSpeed;
   queue: QueuedMessage[];
   /** 队列暂停原因：用户停止或本轮出错后不再自动发送，等用户点「继续」。 */
   queuePaused?: "stopped" | "error";
@@ -134,6 +136,7 @@ export interface AppState {
   setModel(model: string): Promise<void>;
   /** 思考强度随下一次发送生效，并记为该 CLI 新会话的默认值。 */
   setEffort(effort: string): Promise<void>;
+  setCodexSpeed(speed: CodexSpeed): Promise<void>;
   respondPermission(interactionId: string, decision: PermissionDecision): Promise<void>;
   addProject(): Promise<void>;
   setProjectPinned(path: string, pinned: boolean): Promise<void>;
@@ -272,6 +275,7 @@ export const useAppStore = create<AppState>((set, get) => {
       permissionMode: settings.defaultPermissionModes[agent],
       model: settings.defaultModels[agent],
       effort: settings.defaultEfforts[agent],
+      codexSpeed: settings.codexSpeed,
       queue: [],
       turnHistory: [],
     };
@@ -350,6 +354,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: conv.permissionMode,
         ...(conv.model ? { model: conv.model } : {}),
         ...(effort ? { effort } : {}),
+        ...(conv.agent === "codex" ? { codexSpeed: conv.codexSpeed } : {}),
       });
       void notify(conv, "start", "任务正在执行");
       return true;
@@ -541,6 +546,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: settings.defaultPermissionModes[summary.agent],
         model: settings.defaultModels[summary.agent],
         effort: settings.defaultEfforts[summary.agent],
+        codexSpeed: settings.codexSpeed,
         queue,
         turnHistory: loadTurnHistory({ agent: summary.agent, projectPath: summary.projectPath, sessionId: summary.id }),
         ...(queue.length ? { queuePaused: "stopped" as const } : {}),
@@ -601,6 +607,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: settings.defaultPermissionModes[agent],
         model: settings.defaultModels[agent],
         effort: settings.defaultEfforts[agent],
+        codexSpeed: settings.codexSpeed,
         activeModel: undefined,
       });
       void get().loadModels(agent);
@@ -716,6 +723,13 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!conv) return;
       patchConversation(conv.viewId, { effort });
       await get().updateSettings({ defaultEfforts: { [conv.agent]: effort } });
+    },
+
+    async setCodexSpeed(codexSpeed) {
+      const conv = activeConversation();
+      if (!conv || conv.agent !== "codex") return;
+      patchConversation(conv.viewId, { codexSpeed });
+      await get().updateSettings({ codexSpeed });
     },
 
     async respondPermission(interactionId, decision) {

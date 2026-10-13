@@ -265,6 +265,9 @@ export interface FileInput {
   size: number;
 }
 
+/** 空串沿用 CLI 配置；default 为标准速度。 */
+export type CodexSpeed = "" | "fast" | "default";
+
 export interface ChatSendParams {
   agent: AgentKind;
   /** 会话 key，由渲染进程生成；主进程找不到时用它新建会话，保证事件先于 invoke 返回也能对上。 */
@@ -279,6 +282,7 @@ export interface ChatSendParams {
   model?: string;
   /** 思考强度；不传 = CLI 默认。 */
   effort?: string;
+  codexSpeed?: CodexSpeed;
 }
 
 /** 额度窗口：5 小时滚动窗口、周窗口，或其他时长。 */
@@ -352,6 +356,8 @@ export interface Settings {
   defaultModels: Record<AgentKind, string>;
   /** 输入框里最近选择的思考强度（空串 = CLI 默认），新建会话沿用。 */
   defaultEfforts: Record<AgentKind, string>;
+  /** Codex 输入框最近选择的速度，新会话沿用。 */
+  codexSpeed: CodexSpeed;
   /** 置顶会话的 agent:sessionId 键；仅影响所属项目内的会话排序。 */
   pinnedSessions: string[];
   /** 有会话正在运行时阻止电脑休眠（显示器仍可关闭）。 */
@@ -381,6 +387,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultPermissionModes: { claude: "default", codex: "on-request", agy: "default", cline: "default" },
   defaultModels: { claude: "", codex: "", agy: "", cline: "" },
   defaultEfforts: { claude: "", codex: "", agy: "", cline: "" },
+  codexSpeed: "",
   pinnedSessions: [],
   preventSleepWhileRunning: true,
   notifyOnFinish: true,
