@@ -22,6 +22,8 @@ export interface ResearchRuntime {
   root: string;
   tools?: HostedTool[];
   outputSchema?: Record<string, unknown>;
+  /** 宿主记录实际工具读取的证据版本；回调失败作为工具错误返回。 */
+  onRead?(file: { path: string; content: string; hash: string }): Promise<void>;
 }
 
 /** 拒绝相对逃逸和外部符号链接；返回 canonical 路径用于真正的读取。 */
@@ -45,7 +47,7 @@ export async function readResearchFile(root: string, path: string) {
 
 export function researchTools(runtime: ResearchRuntime): HostedTool[] {
   return [
-    { name: "read_file", description: "读取本次项目内文本，返回内容与 hash；无写入权限", schema: { path: z.string().min(1) }, execute: (input) => readResearchFile(runtime.root, String(input.path)) },
+    { name: "read_file", description: "读取本次项目内文本，返回内容与 hash；无写入权限", schema: { path: z.string().min(1) }, execute: async (input) => { const file = await readResearchFile(runtime.root, String(input.path)); await runtime.onRead?.(file); return file; } },
     { name: "list_files", description: "按名称检索本次项目内文件；返回相对路径", schema: { query: z.string() }, execute: (input) => listProjectFiles(runtime.root, String(input.query)) },
     ...(runtime.tools ?? []),
   ];

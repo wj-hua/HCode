@@ -85,6 +85,11 @@ export class CollaborationRunner {
           delivery,
           delegationResume.action === "review",
         );
+    } else if (snapshot.approvedPlan) {
+      // 规划回合已在原会话生成并计入累计预算；确认后仅执行冻结的一项只读任务。
+      const delegate = tools.find(tool => tool.name === "delegate_task");
+      if (!delegate) throw new Error("确认计划缺少宿主派发工具");
+      await delegate.execute({ requestKey: "confirmed-plan", objective: snapshot.params.objective });
     } else {
       const planning = await executor.execute(
         "planning",

@@ -58,7 +58,7 @@ function DelegationRunView({ run }: { run: CollaborationSnapshot }) {
         </div>)}
       </details>)}
     </div>)}
-    <div><p className="mb-2 font-medium">原生会话记录（含修订回合）</p><div className="flex flex-wrap gap-2">{run.tasks.map((task, index) => <Button key={task.id} variant={task.id === taskId ? "secondary" : "outline"} onClick={() => { setTaskId(task.id); setReport(""); }}>{index + 1}. {AGENTS[task.agent].name} · {TASK_LABELS[task.role]} · {OUTCOMES[task.status]}</Button>)}</div></div>
+    <div><p className="mb-2 font-medium">原生会话记录（含修订回合）</p><div className="flex flex-wrap gap-2">{run.tasks.map((task, index) => <Button key={task.id} variant={task.id === taskId ? "secondary" : "outline"} onClick={() => { setTaskId(task.id); setReport(""); }}>{index + 1}. {AGENTS[task.agent].name} · {run.approvedPlan && task.role === "planning" ? "计划生成" : TASK_LABELS[task.role]} · {OUTCOMES[task.status]}</Button>)}</div></div>
     {selectedTask ? <div className="rounded-lg border border-border p-3">{selectedTask.error ? <p className="mb-3 whitespace-pre-wrap text-destructive">{selectedTask.error}</p> : null}<TaskTranscript key={selectedTask.id} task={selectedTask} projectPath={selectedTask.deliveryId ? deliveryCode(run,run.deliveries.find(delivery=>delivery.id===selectedTask.deliveryId)!)?.workspace.path ?? run.params.initiator.projectPath : run.params.initiator.projectPath} /></div> : null}
     {reading ? <p role="status">正在读取报告…</p> : null}
     {error ? <p role="alert" className="text-destructive">{error}</p> : null}

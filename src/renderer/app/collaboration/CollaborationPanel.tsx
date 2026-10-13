@@ -1,7 +1,8 @@
 // 当前会话的协作入口；沿用已有会话身份，首次启动先绑定 key，防止原生行事件丢失。
 import { DEFAULT_WRITE_TASKS, ParallelCodeSetup, writeTasksReady } from "./ParallelCodeSetup";
+import { ResearchDraftPanel } from "./ResearchDraftPanel";
 import type { CodeWriteTask } from "@hcode/shared/codeDelivery";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CodeStartOptions } from "@hcode/shared/codeDelivery";
 import { CodeValidationPlan } from "./CodeValidationPlan";
 import { ExpertSetup, DEFAULT_EXPERTS } from "./ExpertSetup";
@@ -28,6 +29,7 @@ export function useActiveCollaboration(conversation: Conversation) {
 }
 
 export function CollaborationPanel({ conversation }: { conversation: Conversation }) {
+  const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [objective, setObjective] = useState("");
   const [mode, setMode] = useState<"research" | "code" | "experts">("research");
@@ -94,16 +96,16 @@ export function CollaborationPanel({ conversation }: { conversation: Conversatio
 
   return <>
     <div className="mb-2 flex items-center gap-2 text-ui-sm">
-      <Button variant="outline" onClick={() => setOpen(true)}><NetworkIcon />{active ? RUN_LABELS[active.status] : "多 AI 协作"}</Button>
+      <Button ref={trigger} variant="outline" onClick={() => setOpen(true)}><NetworkIcon />{active ? RUN_LABELS[active.status] : "多 AI 协作"}</Button>
       <span className="text-foreground-subtle">{active ? "委派期间由协作调度当前会话" : "委派 · 自动审查 · 专家互审"}</span>
     </div>
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col gap-3">
+      <DialogContent onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.focus(); }} className="flex max-h-[85vh] max-w-4xl flex-col gap-3">
         <DialogHeader><DialogTitle>多 AI 协作</DialogTitle><DialogDescription>当前会话的 AI 负责委派与汇总，其他会话执行和独立审查。支持只读调研、专家独立研究与互审，以及独立副本的并行代码交付。</DialogDescription></DialogHeader>
         <div className="min-h-0 overflow-y-auto pr-1">
           {error ? <p role="alert" className="mb-3 whitespace-pre-wrap text-destructive">{error}</p> : null}
           <CollaborationRecovery />
-          {active ? <p role="status" className="mb-3 text-foreground-subtle">{active.status === "stopping" ? "等待原生中断确认，尚未暂停或停止" : "关闭此窗口后协作会继续；下方可暂停接管或停止"}</p> : <form onSubmit={(event) => { event.preventDefault(); void start(); }} className="mb-4 flex flex-col gap-3 rounded-lg border border-border p-3">
+          {active ? <p role="status" className="mb-3 text-foreground-subtle">{active.status === "stopping" ? "等待原生中断确认，尚未暂停或停止" : "关闭此窗口后协作会继续；下方可暂停接管或停止"}</p> : <form onSubmit={(event) => { event.preventDefault(); if (mode !== "research") void start(); }} className="mb-4 flex flex-col gap-3 rounded-lg border border-border p-3">
             <p className="text-foreground-subtle">发起者：{AGENTS[conversation.agent].name}（当前会话）</p>
             {!sourceCapability?.canInitiate ? <p role="status">{sourceCapability?.reason ?? "正在检查当前线程的委派能力…"}</p> : <>
               <label className="flex items-center gap-3">任务类型<select value={mode} onChange={(event) => { setMode(event.target.value as "research" | "code" | "experts"); setCodeOptions(undefined); }} className="rounded-md border border-border bg-background p-1"><option value="research">只读调研</option><option value="code">隔离代码交付</option><option value="experts">专家独立研究与互审</option></select></label>
@@ -118,7 +120,8 @@ export function CollaborationPanel({ conversation }: { conversation: Conversatio
               <p className="text-ui-sm text-foreground-subtle">{capabilities ? capabilities.find((entry) => entry.agent === executor)?.reason : "正在检查 CLI 能力…"}{mode === "code" ? " · agy/Gemini 当前可只读审查，代码执行尚未准入" : ""}</p>
               {mode === "code" ? <CodeValidationPlan path={conversation.projectPath} onChange={setCodeOptions} /> : null}
               </>}
-              <Button type="submit" disabled={starting || sourceBusy || !objective.trim() || !sourceCapability?.canInitiate || (mode === "experts" ? !expertsReady : mode === "code" && (!codeOptions || parallel && !writeTasksReady(writeTasks,capabilities)) || !(mode === "code" && parallel) && executor === "agy" && !executorModel || reviewer === "agy" && !reviewerModel || reviewer !== "default" && !capabilities?.find((entry) => entry.agent === reviewer)?.canReview || mode === "code" && !parallel && !capabilities?.find((entry) => entry.agent === executor)?.canExecuteCode || !objective.trim() || !sourceCapability?.canInitiate || !(mode === "code" && parallel) && !capabilities?.find((entry) => entry.agent === executor)?.canExecute)}>{starting ? "正在启动…" : sourceBusy ? "请先完成当前回合 / 消息队列" : mode === "experts" ? "开始专家研究与互审" : mode === "code" ? "创建副本并开始代码协作" : "开始只读协作"}</Button>
+              {mode === "research" ? <ResearchDraftPanel conversation={conversation} input={{ objective, executor: { agent: executor, ...(executor === "agy" ? { model: executorModel } : useAppStore.getState().settings.defaultModels[executor] ? { model: useAppStore.getState().settings.defaultModels[executor] } : {}) }, ...(reviewer !== "default" ? { reviewer: { agent: reviewer, ...(reviewer === "agy" ? { model: reviewerModel } : useAppStore.getState().settings.defaultModels[reviewer] ? { model: useAppStore.getState().settings.defaultModels[reviewer] } : {}) } } : {}) }} unavailable={sourceBusy ? "请先完成当前会话回合或消息队列" : executor === "agy" && !executorModel || reviewer === "agy" && !reviewerModel ? "请选择账号可用的 Gemini 模型" : !capabilities?.find(entry => entry.agent === executor)?.canExecute || reviewer !== "default" && !capabilities?.find(entry => entry.agent === reviewer)?.canReview ? "执行或审查 AI 尚未通过能力检查" : undefined} onStarted={run => { useCollaborationStore.getState().accept(run); setSelectedId(run.id); setObjective(""); }} /> :
+              <Button type="submit" disabled={starting || sourceBusy || !objective.trim() || !sourceCapability?.canInitiate || (mode === "experts" ? !expertsReady : !codeOptions || parallel && !writeTasksReady(writeTasks,capabilities)) || mode === "code" && (!parallel && executor === "agy" && !executorModel || reviewer === "agy" && !reviewerModel || reviewer !== "default" && !capabilities?.find((entry) => entry.agent === reviewer)?.canReview || !parallel && !capabilities?.find((entry) => entry.agent === executor)?.canExecuteCode)}>{starting ? "正在启动…" : sourceBusy ? "请先完成当前回合 / 消息队列" : mode === "experts" ? "开始专家研究与互审" : "创建副本并开始代码协作"}</Button>}
             </>}
           </form>}
           {runs.length > 1 ? <label className="mb-3 flex items-center gap-3">协作记录<select value={selected?.id ?? ""} onChange={(event) => setSelectedId(event.target.value)} className="min-w-0 rounded-md border border-border bg-background p-1">{runs.map((run) => <option key={run.id} value={run.id}>{new Date(run.createdAt).toLocaleString()} · {run.experts && run.status === "completed" ? "专家互审与汇总已完成" : RUN_LABELS[run.status]}</option>)}</select></label> : null}

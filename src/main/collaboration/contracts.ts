@@ -3,6 +3,7 @@ import { COLLABORATION_LIMITS, COLLABORATION_WORKER_AGENTS } from "../../shared/
 import { codeStateSchema } from "./workspaces/codeContracts.js";
 import { expertStartSchema, expertStateSchema } from './experts/expertContracts.js';
 import { z } from "zod";
+import { approvedPlanSchema } from "./collaborationSchemas.js";
 
 export const MAX_REPORT_BYTES = 64 * 1024;
 export const MAX_REVISIONS = COLLABORATION_LIMITS.maxRevisions;
@@ -23,6 +24,7 @@ export const snapshotSchema = z.object({
   deliveries: z.array(z.object({ code: codeStateSchema.optional(), id: z.string().uuid(), requestKey: z.string(), objective: z.string(), executor: startSchema.shape.executor, status: z.enum(["queued", "executing", "reviewing", "revising", "accepted", "failed", "awaitingUser", "cancelled", "interrupted"]), versions: z.array(versionSchema), reviews: z.array(z.object({ versionId: z.string().uuid(), verdict: z.enum(["approved", "changesRequested", "inconclusive"]), summary: z.string(), issues: reviewSchema.shape.issues, reviewer: z.object({ agent: z.enum(["claude", "codex", "step", "agy", "pi"]), sessionKey: z.string().uuid(), nativeSessionId: z.string().optional() }).strict().optional() }).strict()), error: z.string().optional(), workerSessionKey: z.string().uuid().optional() }).strict()),
   summary: z.string().optional(), error: z.string().optional(), persistenceError: z.string().optional(),
   stopIntent: z.enum(["pause", "cancel"]).optional(),
+  approvedPlan: approvedPlanSchema.optional(),
   code: codeStateSchema.optional(),
   experts:expertStateSchema.optional(),
   messages: z.array(z.object({ id: z.string().uuid(), deliveryId: z.string().uuid(), requestKey: z.string(), sender: z.enum(["worker", "initiator", "user"]), recipient: z.enum(["initiator", "worker"]), type: z.enum(["clarification", "answer", "context"]), text: z.string().max(COLLABORATION_LIMITS.maxContextLength), createdAt: z.number(), requiresUser: z.boolean().optional(), replyTo: z.string().uuid().optional() }).strict()).max(COLLABORATION_LIMITS.maxMessages).optional(),

@@ -128,6 +128,7 @@ export interface CollaborationSnapshot {
   persistenceError?: string;
   stopIntent?: "pause" | "cancel";
   messages?: TaskMessage[];
+  approvedPlan?: import("./researchDraft.js").ApprovedResearchPlan;
   code?: CodeDeliveryState;
   experts?: ExpertState;
 }

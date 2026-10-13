@@ -5,6 +5,7 @@ import {
   COLLABORATION_WORKER_AGENTS,
 } from "../../shared/collaboration.js";
 import { codeStartSchema } from "./workspaces/codeContracts.js";
+export const approvedPlanSchema = z.object({ draftId: z.string().uuid(), revision: z.number().int().positive(), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 export const backendSchema = z
   .object({
     agent: z.enum(COLLABORATION_WORKER_AGENTS),

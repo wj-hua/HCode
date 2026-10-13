@@ -31,6 +31,10 @@ import { expertSummaryData } from './experts/expertEvidence.js';
 import { ExpertProfileService } from "./experts/profiles/expertProfileService.js";
 import { CodeAdoptionService } from "./adoption/codeAdoptionService.js";
 import { type AdoptionRequest } from "../../shared/codeAdoption.js";
+import { sourceTools } from "./sourceTools.js";
+import type { ApprovedResearchPlan } from "../../shared/researchDraft.js";
+import type { CollaborationTask } from "../../shared/collaboration.js";
+import { approvedPlanSchema } from "./collaborationSchemas.js";
 export class CollaborationService {
   readonly adoption: CodeAdoptionService;
   private readonly runs = new Map<string, ActiveRun>();
@@ -69,6 +73,26 @@ export class CollaborationService {
 
   /** 启动校验和初始记录成功后返回；后续阶段由主进程运行，不依赖视图存活。 */
   async start(input: CollaborationStartParams): Promise<CollaborationSnapshot> {
+    return this.startRun(input);
+  }
+
+  /** 草案确认复用固定 Run ID；已落盘结果只读取，重启后不会再次派发。 */
+  async startPrepared(input: CollaborationStartParams, approval: ApprovedResearchPlan, turns: CollaborationTask[]) {
+    const approved = approvedPlanSchema.parse(approval);
+    return this.operations.execute(approved.draftId, async () => {
+      let existing: CollaborationSnapshot | undefined;
+      try { existing = await this.get(approved.draftId); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if (existing) {
+        if (JSON.stringify(existing.approvedPlan) !== JSON.stringify(approved)) throw new Error("已启动计划的确认版本不一致");
+        return existing;
+      }
+      if (input.code || !turns.length || turns.length + 3 > MAX_RUN_TURNS || turns.some(turn => turn.role !== "planning" || turn.sessionKey !== input.initiator.sessionKey || turn.agent !== input.initiator.agent || turn.status === "running") || turns.at(-1)?.status !== "succeeded" || turns.at(-1)?.nativeSessionId !== input.initiator.resumeSessionId) throw new Error("计划的原会话、规划回合或预算不合法");
+      return this.startRun(input, { approved, turns });
+    });
+  }
+
+  private async startRun(input: CollaborationStartParams, prepared?: { approved: ApprovedResearchPlan; turns: CollaborationTask[] }): Promise<CollaborationSnapshot> {
     const params = startSchema.parse(input);
     const root = await realpath(params.initiator.projectPath);
     if (!(await stat(root)).isDirectory()) throw new Error("协作项目不是目录");
@@ -83,7 +107,7 @@ export class CollaborationService {
       if (backend.agent === "agy" && (!backend.model || !capability?.models?.some((model) => model.value === backend.model))) throw new Error("请选择当前账号模型列表中的 Gemini 模型，不使用默认模型或自动替换");
     }
     if (params.code && !capabilities.find((entry) => entry.agent === params.executor.agent)?.canExecuteCode) throw new Error("所选执行者尚未通过代码写入准入，当前仅支持只读研究/审查");
-    const snapshot: CollaborationSnapshot = { id: randomUUID(), seq: 0, createdAt: Date.now(), params, status: "running", stage: "planning", tasks: [], deliveries: [] };
+    const snapshot: CollaborationSnapshot = { id: prepared?.approved.draftId ?? randomUUID(), seq: 0, createdAt: Date.now(), params, status: "running", stage: "planning", tasks: structuredClone(prepared?.turns ?? []), deliveries: [], ...(prepared ? { approvedPlan: prepared.approved } : {}) };
     this.execution.reserve(params.initiator.sessionKey, snapshot.id, params.initiator.resumeSessionId ? `${params.initiator.agent}:${params.initiator.resumeSessionId}` : undefined);
     let active: ActiveRun;
     try {
@@ -208,13 +232,16 @@ export class CollaborationService {
 
 
   private tools(active: ActiveRun): HostedTool[] {
-    return [
-      { name: "get_context_requests", description: "查询本次任务的待澄清问题；用户决定不能代批", schema: {}, execute: async () => active.messages.pending() },
-      { name: "reply_context", description: "在原权限范围内回复任务的已有上下文；需要用户决定的问题不能代答", schema: { messageId: z.string().uuid(), text: z.string().min(1).max(8000) }, execute: async (input) => { await active.messages.reply(String(input.messageId), String(input.text), "initiator"); return { replied: true }; } },
-      { name: "delegate_task", description: "创建本次协作的只读子任务，自动送审及有界修订；返回 taskId", schema: { requestKey: z.string().min(1).max(120), objective: z.string().min(1).max(8000) }, execute: async (input) => this.delegate(active, String(input.requestKey), String(input.objective)) },
-      { name: "get_task_result", description: "查询本次任务的状态、审查与完整报告", schema: { taskId: z.string().uuid() }, execute: async (input) => this.taskResult(active, String(input.taskId)) },
-      { name: "wait_tasks", description: "有界等待本次任务交付；pending 时宿主负责后续汇总唤醒", schema: { taskIds: z.array(z.string().uuid()).min(1).max(MAX_DELIVERIES) }, execute: async (input) => this.wait(active, input.taskIds as string[]) },
-    ];
+    return sourceTools(async (name, input) => {
+      switch (name) {
+        case "get_context_requests": return active.messages.pending();
+        case "reply_context": await active.messages.reply(String(input.messageId), String(input.text), "initiator"); return { replied: true };
+        case "delegate_task": return this.delegate(active, String(input.requestKey), String(input.objective));
+        case "get_task_result": return this.taskResult(active, String(input.taskId));
+        case "wait_tasks": return this.wait(active, input.taskIds as string[]);
+        default: throw new Error("未知协作工具");
+      }
+    });
   }
 
   /** 汇总前后核对冻结版本；外部编辑不能沿用先前已接受的审查结论。 */
