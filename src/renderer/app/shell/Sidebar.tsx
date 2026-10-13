@@ -104,6 +104,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
             variant="ghost"
             size="icon-md"
             className="app-no-drag text-foreground-subtle"
+            aria-label="收起侧边栏"
             onClick={() => setSidebarCollapsed(true)}
           >
             <PanelLeftIcon />
@@ -115,6 +116,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
             variant="ghost"
             size="icon-md"
             className="app-no-drag text-foreground-subtle"
+            aria-label="新建会话"
             onClick={() => {
               const path = activeProjectPath ?? projects.find((project) => project.purpose !== "conversation")?.path;
               if (path) newChat(path);
@@ -242,6 +244,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
             variant="ghost"
             size="icon-md"
             className="text-foreground-subtle"
+            aria-label="设置"
             onClick={() => setSettingsOpen(true)}
           >
             <SettingsIcon />

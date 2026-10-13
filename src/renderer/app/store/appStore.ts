@@ -192,7 +192,7 @@ function lastAssistantText(rows: readonly ConversationRow[]): string {
 export function conversationTitle(conv: Conversation): string {
   const first = conv.rows.find((row) => row.kind === "userInput");
   const line = first?.kind === "userInput" ? first.text.split("\n").map((item) => item.trim()).find(Boolean) : undefined;
-  return presentationTitle(conv.title ?? line ?? "新会话", conv, usePresentationStore.getState().entries);
+  return presentationTitle(conv.title ?? line ?? "新会话", conv, usePresentationStore.getState().entries, conv.title === undefined);
 }
 
 /** 已打开会话的占位摘要：标题取首条用户消息。 */

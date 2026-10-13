@@ -6,6 +6,7 @@ import { cn } from "@/components/lib/utils.js";
 import { AgentBadge } from "../AgentBadge";
 import { formatDuration } from "../format";
 import { conversationTitle, useAppStore } from "../store/appStore";
+import { usePresentationStore } from "../collaboration/presentationStore";
 
 function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(Date.now());
@@ -17,6 +18,7 @@ function Elapsed({ since }: { since: number }) {
 }
 
 export function RunningTasks() {
+  const presentationEntries = usePresentationStore(state => state.entries);
   const conversations = useAppStore((state) => state.conversations);
   const projects = useAppStore((state) => state.projects);
   const activeViewId = useAppStore((state) => state.activeViewId);
@@ -47,7 +49,7 @@ export function RunningTasks() {
         };
       })
       .sort((a, b) => Number(b.awaiting) - Number(a.awaiting) || a.startedAt - b.startedAt);
-  }, [conversations, projects, activeViewId]);
+  }, [conversations, projects, activeViewId, presentationEntries]);
 
   if (tasks.length === 0) return null;
 

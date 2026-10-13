@@ -69,6 +69,9 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
         { label: "切换会话", submenu: switchViews },
         { type: "separator" },
         { role: "togglefullscreen", label: "切换全屏" },
+        { role: "zoomIn", label: "放大界面" },
+        { role: "zoomOut", label: "缩小界面" },
+        { role: "resetZoom", label: "恢复默认大小" },
       ],
     },
     {

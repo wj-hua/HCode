@@ -1,6 +1,6 @@
 # HCode AI 协作 U5 实施与验收记录
 
-日期：2026-10-13。分支：`codex/ai-collaboration-interaction-plan`。本轮先按授权中文提交 U4：`ce29325`（`feat(协作): 整理进度与结果并分组内部会话`）。U5 工作保留在本地，尚未提交、推送、合入 main 或替换 `/Applications/HCode.app`。
+日期：2026-10-13。分支：`codex/ai-collaboration-interaction-plan`。本轮先按授权中文提交 U4：`ce29325`（`feat(协作): 整理进度与结果并分组内部会话`）。U6 开始前已按新授权中文提交 U5：`2d31be6`（`feat(协作): 打通定向补资料、续跑与停止接管恢复`）；未推送或合入 main。正式安装版更新及新一轮业务验收见 [U6 实施与验收记录](./HCode-AI协作-U6实施与验收记录.md)。下文保留 U5 当时的验证范围。
 
 ## 完成行为与边界
 

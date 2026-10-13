@@ -53,6 +53,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
             variant="ghost"
             size="icon-md"
             className="app-no-drag text-foreground-subtle"
+            aria-label="展开侧边栏"
             onClick={() => setSidebarCollapsed(false)}
           >
             <PanelLeftIcon />
@@ -102,6 +103,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
               variant="ghost"
               size="icon-md"
               className="text-foreground-subtle"
+              aria-label="在 Finder 中显示项目"
               onClick={() => void hcode.invoke("app:showInFinder", conversation.projectPath)}
             >
               <FolderIcon />
@@ -116,6 +118,7 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
                 variant="ghost"
                 size="icon-md"
                 className="text-foreground-subtle"
+                aria-label={conversation.sessionId ? "在终端中继续此会话" : "在终端中打开项目目录"}
                 onClick={() =>
                   void hcode.invoke(
                     "app:openInTerminal",

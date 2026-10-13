@@ -1,5 +1,6 @@
 import { subscribePresentation } from "./collaboration/presentationStore";
 import { useEffect } from "react";
+import { MotionConfig } from "motion/react";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import { AppShell } from "./shell/AppShell";
@@ -18,7 +19,7 @@ export function App() {
   return (
     // 语言切换时重建 Provider，让 ZCode 组件拿到新的 intl
     <ZCodeIntlProvider key={locale} initialLocale={locale}>
-      <TooltipProvider delayDuration={300}>{ready ? <AppShell /> : <div className="h-dvh" />}</TooltipProvider>
+      <MotionConfig reducedMotion="user"><TooltipProvider delayDuration={300}>{ready ? <AppShell /> : <div className="h-dvh" />}</TooltipProvider></MotionConfig>
     </ZCodeIntlProvider>
   );
 }

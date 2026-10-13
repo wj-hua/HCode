@@ -13,6 +13,13 @@ export interface CollaborationPresentation {
 }
 export interface PresentationCatalog { entries: CollaborationPresentation[]; errors: string[] }
 export interface PresentationConversation { agent: AgentKind; projectPath: string; sessionKey?: string; sessionId?: string }
+/** 最新汇总只属于最新成功汇总回合；历史停止/失败回合保留自身错误。 */
+export function presentationContent(entry: CollaborationPresentation, task?: PresentationTask) {
+  const current = entry.tasks.findLast(candidate => candidate.role === 'synthesis' && candidate.status === 'succeeded');
+  const showsSummary = !task || task.role === 'synthesis' && task.status === 'succeeded' && task.id === current?.id;
+  if (!showsSummary) return { error: task?.error };
+  return { summary: entry.summary, summaryLabel: entry.summaryLabel, error: task ? task.error : entry.error };
+}
 export const COLLABORATION_PRESENTATION_LIMITS = { titleLength: 80 } as const;
 export const TASK_ROLE_LABELS = { planning: '计划生成', execution: '执行 / 修订', review: '独立审查', synthesis: '当前会话汇总' } as const;
 export const TASK_RESULT_LABELS = { running: '运行中', succeeded: '回合完成', failed: '失败', cancelled: '已停止', interrupted: '已中断' } as const;
@@ -86,12 +93,13 @@ export function usagePresentation(tasks: readonly CollaborationTask[]) {
 }
 
 /** 只替换与宿主原始首行完全相等的自动标题；用户重命名保持原样。 */
-export function presentationTitle(title: string, conversation: PresentationConversation, entries: readonly CollaborationPresentation[]) {
+export function presentationTitle(title: string, conversation: PresentationConversation, entries: readonly CollaborationPresentation[], automaticFirstInput = false) {
   const associated = entries.filter(entry => entry.source.agent === conversation.agent && entry.projectPath === conversation.projectPath && (entry.source.sessionKey === conversation.sessionKey || Boolean(conversation.sessionId && entry.source.nativeSessionId === conversation.sessionId))).sort((left, right) => left.createdAt - right.createdAt);
   for (const entry of associated) {
     if (!entry.tasks.some(task => {
       const raw = task.presentation?.inputTitle;
-      return raw && (title === raw || title === collaborationInputTitle(raw));
+      const candidate = automaticFirstInput ? collaborationInputTitle(title) : title;
+      return raw && (candidate === raw || candidate === collaborationInputTitle(raw));
     })) continue;
     return collaborationInputTitle(entry.objective);
   }

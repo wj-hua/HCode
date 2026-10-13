@@ -12,6 +12,7 @@ import { CollaborationControls } from "./CollaborationControls";
 import { CodeCandidateView } from "./CodeCandidateView";
 import { ExpertRunView } from "./ExpertRunView";
 import { TaskTranscript } from "./TaskTranscript";
+import { TaskObjective } from "./TaskObjective";
 
 export const RUN_LABELS: Record<CollaborationSnapshot["status"], string> = { running: "协作进行中", stopping: "等待原生停止确认", paused: "已暂停，可人工接管", awaitingUser: "等待人工处理", completed: "交付已审查并汇总", failed: "协作失败", cancelled: "协作已停止", interrupted: "执行已中断" };
 const STAGES: Record<CollaborationSnapshot["stage"], string> = { planning: "当前 AI 拆解与委派", awaitingWorkers: "执行、审查与修订", expertResearch: "专家独立研究", peerReview: "专家交叉审查", synthesis: "当前 AI 汇总", finished: "已结束" };
@@ -41,7 +42,7 @@ function DelegationRunView({ run }: { run: CollaborationSnapshot }) {
   return <div className="flex flex-col gap-4">
     <div aria-live="polite" className="rounded-lg border border-border bg-surface p-3">
       <p className="font-medium">{RUN_LABELS[run.status]} · {STAGES[run.stage]}</p>
-      <p className="mt-1 whitespace-pre-wrap text-foreground-subtle">{run.params.objective}</p>
+      <TaskObjective objective={run.params.objective} />
       <p className="mt-2 text-ui-sm text-foreground-subtle">{run.code ? run.code.adoption?.status === "applied" ? "隔离代码交付 · 所选候选已应用到原项目" : run.code.adoption && ["prepared", "applying", "needsRecovery"].includes(run.code.adoption.status) ? "代码采纳未完成 · 请核对恢复记录" : "隔离代码候选 · 实际检查与独立审查 · 待采纳，原项目未应用" : candidates.length ? `并行代码任务 · ${candidates.length} 个独立副本 · 逐任务验证、审查和采纳` : "只读报告 · 最多两次修订 · 没有运行测试"}</p>
     </div>
     {run.summary ? <details open><summary className="cursor-pointer font-medium">当前 AI 的最终汇总{candidates.some(entry=>entry.code.adoption) ? "（采纳前）" : ""}</summary><div className="mt-3"><MessageResponse>{run.summary}</MessageResponse></div></details> : null}
@@ -51,7 +52,7 @@ function DelegationRunView({ run }: { run: CollaborationSnapshot }) {
     {run.persistenceError ? <p role="alert" className="text-destructive">记录保存失败：{run.persistenceError}。当前状态尚未持久化。</p> : null}
     {run.deliveries.length === 0 ? <p className="text-foreground-subtle">尚未创建子任务。</p> : run.deliveries.map((delivery) => <div key={delivery.id} className="rounded-lg border border-border p-3">
       <p className="font-medium">{DELIVERY_LABELS[delivery.status]} · {AGENTS[delivery.executor.agent].name}</p>
-      <p className="mt-1 whitespace-pre-wrap">{delivery.objective}</p>
+      <TaskObjective objective={delivery.objective} />
       <div className="mt-2 flex flex-wrap gap-2">{delivery.versions.map((version) => <Button key={version.id} variant="outline" disabled={reading} onClick={() => void readVersion(version.id)}>报告 v{version.version}</Button>)}</div>
       {delivery.code ? <div className="mt-3"><p className="text-ui-sm text-foreground-subtle">允许修改：{delivery.code.allowedPaths?.join('、')}</p><CodeCandidateView run={candidateSnapshot(run,{deliveryId:delivery.id,code:delivery.code})} deliveryId={delivery.id} /></div> : null}
       {delivery.error ? <p className="mt-2 whitespace-pre-wrap text-destructive">{delivery.error}</p> : null}

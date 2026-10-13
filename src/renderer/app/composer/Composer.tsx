@@ -23,8 +23,8 @@ import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
-import { drafts, fileDrafts, imageDrafts } from "./drafts";
-import { draftKey, loadDraft, saveDraft } from "./persist";
+import { drafts, fileDrafts, imageDrafts, consumeSubmittedDraft } from "./drafts";
+import { draftKey, loadDraft, saveDraft, consumePersistedDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { hcode } from "../bridge";
@@ -372,6 +372,7 @@ export function Composer({
       return;
     }
     setSubmitting(true);
+    const enteringCompare = submission.action === "compare" && isDraft && !conversation.compareId;
     const sending = conversation.compareId
       ? sendGroup(text, images, files)
       : submission.action === "compare" && isDraft
@@ -379,6 +380,11 @@ export function Composer({
         : send(text, images, files);
     void sending.then((sent) => {
       if (!sent) return;
+      if (enteringCompare && useAppStore.getState().conversations[conversation.viewId]?.compareId) {
+        consumePersistedDraft(persistedKey, text, files);
+        const remaining = consumeSubmittedDraft(conversation.viewId, text, images, files);
+        useAppStore.setState({ composerPrefill: { viewId: conversation.viewId, ...remaining } });
+      }
       rememberPrompt(text);
       setText((current) => current === text ? "" : current);
       setImages((current) => current === images ? [] : current);

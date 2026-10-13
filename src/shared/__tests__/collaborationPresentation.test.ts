@@ -1,6 +1,7 @@
 // 展示关联只接受宿主身份；普通消息、跨项目和未知用量不能被重新解释。
 import { describe, expect, it } from 'vitest';
 import type { CollaborationSnapshot } from '../collaboration.js';
+import { presentationContent } from '../collaborationPresentation.js';
 import { presentationForRun, presentationForDraft, mergePresentationEntry, presentationTaskForTurn, groupCollaborationSessions, usagePresentation, presentationTitle, collaborationInputTitle, collaborationGroupMatchesQuery } from '../collaborationPresentation.js';
 
 const run: CollaborationSnapshot = {
@@ -10,6 +11,16 @@ const run: CollaborationSnapshot = {
   deliveries: [{ id: 'delivery', requestKey: 'request', objective: '核对表单', executor: { agent: 'claude' }, status: 'accepted', versions: [], reviews: [] }], summary: '已核对，未运行测试',
 };
 describe('协作展示的身份边界', () => {
+  it('旧的已停止汇总不展示最新成功结果，回合错误不借用全局错误', () => {
+    const entry = presentationForRun({ ...run, error: '新增资料尚未核对', tasks: [
+      { ...run.tasks[0]!, id: 'stopped', role: 'synthesis', status: 'cancelled', error: '本回合已停止' },
+      { ...run.tasks[0]!, id: 'current', role: 'synthesis', status: 'succeeded' },
+    ] });
+    expect(presentationContent(entry, entry.tasks[0]!)).toEqual({ error: '本回合已停止' });
+    expect(presentationContent(entry, entry.tasks[1]!).summary).toBe(run.summary);
+    expect(presentationContent(entry, { ...entry.tasks[1]!, role: 'planning' })).toEqual({ error: undefined });
+    expect(presentationContent(entry).error).toBe('新增资料尚未核对');
+  });
   it('只保存有界原生自动标题，长 JSON 正文不进入展示元数据', () => {
     const title = collaborationInputTitle('宿主规划' + '文'.repeat(2000) + '\n' + '{"private":"raw output"}');
     expect(title).toHaveLength(81);
@@ -70,5 +81,14 @@ describe('协作展示的身份边界', () => {
     expect(presentationTitle('宿主指令', source, [entry])).toBe(run.params.objective);
     expect(presentationTitle('我重命名的项目', source, [entry])).toBe('我重命名的项目');
     expect(presentationTitle('宿主指令', { ...source, projectPath: '/other' }, [entry])).toBe('宿主指令');
+  });
+  it('规划期间原始首行尚未截短时也显示已关联的业务目标', () => {
+    const prompt = '这是宿主规划指令。'.repeat(20);
+    const sourceRun = { ...run, tasks: [{ ...run.tasks[0]!, agent: 'codex' as const, sessionKey: 'source-key', role: 'planning' as const, presentation: { executionTurnId: 'planning-turn', projectPath: '/project', inputTitle: collaborationInputTitle(prompt) } }] };
+    const entry = presentationForRun(sourceRun);
+    const source = { agent: 'codex' as const, projectPath: '/project', sessionKey: 'source-key' };
+    expect(presentationTitle(prompt, source, [entry], true)).toBe(run.params.objective);
+    const renamed = `${prompt.slice(0, 80)}用户新增备注`;
+    expect(presentationTitle(renamed, source, [entry])).toBe(renamed);
   });
 });

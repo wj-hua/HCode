@@ -1,7 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { submissionForMode, createWorkModeStore } from "../workMode";
+import { drafts, imageDrafts, fileDrafts, consumeSubmittedDraft } from "../drafts";
+import { loadDraft, saveDraft, consumePersistedDraft } from "../persist";
 const input = { text: "核对 @review-context.md 的两条规则", imageCount: 0, fileCount: 0, busy: false, activeCollaboration: false, canCompare: true, compareCount: 1 };
 describe("工作方式的发送边界", () => {
+  it("对比提交确认后新会话不恢复已发送草稿，持久化的新编辑仍可恢复", () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    try {
+      saveDraft('p:compare-project', '已发送内容', []);
+      consumePersistedDraft('p:compare-project', '已发送内容', []);
+      expect(loadDraft('p:compare-project')).toEqual({ text: '', files: [] });
+      saveDraft('p:compare-project', '新编辑', []);
+      consumePersistedDraft('p:compare-project', '已发送内容', []);
+      expect(loadDraft('p:compare-project').text).toBe('新编辑');
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("对比入口换挂载后只消费已确认发送的原草稿，发送期间的新编辑保留", () => {
+    const images: [] = [], files: [] = [];
+    drafts.set('compare-entry', '原输入'); imageDrafts.set('compare-entry', images); fileDrafts.set('compare-entry', files);
+    expect(consumeSubmittedDraft('compare-entry', '原输入', images, files)).toEqual({ text: '', images: [], files: [] });
+    drafts.set('compare-entry', '发送期间的新文字');
+    expect(consumeSubmittedDraft('compare-entry', '原输入', images, files).text).toBe('发送期间的新文字');
+  });
   it("切换方式及会话保留选择且不调用发送", () => {
     const store = createWorkModeStore();
     store.getState().select("first", "collaboration");

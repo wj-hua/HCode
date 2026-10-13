@@ -13,6 +13,7 @@ import { hasRepeatedExpertBackend } from "./expertPresentation";
 import { ExpertParticipantView } from "./ExpertParticipantView";
 import { ExpertSummaryView } from "./ExpertSummaryView";
 import { TaskTranscript } from "./TaskTranscript";
+import { TaskObjective } from "./TaskObjective";
 const RUN_STATUSES = {
   running: "运行中",
   stopping: "等待停止确认",
@@ -44,7 +45,7 @@ function ExpertRunHeader({ run }: { run: CollaborationSnapshot }) {
           : STAGES[run.stage]}{" "}
         · {RUN_STATUSES[run.status]}
       </p>
-      <p className="mt-1 whitespace-pre-wrap">{run.params.objective}</p>
+      <TaskObjective objective={run.params.objective} />
       <p className="mt-2 text-ui-sm text-foreground-subtle">
         首轮独立报告 →{" "}
         {state.participants.some(expert=>expert.profile) ? "相关角色交叉审查" : state.activeIds.length === 2 ? "双方互审" : "三方环形互审"} →{" "}
