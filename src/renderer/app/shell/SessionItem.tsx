@@ -1,3 +1,5 @@
+import { presentationTitle } from "@hcode/shared/collaborationPresentation";
+import { usePresentationStore } from "../collaboration/presentationStore";
 import { LoaderIcon, PinIcon, PinOffIcon, SquareTerminalIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { SessionSummary } from "@hcode/shared/types";
@@ -29,6 +31,8 @@ import { formatCompactRelativeTime } from "../format";
 import { errorMessage, useAppStore } from "../store/appStore";
 
 export function SessionItem({ session }: { session: SessionSummary }) {
+  const entries = usePresentationStore(state => state.entries);
+  const displayTitle = presentationTitle(session.title, { agent: session.agent, projectPath: session.projectPath, sessionId: session.id }, entries);
   const openSession = useAppStore((state) => state.openSession);
   const renameSession = useAppStore((state) => state.renameSession);
   const deleteSession = useAppStore((state) => state.deleteSession);
@@ -118,7 +122,7 @@ export function SessionItem({ session }: { session: SessionSummary }) {
                     />
                   ) : (
                     <TaskTitleOverflowText className="text-ui-base text-foreground">
-                      {session.title}
+                      {displayTitle}
                     </TaskTitleOverflowText>
                   )}
                 </div>

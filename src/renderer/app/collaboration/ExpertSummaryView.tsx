@@ -14,13 +14,13 @@ export function ExpertSummaryView({
 }: {
   state: ExpertState;
   reading: boolean;
-  openReport(versionId: string, name: string): Promise<void>;
+  openReport(versionId: string, name: string, claimId?: string): Promise<void>;
 }) {
   const summary = state.summary;
   if (!summary) return null;
   const label = (id: string) => expertLabel(state, id);
   const reference = (ref: ExpertClaimRef) =>
-    `${label(ref.expertId)} · v${state.participants.find((expert) => expert.id === ref.expertId)!.versions.find((version) => version.id === ref.versionId)!.version} · ${ref.claimId}`;
+    `${label(ref.expertId)} · v${state.participants.find((expert) => expert.id === ref.expertId)!.versions.find((version) => version.id === ref.versionId)!.version}`;
   const conclusions = (title: string, entries: ExpertConclusion[]) => (
     <section className="mt-3">
       <p className="font-medium">{title}</p>
@@ -35,7 +35,7 @@ export function ExpertSummaryView({
                   variant="outline"
                   className="h-auto min-w-0 max-w-full whitespace-normal break-all text-left"
                   disabled={reading}
-                  onClick={() => void openReport(ref.versionId, reference(ref))}
+                  onClick={() => void openReport(ref.versionId, reference(ref), ref.claimId)}
                 >
                   {reference(ref)}
                 </Button>

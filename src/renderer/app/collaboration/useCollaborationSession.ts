@@ -6,6 +6,7 @@ import { hcode } from "../bridge";
 import { subscribeCollaboration, useCollaborationStore } from "./collaborationStore";
 
 function belongsToConversation(run: CollaborationSnapshot, conversation: Conversation) {
+  if (run.params.initiator.agent !== conversation.agent || run.params.initiator.projectPath !== conversation.projectPath) return false;
   return run.params.initiator.sessionKey === conversation.sessionKey || Boolean(conversation.sessionId && (run.params.initiator.resumeSessionId === conversation.sessionId || run.tasks.some((task) => task.role === "planning" && task.nativeSessionId === conversation.sessionId)));
 }
 
@@ -19,7 +20,7 @@ export function useCollaborationSession(conversation: Conversation, open: boolea
   const [recordError, setRecordError] = useState("");
   const [capabilityError, setCapabilityError] = useState("");
   const allRuns = useCollaborationStore(state => state.runs);
-  const runs = useMemo(() => Object.values(allRuns).filter(run => belongsToConversation(run, conversation)).sort((left, right) => right.createdAt - left.createdAt), [allRuns, conversation.sessionKey, conversation.sessionId]);
+  const runs = useMemo(() => Object.values(allRuns).filter(run => belongsToConversation(run, conversation)).sort((left, right) => right.createdAt - left.createdAt), [allRuns, conversation.sessionKey, conversation.sessionId, conversation.agent, conversation.projectPath]);
   const active = useActiveCollaboration(conversation);
   const sourceBusy = conversation.runState === "running" || conversation.runState === "awaitingApproval" || conversation.queue.length > 0;
   const sourceCapability = capabilities?.find(entry => entry.agent === conversation.agent);

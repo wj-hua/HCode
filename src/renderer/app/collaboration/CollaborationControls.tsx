@@ -1,4 +1,5 @@
 // 将用户的接管、澄清与续跑动作交给主进程；本组件不推断原生停止状态。
+import { usagePresentation } from "@hcode/shared/collaborationPresentation";
 import { codeCandidates, deliveryCode } from "@hcode/shared/codeCandidates";
 import { useState } from "react";
 import { COLLABORATION_LIMITS } from "@hcode/shared/collaboration";
@@ -45,9 +46,10 @@ export function CollaborationControls({ run }: { run: CollaborationSnapshot }) {
     bindCollaborationSource(run);
     await hcode.invoke("collaboration:resume", run.id, { deliveryId, action, ...(context.trim() ? { context } : {}) });
   });
-  const known = run.tasks.filter((task) => task.usage?.inputTokens !== undefined && task.usage?.outputTokens !== undefined);
+  const usage = usagePresentation(run.tasks);
   return <div className="flex flex-col gap-3">
-    <p className="text-ui-sm text-foreground-subtle">回合已用 {run.tasks.length} / {run.experts?.turnLimit ?? COLLABORATION_LIMITS.maxTurns} · 最多 {COLLABORATION_LIMITS.maxConcurrentWorkers} 个执行 / 审查回合并发 · 已知输入 {known.reduce((sum, task) => sum + task.usage!.inputTokens!, 0)}，输出 {known.reduce((sum, task) => sum + task.usage!.outputTokens!, 0)} Token；{run.tasks.length - known.length} 个回合用量未知。额度不足会明确失败，不自动换模型。</p>
+    <details><summary className="cursor-pointer text-ui-sm text-foreground-subtle">回合与用量 · {run.tasks.length} 个回合</summary><p className="mt-2 text-ui-sm text-foreground-subtle">已用 {run.tasks.length} / {run.experts?.turnLimit ?? COLLABORATION_LIMITS.maxTurns} 回合 · 最多 {COLLABORATION_LIMITS.maxConcurrentWorkers} 个执行 / 审查回合并发。{usage.knownTurns ? `已知输入 ${usage.inputTokens}，输出 ${usage.outputTokens} Token；` : '未提供可信 Token 用量；'}{usage.unknownTurns} 个回合用量未知。额度不足会明确失败，不自动换模型。</p></details>
+    <details open={active || pending.length > 0 || ['awaitingUser', 'failed', 'interrupted', 'paused'].includes(run.status) ? true : undefined}><summary className="cursor-pointer text-ui-sm">{active ? '协作控制' : '补充与继续'}</summary><div className="mt-3 flex flex-col gap-3">
     {active ? <div className="flex flex-wrap gap-2">
       <Button variant="outline" disabled={busy || run.status === "stopping"} onClick={() => void act(() => hcode.invoke("collaboration:pause", run.id))}>暂停并接管</Button>
       <Button variant="destructive" disabled={busy || run.stopIntent === "cancel"} onClick={() => void act(() => hcode.invoke("collaboration:cancel", run.id))}>停止本次协作</Button>
@@ -67,6 +69,7 @@ export function CollaborationControls({ run }: { run: CollaborationSnapshot }) {
       </> : null}
     </div>)}
     {run.messages?.length ? <details><summary className="cursor-pointer">澄清与回复记录（{run.messages.length}）</summary>{run.messages.map((message) => <p key={message.id} className="mt-2 whitespace-pre-wrap"><span className="font-medium">{message.sender === "worker" ? "执行者提问" : message.sender === "user" ? "用户" : "发起 AI"}：</span>{message.text}</p>)}</details> : null}
+    </div></details>
     {busy ? <p role="status">正在处理，请等待状态确认…</p> : null}
     {error ? <p role="alert" className="whitespace-pre-wrap text-destructive">{error}</p> : null}
   </div>;

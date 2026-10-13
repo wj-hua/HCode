@@ -1,6 +1,6 @@
 # HCode AI 协作 U3 实施与验收记录
 
-日期：2026-10-13。分支：`codex/ai-collaboration-interaction-plan`。本轮先按用户授权中文提交 U2：`ff0425d`，提交说明为 `feat(协作): 推荐专家团队并打通独立研究与互审闭环`。U3 已完成下面的实施与验收，尚未提交、推送、合入 main 或替换 `/Applications/HCode.app`。
+日期：2026-10-13。分支：`codex/ai-collaboration-interaction-plan`。本轮先按用户授权中文提交 U2：`ff0425d`，提交说明为 `feat(协作): 推荐专家团队并打通独立研究与互审闭环`。U3 已完成下面的实施与验收，并于后续 U4 阶段按用户授权中文提交 `79c96e7`：`feat(协作): 确认代码计划并打通隔离交付与逐项安全采纳`。尚未推送、合入 main 或替换 `/Applications/HCode.app`。
 
 ## 完成行为
 

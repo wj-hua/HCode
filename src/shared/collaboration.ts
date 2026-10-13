@@ -49,6 +49,12 @@ export interface ReportVersion {
   evidence: SourceEvidence[];
 }
 
+export interface CollaborationReport {
+  summary: string;
+  findings: { id: string; title: string; detail: string; evidence: Omit<SourceEvidence, 'hash'>[] }[];
+  limitations: string[];
+}
+
 export interface ReviewIssue {
   id: string;
   blocking: boolean;
@@ -80,6 +86,8 @@ export interface DeliverySnapshot {
 }
 
 export interface CollaborationTask {
+  /** 宿主生成的回合关联；旧记录缺失时不得根据内容猜测。 */
+  presentation?: { executionTurnId: string; nativeTurnId?: string; projectPath: string; inputTitle: string };
   id: string;
   deliveryId?: string;
   expertId?: string;

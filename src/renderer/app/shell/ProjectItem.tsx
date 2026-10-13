@@ -29,6 +29,9 @@ import { AgentBadge } from "../AgentBadge";
 import { hcode } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
+import { groupCollaborationSessions, presentationTitle, collaborationGroupMatchesQuery } from "@hcode/shared/collaborationPresentation";
+import { usePresentationStore } from "../collaboration/presentationStore";
+import { InternalSessionGroups } from "../collaboration/InternalSessionGroups";
 import { SessionItem } from "./SessionItem";
 
 const PAGE_SIZE = 5;
@@ -124,11 +127,14 @@ export function ProjectItem({
   const [focusWithin, setFocusWithin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const sorted = useMemo(() => sortSessionsWithPins(sessions ?? [], pinnedSessions), [sessions, pinnedSessions]);
+  const entries = usePresentationStore(state => state.entries);
+  const presentationErrors = usePresentationStore(state => state.errors);
+  const grouped = useMemo(() => groupCollaborationSessions(sessions ?? [], entries, project.path), [sessions, entries, project.path]);
+  const sorted = useMemo(() => sortSessionsWithPins(grouped.ordinary, pinnedSessions), [grouped, pinnedSessions]);
   const filtered = query
-    ? sorted.filter((session) => session.title.toLowerCase().includes(query))
+    ? sorted.filter((session) => presentationTitle(session.title, { agent: session.agent, projectPath: session.projectPath, sessionId: session.id }, entries).toLowerCase().includes(query))
     : sorted;
-  const isOpen = !collapsed && (expanded || (query.length > 0 && filtered.length > 0));
+  const isOpen = !collapsed && (expanded || (query.length > 0 && (filtered.length > 0 || grouped.groups.some(group => collaborationGroupMatchesQuery(group, query)))));
   const visible = filtered.slice(0, limit);
   // 与 ZCode 一致：操作按钮只在交互时挂载，菜单打开时保活。
   const showActions = hovered || focusWithin || menuOpen;
@@ -275,6 +281,8 @@ export function ProjectItem({
                   </ul>
                 )}
               </div>
+              <InternalSessionGroups groups={grouped.groups} query={query} />
+              {presentationErrors.length ? <details className="px-2.5 text-ui-sm text-destructive"><summary>协作分组记录读取失败</summary>{presentationErrors.map((error, index) => <p key={index}>{error}</p>)}</details> : null}
               {filtered.length > visible.length ? (
                 <div className="cursor-pointer pl-8.5">
                   <span

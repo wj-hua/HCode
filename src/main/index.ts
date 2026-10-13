@@ -1,3 +1,4 @@
+import { presentationForRun, presentationForDraft } from "../shared/collaborationPresentation.js";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
@@ -296,10 +297,28 @@ async function bootstrap() {
     },
   });
   handle("chat:send", (params) => execution!.send(params));
-  const collaboration = new CollaborationService(new CollaborationRepository(join(app.getPath("userData"), "collaborations")), execution, agents, (snapshot) => send("collaboration:updated", snapshot), process.platform, new ExpertProfileService(join(app.getPath("userData"),"collaborations"),{discoverSkills:project=>extensions.expertSkills(project)}));
+  const collaborationRepository = new CollaborationRepository(join(app.getPath("userData"), "collaborations"));
+  const collaboration = new CollaborationService(collaborationRepository, execution, agents, (snapshot) => send("collaboration:updated", snapshot), process.platform, new ExpertProfileService(join(app.getPath("userData"),"collaborations"),{discoverSkills:project=>extensions.expertSkills(project)}));
   const drafts = new ResearchDraftService(join(app.getPath("userData"), "collaboration-plans"), collaboration, execution, agents, draft => send("collaboration:draftUpdated", draft));
   const expertDrafts = new ExpertDraftService(join(app.getPath("userData"), "expert-plans"), collaboration, execution, agents, draft => send("collaboration:expertDraftUpdated", draft));
   const codeDrafts = new CodeDraftService(join(app.getPath("userData"), "code-plans"), collaboration, execution, agents, draft => send("collaboration:codeDraftUpdated", draft));
+  handle("collaboration:presentation", async () => {
+    const runs = await collaborationRepository.catalog();
+    // 展示沿用服务的恢复和采纳状态；磁盘上的 running 不代表重启后仍在执行。
+    const current = await Promise.allSettled(runs.snapshots.map(snapshot => collaboration.get(snapshot.id)));
+    const result = await Promise.allSettled([
+      drafts.repository.list().then(saved => Promise.all(saved.map(draft => drafts.get(draft.id)))),
+      expertDrafts.repository.list().then(saved => Promise.all(saved.map(draft => expertDrafts.get(draft.id)))),
+      codeDrafts.repository.list().then(saved => Promise.all(saved.map(draft => codeDrafts.get(draft.id)))),
+    ]);
+    const entries = current.flatMap(item => item.status === "fulfilled" ? [presentationForRun(item.value)] : []);
+    const errors = [...runs.issues.map(issue => issue.error), ...current.flatMap((item, index) => item.status === "rejected" ? [`读取协作 ${runs.snapshots[index]!.id} 展示失败：${String(item.reason)}`] : [])];
+    for (const item of result) {
+      if (item.status === "fulfilled") entries.push(...item.value.map(presentationForDraft));
+      else errors.push(`读取协作计划索引失败：${String(item.reason)}`);
+    }
+    return { entries, errors };
+  });
   handle("collaboration:codeDraftCreate", input => codeDrafts.create(input));
   handle("collaboration:codeDraftList", (key, nativeId) => codeDrafts.list(key, nativeId));
   handle("collaboration:codeDraftUpdate", (id, revision, edit) => codeDrafts.update(id, revision, edit));

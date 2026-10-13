@@ -1,3 +1,5 @@
+import { usePresentationStore } from "../collaboration/presentationStore";
+import { CollaborationProgress } from "../collaboration/CollaborationProgress";
 import { ArrowDownIcon, LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
@@ -27,6 +29,8 @@ export function ConversationView({
   const collaborationOpen = panel?.type === "collaboration" && panel.viewId === conversation.viewId;
   const permissions = useAppStore((state) => state.permissions);
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
+  const presentations = usePresentationStore(state => state.entries);
+  const latest = presentations.filter(entry => entry.projectPath === conversation.projectPath && entry.source.agent === conversation.agent && (entry.source.sessionKey === conversation.sessionKey || Boolean(conversation.sessionId && entry.source.nativeSessionId === conversation.sessionId))).sort((left, right) => right.createdAt - left.createdAt)[0];
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -79,6 +83,7 @@ export function ConversationView({
   return (
     <FilePreviewProvider viewId={conversation.viewId} workspacePath={conversation.projectPath}>
       <div className={cn("relative flex min-h-0 flex-1 flex-col", collaborationOpen && "collaboration-content")}>
+        {latest ? <div className="mx-auto w-full max-w-3xl px-6 pt-3"><CollaborationProgress entry={latest} viewId={conversation.viewId} /></div> : null}
         <div className="relative min-h-0 flex-1">
           <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
             <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
@@ -99,6 +104,7 @@ export function ConversationView({
               ) : (
                 <Timeline
                   rows={conversation.rows}
+                  presentation={{ agent: conversation.agent, projectPath: conversation.projectPath, sessionKey: conversation.sessionKey, sessionId: conversation.sessionId, viewId: conversation.viewId }}
                   workspacePath={conversation.projectPath}
                   permissions={permissions}
                   running={conversation.runState === "running"}

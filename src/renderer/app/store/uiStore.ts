@@ -5,7 +5,7 @@ import { applyTheme, type Theme } from "@/useTheme.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 
 type SidePanelState =
-  | { type: "collaboration"; viewId: string; intent?: "plan" | "records" }
+  | { type: "collaboration"; viewId: string; intent?: "plan" | "records"; runId?: string }
   | { type: "diff"; viewId: string }
   | { type: "file"; viewId: string; source: CodeViewerSource };
 

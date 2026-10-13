@@ -1,5 +1,7 @@
 // 显示真实交付版本、独立审查与原生执行记录；不把模型通过显示成测试或代码应用成功。
 import { codeCandidates, candidateSnapshot, deliveryCode } from "@hcode/shared/codeCandidates";
+import { FrozenReportView } from "./FrozenReportView";
+import type { InvokeMap } from "@hcode/shared/ipc";
 import { useState } from "react";
 import type { CollaborationSnapshot, CollaborationTask, DeliverySnapshot } from "@hcode/shared/collaboration";
 import { AGENTS } from "@hcode/shared/agents";
@@ -22,14 +24,17 @@ export function CollaborationRunView({ run }: { run: CollaborationSnapshot }) {
 }
 function DelegationRunView({ run }: { run: CollaborationSnapshot }) {
   const [taskId, setTaskId] = useState<string>();
-  const [report, setReport] = useState("");
+  const [report, setReport] = useState<InvokeMap["collaboration:artifact"][1]>();
+  const [reportRoot, setReportRoot] = useState<string>();
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
   const candidates=codeCandidates(run);
   const selectedTask = run.tasks.find((task) => task.id === taskId);
   const readVersion = async (versionId: string) => {
-    setReading(true); setError(""); setReport(""); setTaskId(undefined);
-    try { setReport((await hcode.invoke("collaboration:artifact", run.id, versionId)).markdown); }
+    const owner = run.deliveries.find(delivery => delivery.versions.some(version => version.id === versionId));
+    setReportRoot(owner ? deliveryCode(run, owner)?.workspace.path ?? run.params.initiator.projectPath : run.params.initiator.projectPath);
+    setReading(true); setError(""); setReport(undefined); setTaskId(undefined);
+    try { setReport(await hcode.invoke("collaboration:artifact", run.id, versionId)); }
     catch (reason) { setError(String(reason)); }
     finally { setReading(false); }
   };
@@ -39,6 +44,7 @@ function DelegationRunView({ run }: { run: CollaborationSnapshot }) {
       <p className="mt-1 whitespace-pre-wrap text-foreground-subtle">{run.params.objective}</p>
       <p className="mt-2 text-ui-sm text-foreground-subtle">{run.code ? run.code.adoption?.status === "applied" ? "隔离代码交付 · 所选候选已应用到原项目" : run.code.adoption && ["prepared", "applying", "needsRecovery"].includes(run.code.adoption.status) ? "代码采纳未完成 · 请核对恢复记录" : "隔离代码候选 · 实际检查与独立审查 · 待采纳，原项目未应用" : candidates.length ? `并行代码任务 · ${candidates.length} 个独立副本 · 逐任务验证、审查和采纳` : "只读报告 · 最多两次修订 · 没有运行测试"}</p>
     </div>
+    {run.summary ? <details open><summary className="cursor-pointer font-medium">当前 AI 的最终汇总{candidates.some(entry=>entry.code.adoption) ? "（采纳前）" : ""}</summary><div className="mt-3"><MessageResponse>{run.summary}</MessageResponse></div></details> : null}
     <CollaborationControls run={run} />
     {run.code ? <CodeCandidateView run={run} /> : null}
     {run.error ? <p role="alert" className="whitespace-pre-wrap text-destructive">{run.error}</p> : null}
@@ -58,11 +64,11 @@ function DelegationRunView({ run }: { run: CollaborationSnapshot }) {
         </div>)}
       </details>)}
     </div>)}
-    <div><p className="mb-2 font-medium">原生会话记录（含修订回合）</p><div className="flex flex-wrap gap-2">{run.tasks.map((task, index) => <Button key={task.id} variant={task.id === taskId ? "secondary" : "outline"} onClick={() => { setTaskId(task.id); setReport(""); }}>{index + 1}. {AGENTS[task.agent].name} · {run.approvedPlan && task.role === "planning" ? "计划生成" : TASK_LABELS[task.role]} · {OUTCOMES[task.status]}</Button>)}</div></div>
+    <details><summary className="cursor-pointer font-medium">原生会话记录（含修订回合）</summary><div className="mt-2"><div className="flex flex-wrap gap-2">{run.tasks.map((task, index) => <Button key={task.id} variant={task.id === taskId ? "secondary" : "outline"} onClick={() => { setTaskId(task.id); setReport(undefined); }}>{index + 1}. {AGENTS[task.agent].name} · {run.approvedPlan && task.role === "planning" ? "计划生成" : TASK_LABELS[task.role]} · {OUTCOMES[task.status]}</Button>)}</div></div>
     {selectedTask ? <div className="rounded-lg border border-border p-3">{selectedTask.error ? <p className="mb-3 whitespace-pre-wrap text-destructive">{selectedTask.error}</p> : null}<TaskTranscript key={selectedTask.id} task={selectedTask} projectPath={selectedTask.deliveryId ? deliveryCode(run,run.deliveries.find(delivery=>delivery.id===selectedTask.deliveryId)!)?.workspace.path ?? run.params.initiator.projectPath : run.params.initiator.projectPath} /></div> : null}
+    </details>
     {reading ? <p role="status">正在读取报告…</p> : null}
     {error ? <p role="alert" className="text-destructive">{error}</p> : null}
-    {report ? <div className="rounded-lg border border-border p-3"><MessageResponse>{report}</MessageResponse></div> : null}
-    {run.summary ? <details open><summary className="cursor-pointer font-medium">当前 AI 的最终汇总{candidates.some(entry=>entry.code.adoption) ? "（采纳前）" : ""}</summary><div className="mt-3"><MessageResponse>{run.summary}</MessageResponse></div></details> : null}
+    {report ? <div className="rounded-lg border border-border p-3"><FrozenReportView artifact={report} workspacePath={reportRoot} /></div> : null}
   </div>;
 }

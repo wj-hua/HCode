@@ -4,6 +4,8 @@ import { join } from "node:path";
 import type { ExpertDraft } from "../../../shared/expertDraft.js";
 const editable = (draft: ExpertDraft) => ({ objective: draft.params.objective, experts: draft.params.experts, turnLimit: draft.params.turnLimit, acceptProfileLimitations: true });
 import { expertDraftFixture } from "./expertDraftFixture.js";
+const EXPERT_TEAM_COMPLETION_TIMEOUT_MS = 4_000;
+
 it.each(["ios", "frontend", "java", "unknown"] as const)("原会话按 %s 上下文生成可核对团队，确认前没有专家或 Run", async kind => {
   const data = await expertDraftFixture();
   try {
@@ -90,7 +92,8 @@ it("七位团队的规划、研究、互审和汇总共享十六回合，预览�
     expect(await data.repository.list()).toEqual([]);
     const accepted = await data.drafts.update(plan.id, plan.revision, editable(plan));
     const run = await data.drafts.confirm(plan.id, accepted.revision);
-    await vi.waitFor(async () => expect((await data.collaboration.get(run.id)).status).toBe("completed"));
+    // 十六次持久化及配置加载在并行验证时可能超过默认一秒；仍等待真实 completed。
+    await vi.waitFor(async () => expect((await data.collaboration.get(run.id)).status).toBe("completed"), { timeout: EXPERT_TEAM_COMPLETION_TIMEOUT_MS });
     const completed = await data.collaboration.get(run.id);
     expect(completed.tasks).toHaveLength(16);
     expect(completed.experts!.participants.every(expert => expert.profileHash === expert.profile?.hash)).toBe(true);

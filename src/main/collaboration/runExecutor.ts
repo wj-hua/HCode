@@ -1,4 +1,5 @@
 // 一个 Run 的执行并发与硬回合预算；主持不占工作者槽，取消排队项不会启动 CLI。
+import { collaborationInputTitle } from "../../shared/collaborationPresentation.js";
 import { deliveryCode } from '../../shared/codeCandidates.js';
 import { randomUUID } from "node:crypto";
 import type { ChatSendParams } from "../../shared/types.js";
@@ -89,19 +90,22 @@ export class RunExecutor {
     const backend = expert?.backend ?? (role === "execution" ? delivery!.executor : role === "review" && configuredReviewer ? configuredReviewer : { agent: initiator.agent as "claude" | "codex", model: initiator.model });
     const { agent, model } = backend;
     const task: CollaborationTask = { id: randomUUID(), sessionKey: key, agent, role, status: "running", ...(delivery ? { deliveryId: delivery.id } : {}), ...(expert?{expertId:expert.id}:{}), ...(model ? { model } : {}) };
+    const executionTurnId = randomUUID();
+    const root = delivery ? deliveryCode(this.snapshot,delivery)?.workspace.path ?? initiator.projectPath : initiator.projectPath;
+    task.presentation = { executionTurnId, projectPath: root, inputTitle: collaborationInputTitle(text) };
     this.snapshot.tasks.push(task);
     await this.changed();
     const nativeSessionId = this.snapshot.tasks.findLast((entry) => entry.sessionKey === key && entry.nativeSessionId)?.nativeSessionId;
-    const root = delivery ? deliveryCode(this.snapshot,delivery)?.workspace.path ?? initiator.projectPath : initiator.projectPath;
     const params: ChatSendParams = { ...initiator, projectPath: root, sessionKey: key, agent, text, permissionMode: agent === "claude" ? "default" : "read-only", ...(model ? { model } : { model: undefined }), ...(role === "planning" || role === "synthesis" ? {} : { resumeSessionId: nativeSessionId, effort: undefined }) };
     let runtime = this.runtimes.get(key);
     if (!runtime) { runtime = { root, tools, outputSchema: schema }; this.runtimes.set(key, runtime); }
     runtime.outputSchema=schema;
     let result: TurnOutcome;
-    try { await expert?.onStart?.(); result = await this.execution.execute(params, runtime, signal); }
-    catch (error) { result = { sessionKey: key, agent, executionTurnId: randomUUID(), outcome: signal.aborted ? "interrupted" : "failed", text: "", error: error instanceof Error ? error.message : String(error) }; }
+    try { await expert?.onStart?.(); result = await this.execution.execute(params, runtime, signal, executionTurnId); }
+    catch (error) { result = { sessionKey: key, agent, executionTurnId, outcome: signal.aborted ? "interrupted" : "failed", text: "", error: error instanceof Error ? error.message : String(error) }; }
     if (signal.aborted && result.outcome === "succeeded") result = { ...result, outcome: "cancelled", error: "协作已取消或回合超时" };
     task.status = result.outcome;
+    if (result.nativeTurnId) task.presentation.nativeTurnId = result.nativeTurnId;
     if (result.nativeSessionId) task.nativeSessionId = result.nativeSessionId;
     if (result.error) task.error = result.error;
     if (result.usage) task.usage = result.usage;

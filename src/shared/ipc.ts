@@ -42,6 +42,7 @@ import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "collaboration:presentation": [[], import("./collaborationPresentation.js").PresentationCatalog];
   "collaboration:codeDraftCreate": [[input: CodeDraftInput], CodeDraft];
   "collaboration:codeDraftList": [[sessionKey?: string, nativeSessionId?: string], CodeDraft[]];
   "collaboration:codeDraftUpdate": [[id: string, revision: number, edit: CodeDraftEdit], CodeDraft];
@@ -83,7 +84,7 @@ export interface InvokeMap {
   "collaboration:cancelDelivery": [[id: string, deliveryId: string], void];
   "collaboration:recoveryIssues": [[], RecoveryIssue[]];
   "collaboration:repair": [[id: string], CollaborationSnapshot];
-  "collaboration:artifact": [[runId: string, versionId: string], { text: string; markdown: string }];
+  "collaboration:artifact": [[runId: string, versionId: string], { text: string; markdown: string; report: import("./collaboration.js").CollaborationReport }];
   "agent:status": [[], AgentStatus[]];
   "agent:models": [[agent: AgentKind], ModelOption[]];
   "agent:commands": [[agent: AgentKind, projectPath: string, sessionKey?: string, sessionId?: string], SlashCommandOption[]];
@@ -179,7 +180,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "collaboration:expertDraftCreate", "collaboration:expertDraftList", "collaboration:expertDraftUpdate", "collaboration:expertDraftPrepare", "collaboration:expertDraftConfirm", "collaboration:expertDraftCancel", "collaboration:expertDraftAbandon",
   "collaboration:draftCreate", "collaboration:draftList", "collaboration:draftUpdate", "collaboration:draftPrepare", "collaboration:draftConfirm", "collaboration:draftCancel", "collaboration:draftAbandon",
   "collaboration:expertProfiles",
-  "collaboration:adoptionPreview", "collaboration:applyCandidate", "collaboration:recoverAdoption", "collaboration:codeAdmission", "collaboration:candidatePreview", "collaboration:candidateAction", "collaboration:capabilities", "collaboration:start", "collaboration:startExperts", "collaboration:resumeExperts", "collaboration:get", "collaboration:list", "collaboration:cancel", "collaboration:artifact", "collaboration:pause", "collaboration:resume", "collaboration:reply", "collaboration:cancelDelivery", "collaboration:recoveryIssues", "collaboration:repair",
+  "collaboration:presentation", "collaboration:adoptionPreview", "collaboration:applyCandidate", "collaboration:recoverAdoption", "collaboration:codeAdmission", "collaboration:candidatePreview", "collaboration:candidateAction", "collaboration:capabilities", "collaboration:start", "collaboration:startExperts", "collaboration:resumeExperts", "collaboration:get", "collaboration:list", "collaboration:cancel", "collaboration:artifact", "collaboration:pause", "collaboration:resume", "collaboration:reply", "collaboration:cancelDelivery", "collaboration:recoveryIssues", "collaboration:repair",
   "agent:status",
   "agent:models",
   "agent:commands",

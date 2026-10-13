@@ -1,9 +1,11 @@
 // 专家报告、互审和主持汇总分层展示；每个汇总引用可打开对应冻结版本核对。
+import { FrozenReportView } from "./FrozenReportView";
+import type { InvokeMap } from "@hcode/shared/ipc";
+import { TASK_RESULT_LABELS } from "@hcode/shared/collaborationPresentation";
 import { useEffect, useRef, useState } from "react";
 import type { CollaborationSnapshot } from "@hcode/shared/collaboration";
 import { AGENTS } from "@hcode/shared/agents";
 import { Button } from "@/components/ui/button.js";
-import { MessageResponse } from "@/components/ai-elements/message.js";
 import { hcode } from "../bridge";
 import { CollaborationControls } from "./CollaborationControls";
 import { ExpertRecoveryControls } from "./ExpertRecoveryControls";
@@ -58,28 +60,30 @@ function ExpertRunHeader({ run }: { run: CollaborationSnapshot }) {
   );
 }
 export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
-  const [report, setReport] = useState(""),
+  const [report, setReport] = useState<InvokeMap["collaboration:artifact"][1]>(),
+    [claimId, setClaimId] = useState<string>(),
     [reportLabel, setReportLabel] = useState(""),
     [reading, setReading] = useState(false),
     [error, setError] = useState(""),
     [taskId, setTaskId] = useState<string>();
   const reportView = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
-    if (!report) return;
+    // 指定结论时由报告组件定位，整份报告的焦点不能覆盖具体 claim。
+    if (!report || claimId) return;
     reportView.current?.focus();
     reportView.current?.scrollIntoView({ block: "start" });
-  }, [report]);
+  }, [report, claimId]);
   const state = run.experts!,
     task = run.tasks.find((entry) => entry.id === taskId);
-  const openReport = async (versionId: string, name: string) => {
+  const openReport = async (versionId: string, name: string, claim?: string) => {
+    setClaimId(claim);
     setReading(true);
     setError("");
-    setReport("");
+    setReport(undefined);
     setReportLabel(name);
     try {
       setReport(
-        (await hcode.invoke("collaboration:artifact", run.id, versionId))
-          .markdown,
+        await hcode.invoke("collaboration:artifact", run.id, versionId),
       );
     } catch (reason) {
       setError(String(reason));
@@ -134,7 +138,7 @@ export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
           <summary className="cursor-pointer font-medium">
             {reportLabel}
           </summary>
-          <MessageResponse>{report}</MessageResponse>
+          <FrozenReportView artifact={report} claimId={claimId} />
         </details>
       ) : null}
       <details>
@@ -156,7 +160,7 @@ export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
                   : entry.role === "planning"
                     ? run.approvedPlan ? "团队推荐" : "主持"
                     : "汇总"}{" "}
-              · {entry.status}
+              · {TASK_RESULT_LABELS[entry.status]}
             </Button>
           ))}
         </div>

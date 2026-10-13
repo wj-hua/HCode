@@ -1,3 +1,4 @@
+import { subscribePresentation } from "./collaboration/presentationStore";
 import { useEffect } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
@@ -9,6 +10,7 @@ export function App() {
   const locale = useAppStore((state) => state.settings.locale);
   const ready = useAppStore((state) => state.ready);
 
+  useEffect(subscribePresentation, []);
   useEffect(() => {
     void init();
   }, [init]);

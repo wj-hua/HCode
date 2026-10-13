@@ -15,6 +15,8 @@ import { ExpertProfileService } from "../experts/profiles/expertProfileService.j
 import { PROFILE_DEFINITIONS } from "../experts/profiles/profileDefinitions.js";
 import { BUSINESS_EXPERT_TYPES } from "../../../shared/expertProfiles.js";
 
+const PROFILE_WORKFLOW_COMPLETION_TIMEOUT_MS = 4_000;
+
 it.each(["complete", "budget", "corrupt"] as const)(
   "七类专家固定预算、配置加载及专项互审：%s",
   async (scenario) => {
@@ -227,7 +229,8 @@ it.each(["complete", "budget", "corrupt"] as const)(
           backend: { agent: "codex" },
         })),
       });
-      await vi.waitFor(() => expect(latest?.stage).toBe("finished"));
+      // 七类配置与十六回合会落盘多次；等待真实终态，避免默认一秒超时后清理仍在写入的夹具。
+      await vi.waitFor(() => expect(latest?.stage).toBe("finished"), { timeout: PROFILE_WORKFLOW_COMPLETION_TIMEOUT_MS });
       const result = await service.get(run.id);
       expect(result.tasks.length).toBeLessThanOrEqual(16);
       expect(result.status, JSON.stringify(result)).toBe(

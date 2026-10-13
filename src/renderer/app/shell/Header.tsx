@@ -1,4 +1,6 @@
 // 会话头部：参照 ZCode WorkspaceHeader（项目名 / 会话标题 + 右侧操作）。
+import { presentationTitle } from "@hcode/shared/collaborationPresentation";
+import { usePresentationStore } from "../collaboration/presentationStore";
 import { FileDiffIcon, FolderIcon, GitBranchIcon, PanelLeftIcon, SquareTerminalIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button.js";
@@ -34,7 +36,9 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
       : undefined,
   );
   const projectName = project?.name ?? conversation?.projectPath.split("/").filter(Boolean).at(-1);
-  const title = summary?.title ?? conversation?.title ?? (conversation ? "新会话" : "");
+  const entries = usePresentationStore(state => state.entries);
+  const rawTitle = summary?.title ?? conversation?.title ?? (conversation ? "新会话" : "");
+  const title = conversation ? presentationTitle(rawTitle, conversation, entries) : rawTitle;
 
   return (
     <header

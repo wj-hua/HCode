@@ -121,6 +121,6 @@ export class CollaborationRepository {
     const text = await readFile(path, "utf8");
     if (digest(text) !== version.hash) throw new Error("报告文件已变化，原审查结果失效");
     const report = reportSchema.parse(JSON.parse(text));
-    return { text, markdown: reportMarkdown(report) };
+    return { text, markdown: reportMarkdown(report), report };
   }
 }

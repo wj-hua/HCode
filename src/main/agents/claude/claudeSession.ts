@@ -177,7 +177,7 @@ export class ClaudeSession {
       contextWindowTokens: this.usage.contextWindowTokens,
       contextUsedPercent: this.usage.contextUsedPercent,
     } : undefined;
-    this.projector.beginUserTurn(text, Date.now(), undefined, inputAttachments(images, files));
+    this.projector.beginUserTurn(text, Date.now(), executionTurnId, inputAttachments(images, files));
     this.flushNow();
     if (!this.activeQuery) this.start();
     // 有图片时用 Anthropic 的内容块数组；空文本块会被 API 拒绝，所以只在有文字时带上

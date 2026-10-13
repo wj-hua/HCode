@@ -1,4 +1,6 @@
 // 侧边栏：项目列表 + 会话历史。行样式照 ZCode WorkspaceSidebarItem / TaskListItem。
+import { groupCollaborationSessions, presentationTitle, collaborationGroupMatchesQuery } from "@hcode/shared/collaborationPresentation";
+import { usePresentationStore } from "../collaboration/presentationStore";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -80,6 +82,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
     setDragPath(null);
     setDragWidth(null);
   };
+  const presentationEntries = usePresentationStore(state => state.entries);
   const visibleProjects = useMemo(() => {
     const regularProjects = projects.filter((project) => project.purpose !== "conversation");
     if (!query) return regularProjects;
@@ -87,9 +90,10 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
       (project) =>
         project.name.toLowerCase().includes(query) ||
         project.path.toLowerCase().includes(query) ||
-        (sessions[project.path] ?? []).some((session) => session.title.toLowerCase().includes(query)),
+        (sessions[project.path] ?? []).some(session => presentationTitle(session.title, { agent: session.agent, projectPath: session.projectPath, sessionId: session.id }, presentationEntries).toLowerCase().includes(query)) ||
+        groupCollaborationSessions(sessions[project.path] ?? [], presentationEntries, project.path).groups.some(group => collaborationGroupMatchesQuery(group, query)),
     );
-  }, [projects, query, sessions]);
+  }, [projects, query, sessions, presentationEntries]);
 
   return (
     <div className="flex h-full flex-col">

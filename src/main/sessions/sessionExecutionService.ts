@@ -90,12 +90,11 @@ export class SessionExecutionService {
   }
 
   /** 先登记等待，再发送；即便 CLI 同步返回终态也不会丢结果。 */
-  async execute(params: ChatSendParams, research: ResearchRuntime, signal: AbortSignal): Promise<TurnOutcome> {
+  async execute(params: ChatSendParams, research: ResearchRuntime, signal: AbortSignal, executionTurnId: string = randomUUID()): Promise<TurnOutcome> {
     if (signal.aborted) throw new Error("执行已取消");
     const identity = this.identity(params);
     if (this.busy.has(params.sessionKey) || identity && this.nativeBusy.has(identity)) throw new Error("该会话已有活动执行回合");
     this.busy.add(params.sessionKey);
-    const executionTurnId = randomUUID();
     this.trackNative(executionTurnId, identity);
     const result = new Promise<TurnOutcome>((resolve, reject) => this.pending.set(executionTurnId, { sessionKey: params.sessionKey, resolve, reject }));
     // 发送前错误也可能发生；立即登记拒绝处理避免未处理的 Promise rejection。

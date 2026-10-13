@@ -39,7 +39,8 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
   const [reviewerModel, setReviewerModel] = useState("");
   const [selectedId, setSelectedId] = useState<string | undefined>(panelPositions.get(conversation.viewId)?.selectedId);
   const { runs, active, capabilities, checkingCapabilities, sourceCapability, sourceBusy, error: sessionError } = useCollaborationSession(conversation, open);
-  const selected = runs.find(run => run.id === selectedId) ?? runs[0];
+  const requestedId = panel?.type === "collaboration" && panel.viewId === conversation.viewId ? panel.runId : undefined;
+  const selected = requestedId ? runs.find(run => run.id === requestedId) : runs.find(run => run.id === selectedId) ?? runs[0];
   useEffect(() => { setExecutor(conversation.agent === "codex" ? "claude" : "codex"); }, [conversation.agent]);
 
   useEffect(() => { if (open) setObjective(currentInput); }, [panel]);
@@ -48,7 +49,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
     if (!open || !scrollRef.current) return;
     scrollRef.current.scrollTop = panelPositions.get(conversation.viewId)?.scrollTop ?? 0;
   }, [open]);
-  const selectRun = (id: string) => { setSelectedId(id); panelPositions.set(conversation.viewId, { selectedId: id, scrollTop: 0 }); };
+  const selectRun = (id: string) => { setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "records", runId: id }); setSelectedId(id); panelPositions.set(conversation.viewId, { selectedId: id, scrollTop: 0 }); };
 
   const acceptRun = (run: CollaborationSnapshot, input: string) => { useCollaborationStore.getState().accept(run); selectRun(run.id); setObjective(""); onStarted(input); setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "records" }); };
   const unavailable = attachmentBlocked ?? (checkingCapabilities ? "正在核对当前会话及 AI 能力…" : sourceBusy ? "请先完成当前回合或消息队列" : undefined);
@@ -81,7 +82,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
             </>}
           </form></details>}
           {runs.length > 1 ? <label className="mb-3 flex items-center gap-3">协作记录<select value={selected?.id ?? ""} onChange={(event) => selectRun(event.target.value)} className="min-w-0 rounded-md border border-border bg-background p-1">{runs.map((run) => <option key={run.id} value={run.id}>{new Date(run.createdAt).toLocaleString()} · {run.experts && run.status === "completed" ? "专家互审与汇总已完成" : RUN_LABELS[run.status]}</option>)}</select></label> : null}
-          {selected ? <CollaborationRunView key={selected.id} run={selected} /> : <p className="pb-3 text-foreground-subtle">暂无协作记录。</p>}
+          {selected ? <CollaborationRunView key={selected.id} run={selected} /> : <p className="pb-3 text-foreground-subtle">{requestedId ? "指定记录尚未加载或不属于当前会话；请核对读取错误或重新选择记录。" : "暂无协作记录。"}</p>}
         </div>
       </SidePanel>
     </div>, portal) : null}

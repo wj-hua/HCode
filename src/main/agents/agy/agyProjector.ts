@@ -162,8 +162,8 @@ export class AgyRowProjector extends RowProjectorBase {
   private readonly streamText = new Map<number, number>();
   private readonly streamThinking = new Map<number, number>();
 
-  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[]) {
-    this.beginUserTurn(text, at, undefined, inputAttachments(images, files));
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[], turnId?: string) {
+    this.beginUserTurn(text, at, turnId, inputAttachments(images, files));
   }
 
   protected override onTurnClosed() {

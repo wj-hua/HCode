@@ -1,4 +1,6 @@
 // HCode 渲染进程主状态：项目、会话列表、打开的对话、审批请求。
+import { presentationTitle } from "@hcode/shared/collaborationPresentation";
+import { usePresentationStore } from "../collaboration/presentationStore";
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import type {
@@ -190,7 +192,7 @@ function lastAssistantText(rows: readonly ConversationRow[]): string {
 export function conversationTitle(conv: Conversation): string {
   const first = conv.rows.find((row) => row.kind === "userInput");
   const line = first?.kind === "userInput" ? first.text.split("\n").map((item) => item.trim()).find(Boolean) : undefined;
-  return conv.title ?? line ?? "新会话";
+  return presentationTitle(conv.title ?? line ?? "新会话", conv, usePresentationStore.getState().entries);
 }
 
 /** 已打开会话的占位摘要：标题取首条用户消息。 */

@@ -256,8 +256,8 @@ export class CodexRowProjector extends RowProjectorBase {
   private skipNextUserEcho = false;
   private planRowId: number | null = null;
 
-  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[]) {
-    this.beginUserTurn(text, at, undefined, inputAttachments(images, files));
+  beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[], turnId?: string) {
+    this.beginUserTurn(text, at, turnId, inputAttachments(images, files));
     this.skipNextUserEcho = true;
   }
 

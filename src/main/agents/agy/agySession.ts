@@ -133,7 +133,7 @@ export class AgySession {
     this.protocolError = undefined;
     this.responseMetrics.start();
     this.usage = undefined;
-    this.projector.beginLocalTurn(text, Date.now(), images, files);
+    this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
     this.flushNow();
     this.setState("running");
     try {

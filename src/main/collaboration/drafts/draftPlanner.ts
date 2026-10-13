@@ -1,4 +1,5 @@
 // 原会话生成结构化计划；协作工具目录保持稳定，所有派发工具在草案阶段拒绝执行。
+import { collaborationInputTitle } from "../../../shared/collaborationPresentation.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { PlanningDraft } from "../../../shared/planningDraft.js";
@@ -29,6 +30,8 @@ export class DraftPlanner {
     const source = draft.params.initiator;
     const originalMode = source.permissionMode;
     const turn: CollaborationTask = { id: randomUUID(), sessionKey: source.sessionKey, agent: source.agent as "claude" | "codex", role: "planning", status: "running", ...(source.model ? { model: source.model } : {}) };
+    const executionTurnId = randomUUID();
+    turn.presentation = { executionTurnId, projectPath: source.projectPath, inputTitle: collaborationInputTitle(prompt) };
     draft.turns.push(turn);
     const observed = new Map<string, string>();
     let dispatched = false;
@@ -44,7 +47,8 @@ export class DraftPlanner {
           if (observed.has(file.path) && observed.get(file.path) !== file.hash) throw new Error("规划期间文件已变化，请重新生成计划");
           observed.set(file.path, file.hash);
         },
-      }, signal);
+      }, signal, executionTurnId);
+      if (result.nativeTurnId) turn.presentation.nativeTurnId = result.nativeTurnId;
       Object.assign(turn, { status: result.outcome, ...(result.nativeSessionId ? { nativeSessionId: result.nativeSessionId } : {}), ...(result.usage ? { usage: result.usage } : {}), ...(result.error ? { error: result.error } : {}) });
       draft.rawResult = result.text;
       if (result.nativeSessionId && source.resumeSessionId && result.nativeSessionId !== source.resumeSessionId) throw new Error("规划返回不同原生会话，禁止替换当前身份");

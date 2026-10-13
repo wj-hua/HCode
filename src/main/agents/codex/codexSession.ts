@@ -152,7 +152,7 @@ export class CodexSession {
       contextWindowTokens: this.usage.contextWindowTokens,
       contextUsedPercent: this.usage.contextUsedPercent,
     } : undefined;
-    this.projector.beginLocalTurn(text, Date.now(), images, files);
+    this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
     this.flushNow();
     this.setState("running");
     try {
