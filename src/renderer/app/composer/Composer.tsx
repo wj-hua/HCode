@@ -625,10 +625,11 @@ export function Composer({
           event.target.value = "";
         }}
       />
+      <div className="composer-metrics-row min-w-0"><UsageIndicator usage={conversation.usage} /></div>
       {/* 工具条照 ZCode ChatPromptEditor：左侧 + / CLI / 权限模式，右侧模型 / 思考强度 / 发送 */}
       <div className="composer-toolbar group/toolbar flex flex-wrap items-end gap-3">
-        <div className="composer-toolbar-primary flex min-w-0 flex-1 items-center">
-          <div className="composer-toolbar-controls flex shrink-0 items-center gap-1">
+        <div className="composer-toolbar-primary flex min-w-0 flex-wrap items-center">
+          <div className="composer-toolbar-controls flex min-w-0 flex-wrap items-center gap-1">
             <ControlHintTooltip title="添加附件（图片、视频、文档等；也可以粘贴或拖入）">
               <Button
                 type="button"
@@ -716,8 +717,7 @@ export function Composer({
         </div>
         <div className="composer-toolbar-secondary ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-            <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden empty:hidden">
-              <UsageIndicator usage={conversation.usage} />
+            <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 empty:hidden">
               <ModelConfigSelect
                 modelGroups={modelGroups}
                 showProviderLevel={false}

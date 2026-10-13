@@ -27,7 +27,7 @@ export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
   return (
     <Context usedTokens={hasContext ? used : 0} maxTokens={hasContext ? window : 1}>
       <ContextTrigger>
-        <Button type="button" variant="ghost" size="sm" className={cn("h-7 gap-1.5 rounded-lg px-2 text-ui-sm tabular-nums", tone)} aria-label="上下文、本轮用量与输出速度">
+        <Button type="button" variant="ghost" size="sm" className={cn("h-auto min-h-7 max-w-full flex-wrap gap-x-2 gap-y-1 whitespace-normal rounded-lg px-2 py-1 text-ui-sm tabular-nums", tone)} aria-label="上下文、本轮用量与输出速度">
           {hasContext ? <ContextIcon /> : null}
           {hasContext ? <span>{`上下文 ${Math.round(percent!)}%`}</span> : !hasMetrics ? <span>本轮用量</span> : null}
           {usage.ttftMs !== undefined ? <span>TTFT {(usage.ttftMs / 1000).toFixed(2)}s</span> : null}

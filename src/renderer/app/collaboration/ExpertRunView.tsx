@@ -1,12 +1,12 @@
 // 专家报告、互审和主持汇总分层展示；每个汇总引用可打开对应冻结版本核对。
+import { useUiStore } from "../store/uiStore";
 import { FrozenReportView } from "./FrozenReportView";
-import type { InvokeMap } from "@hcode/shared/ipc";
+import { useExpertReport } from "./useExpertReport";
 import { TASK_RESULT_LABELS } from "@hcode/shared/collaborationPresentation";
 import { useEffect, useRef, useState } from "react";
 import type { CollaborationSnapshot } from "@hcode/shared/collaboration";
 import { AGENTS } from "@hcode/shared/agents";
 import { Button } from "@/components/ui/button.js";
-import { hcode } from "../bridge";
 import { CollaborationControls } from "./CollaborationControls";
 import { ExpertRecoveryControls } from "./ExpertRecoveryControls";
 import { hasRepeatedExpertBackend } from "./expertPresentation";
@@ -61,12 +61,10 @@ function ExpertRunHeader({ run }: { run: CollaborationSnapshot }) {
   );
 }
 export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
-  const [report, setReport] = useState<InvokeMap["collaboration:artifact"][1]>(),
-    [claimId, setClaimId] = useState<string>(),
-    [reportLabel, setReportLabel] = useState(""),
-    [reading, setReading] = useState(false),
-    [error, setError] = useState(""),
-    [taskId, setTaskId] = useState<string>();
+  const [taskId, setTaskId] = useState<string>();
+  const panel = useUiStore(state => state.sidePanel);
+  const citation = panel?.type === "collaboration" && panel.runId === run.id ? panel.citation : undefined;
+  const { report, claimId, reportLabel, reading, error, openReport } = useExpertReport(run.id, citation);
   const reportView = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     // 指定结论时由报告组件定位，整份报告的焦点不能覆盖具体 claim。
@@ -76,22 +74,6 @@ export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
   }, [report, claimId]);
   const state = run.experts!,
     task = run.tasks.find((entry) => entry.id === taskId);
-  const openReport = async (versionId: string, name: string, claim?: string) => {
-    setClaimId(claim);
-    setReading(true);
-    setError("");
-    setReport(undefined);
-    setReportLabel(name);
-    try {
-      setReport(
-        await hcode.invoke("collaboration:artifact", run.id, versionId),
-      );
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setReading(false);
-    }
-  };
   return (
     <div className="flex flex-col gap-4">
       <ExpertRunHeader run={run} />

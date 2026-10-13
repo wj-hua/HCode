@@ -1,15 +1,19 @@
 // 界面设置（主题、代码预览），同时供 ZCode 组件经 useZCodeStore shim 读取。
+import { PANEL_LAYOUT } from "../conversation/panelLayout";
+import type { ExpertClaimRef } from "@hcode/shared/experts";
 import { create } from "zustand";
 import { DEFAULT_CODE_PREVIEW_SETTINGS, type CodePreviewSettings } from "@/lib/codePreviewSettings.js";
 import { applyTheme, type Theme } from "@/useTheme.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 
 type SidePanelState =
-  | { type: "collaboration"; viewId: string; intent?: "plan" | "records"; runId?: string }
+  | { type: "collaboration"; viewId: string; intent?: "plan" | "records"; runId?: string; citation?: ExpertClaimRef & { label: string } }
   | { type: "diff"; viewId: string }
   | { type: "file"; viewId: string; source: CodeViewerSource };
 
 interface UiState {
+  panelWidth: number;
+  setPanelWidth(width: number): void;
   theme: Theme;
   codePreviewSettings: CodePreviewSettings;
   sidePanel: SidePanelState | null;
@@ -28,6 +32,8 @@ function returnToCollaboration(next: SidePanelState | null, current: SidePanelSt
 let mediaListener: (() => void) | null = null;
 
 export const useUiStore = create<UiState>((set) => ({
+  panelWidth: PANEL_LAYOUT.defaultWidth,
+  setPanelWidth: panelWidth => set({ panelWidth }),
   theme: "system",
   codePreviewSettings: DEFAULT_CODE_PREVIEW_SETTINGS,
   sidePanel: null,

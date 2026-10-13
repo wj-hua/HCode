@@ -1,4 +1,5 @@
 // 应用外壳：结构与样式参照 ZCode WorkspaceShellLayout（侧栏 + 带 4px 留白的圆角主面板）。
+import { usePanelWidthPreference } from "../conversation/PanelResizeHandle";
 import { useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/components/lib/utils.js";
@@ -25,6 +26,7 @@ import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 const SIDEBAR_WIDTH = 272;
 
 export function AppShell() {
+  const panelWidth = usePanelWidthPreference();
   const isOfficeMode = useIsOfficeMode();
   const hasBackground = useAppStore((state) => !!state.settings.background.path);
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
@@ -76,9 +78,9 @@ export function AppShell() {
             <Sidebar onOpenSearch={openSearch} />
           </aside>
         </div>
-        <div className={cn("flex min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
+        <div className={cn("flex min-h-0 min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
           <div className="app-drag h-1 w-full" />
-          <section id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
+          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
             <Header
               conversation={conversation}
               diffOpen={diffOpen}

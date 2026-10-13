@@ -1,8 +1,10 @@
 // 对话时间线：按轮（turnId）分组渲染 ZCode v4 行。
 // 用户气泡 / 助手正文 / 思考块 / 工具卡片分别复用 ZCode 的组件（见各 import）。
-import { presentationTaskForTurn } from "@hcode/shared/collaborationPresentation";
+import { presentationBelongsToSource, presentationTaskForTurn } from "@hcode/shared/collaborationPresentation";
 import type { PresentationConversation } from "@hcode/shared/collaborationPresentation";
 import { usePresentationStore } from "../collaboration/presentationStore";
+import { ExpertConversationResult } from "../collaboration/ExpertConversationResult";
+import { presentationContent } from "@hcode/shared/collaborationPresentation";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
 import { CopyIcon, GitBranchIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
@@ -89,9 +91,11 @@ export function Timeline({
         const content = <TurnView key={turn.turnId} turn={turn} workspacePath={workspacePath} permissions={permissions} isLast={index === turns.length - 1} running={running} canFork={owned ? false : canFork} canResend={owned ? false : canResend} lastUserRowId={lastUserRowId} highlightedRowId={highlightedRowId} />;
         if (!owned || Object.keys(permissions).length) return content;
         const highlighted = turn.rows.some(row => row.rowId === highlightedRowId);
-        const isSource = owned.entry.source.agent === presentation?.agent && (owned.entry.source.sessionKey === presentation?.sessionKey || owned.entry.source.nativeSessionId === presentation?.sessionId);
+        const isSource = presentation && presentationBelongsToSource(owned.entry, presentation);
         return <div key={turn.turnId} className="space-y-3">
-          <CollaborationProgress entry={owned.entry} task={owned.task} viewId={isSource ? presentation?.viewId : undefined} />
+          {isSource && presentation && owned.entry.experts?.summary && presentationContent(owned.entry, owned.task).summary
+            ? <ExpertConversationResult entry={owned.entry} viewId={presentation.viewId} />
+            : <CollaborationProgress entry={owned.entry} task={owned.task} viewId={isSource ? presentation?.viewId : undefined} />}
           <details open={highlighted ? true : undefined} className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-ui-sm text-foreground-subtle focus-visible:ring-2 focus-visible:ring-ring">原始提示词与原生响应</summary>
             <div className="mt-4">{content}</div>

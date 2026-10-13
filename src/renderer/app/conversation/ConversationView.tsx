@@ -1,7 +1,9 @@
+import { ExpertConversationResult } from "../collaboration/ExpertConversationResult";
+import { presentationBelongsToSource, presentationTaskForTurn, presentationContent } from "@hcode/shared/collaborationPresentation";
 import { usePresentationStore } from "../collaboration/presentationStore";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
 import { ArrowDownIcon, LoaderIcon } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useConversationScroll } from "./useConversationScroll";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useUiStore } from "../store/uiStore";
@@ -12,8 +14,6 @@ import { Timeline } from "./Timeline";
 import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
 
-
-const STICK_THRESHOLD_PX = 80;
 
 export function ConversationView({
   conversation,
@@ -30,62 +30,21 @@ export function ConversationView({
   const permissions = useAppStore((state) => state.permissions);
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
   const presentations = usePresentationStore(state => state.entries);
-  const latest = presentations.filter(entry => entry.projectPath === conversation.projectPath && entry.source.agent === conversation.agent && (entry.source.sessionKey === conversation.sessionKey || Boolean(conversation.sessionId && entry.source.nativeSessionId === conversation.sessionId))).sort((left, right) => right.createdAt - left.createdAt)[0];
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const stickRef = useRef(true);
-  const lastScrollTopRef = useRef(0);
-  const [showJump, setShowJump] = useState(false);
+  const associated = presentations.filter(entry => presentationBelongsToSource(entry, conversation)).sort((left, right) => right.createdAt - left.createdAt);
+  const latest = associated[0];
+  const identity = { agent: conversation.agent, projectPath: conversation.projectPath, sessionKey: conversation.sessionKey, sessionId: conversation.sessionId };
+  const displayedResults = new Set(Object.keys(permissions).length ? [] : conversation.rows.flatMap(row => {
+    const owned = presentationTaskForTurn(presentations, identity, row.turnId);
+    return owned && presentationContent(owned.entry, owned.task).summary ? [owned.entry.id] : [];
+  }));
+  const { scrollRef, contentRef, onScroll, showJump, followLatest } = useConversationScroll(conversation, latest, searchTarget);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
-  }, []);
-
-  // 内容增长时，如果用户停在底部附近就跟随到底
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    const observer = new ResizeObserver(() => {
-      if (stickRef.current) scrollToBottom();
-    });
-    observer.observe(content);
-    // 固定任务清单展开或收起会改变消息区高度；停在底部时仍跟随最新消息。
-    if (scrollRef.current) observer.observe(scrollRef.current);
-    return () => observer.disconnect();
-  }, [scrollToBottom]);
-
-  useLayoutEffect(() => {
-    if (!conversation.loading) scrollToBottom();
-  }, [conversation.loading, scrollToBottom]);
-
-  useLayoutEffect(() => {
-    if (conversation.loading || searchTarget?.rowId == null) return;
-    const row = contentRef.current?.querySelector(`[data-search-row-id="${searchTarget.rowId}"]`);
-    if (!row) return;
-    stickRef.current = false;
-    row.scrollIntoView({ block: "center" });
-  }, [conversation.loading, conversation.rows.length, searchTarget?.key, searchTarget?.rowId]);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // 内容增长（如刚发送的新消息）会让距离变大但 scrollTop 不会变小；只有用户向上滚才取消跟随。
-    if (distance < STICK_THRESHOLD_PX) stickRef.current = true;
-    else if (el.scrollTop < lastScrollTopRef.current) stickRef.current = false;
-    lastScrollTopRef.current = el.scrollTop;
-    setShowJump(distance > STICK_THRESHOLD_PX * 4);
-  };
 
   return (
     <FilePreviewProvider viewId={conversation.viewId} workspacePath={conversation.projectPath}>
-      <div className={cn("relative flex min-h-0 flex-1 flex-col", collaborationOpen && "collaboration-content")}>
-        {latest ? <div className="mx-auto w-full max-w-3xl px-6 pt-3"><CollaborationProgress entry={latest} viewId={conversation.viewId} /></div> : null}
+      <div className={cn("conversation-content relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", collaborationOpen && "collaboration-content")}>
         <div className="relative min-h-0 flex-1">
-          <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
+          <div ref={scrollRef} onScroll={onScroll} aria-label="会话消息" tabIndex={0} className="absolute inset-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
             <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
               {conversation.loading ? (
                 <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">
@@ -113,17 +72,19 @@ export function ConversationView({
                   highlightedRowId={searchTarget?.rowId ?? null}
                 />
               )}
+              {!conversation.loading ? <div className="mt-6 space-y-8">
+                {latest && (!latest.experts?.summary || latest.experts.busy) ? <CollaborationProgress entry={latest} viewId={conversation.viewId} /> : null}
+                {associated.filter(entry => entry.experts?.summary && !displayedResults.has(entry.id)).reverse().map(entry => <ExpertConversationResult key={entry.id} entry={entry} viewId={conversation.viewId} />)}
+              </div> : null}
             </div>
           </div>
           {showJump ? (
             <Button
+              aria-label="回到最新消息"
               variant="outline"
               size="icon-md"
               className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-background shadow-md"
-              onClick={() => {
-                stickRef.current = true;
-                scrollToBottom("smooth");
-              }}
+              onClick={() => followLatest('smooth')}
             >
               <ArrowDownIcon />
             </Button>
@@ -135,10 +96,7 @@ export function ConversationView({
             <Composer
               key={conversation.viewId}
               conversation={conversation}
-              onSubmitted={() => {
-                stickRef.current = true;
-                scrollToBottom();
-              }}
+              onSubmitted={() => followLatest()}
             />
           )}
         </div>

@@ -3,10 +3,12 @@ import type { CollaborationSnapshot, CollaborationTask } from './collaboration.j
 import type { PlanningDraft } from './planningDraft.js';
 import type { AgentKind, SessionSummary } from './types.js';
 import { EXPERT_ROLES } from './experts.js';
+import { expertConversation, type ExpertConversation } from './expertConversation.js';
 import { deliveryCode, codeCandidates } from './codeCandidates.js';
 
 export interface PresentationTask extends CollaborationTask { projectPath: string; label: string }
 export interface CollaborationPresentation {
+  experts?: ExpertConversation;
   id: string; runId?: string; createdAt: number; projectPath: string; objective: string;
   status: string; stage?: string; summary?: string; summaryLabel?: string; error?: string; tasks: PresentationTask[];
   source: { agent: AgentKind; sessionKey: string; nativeSessionId?: string };
@@ -47,7 +49,7 @@ export function presentationForRun(run: CollaborationSnapshot): CollaborationPre
     const role = run.experts && task.role === 'execution' ? '独立研究' : run.experts && task.role === 'review' ? '专家互审' : TASK_ROLE_LABELS[task.role];
     return { ...task, projectPath, label: `${role}${expert || delivery ? ' · ' : ''}${(expert ? EXPERT_ROLES[expert.role].name : undefined) ?? delivery?.objective ?? ''}` };
   });
-  return { id: run.id, runId: run.id, createdAt: run.createdAt, projectPath: source.projectPath, objective: run.params.objective, stage: run.stage === "finished" ? undefined : STAGE_LABELS[run.stage], status: RUN_STATES[run.status] + (candidates.length ? ` · 已采纳 ${applied} / ${candidates.length}` : ''), summaryLabel: candidates.some(entry => entry.code.adoption) ? '当时的汇总（采纳前），采纳状态以宿主记录为准' : '当前会话汇总', summary: run.experts?.summary?.summary ?? (run.experts ? undefined : run.summary), error: run.error ?? run.persistenceError, tasks, source: { agent: source.agent, sessionKey: source.sessionKey, nativeSessionId: source.resumeSessionId ?? tasks.find(task => task.role === 'planning')?.nativeSessionId } };
+  return { experts: expertConversation(run), id: run.id, runId: run.id, createdAt: run.createdAt, projectPath: source.projectPath, objective: run.params.objective, stage: run.stage === "finished" ? undefined : STAGE_LABELS[run.stage], status: RUN_STATES[run.status] + (candidates.length ? ` · 已采纳 ${applied} / ${candidates.length}` : ''), summaryLabel: candidates.some(entry => entry.code.adoption) ? '当时的汇总（采纳前），采纳状态以宿主记录为准' : '当前会话汇总', summary: run.experts?.summary?.summary ?? (run.experts ? undefined : run.summary), error: run.error ?? run.persistenceError, tasks, source: { agent: source.agent, sessionKey: source.sessionKey, nativeSessionId: source.resumeSessionId ?? tasks.find(task => task.role === 'planning')?.nativeSessionId } };
 }
 
 /** 草案只呈现规划状态；同 UUID 的正式 Run 由合并规则优先保留。 */
@@ -60,6 +62,12 @@ export function presentationForDraft(draft: PlanningDraft): CollaborationPresent
 export function mergePresentationEntry(entries: readonly CollaborationPresentation[], next: CollaborationPresentation) {
   if (next.runId && next.id !== next.runId && entries.some(entry => entry.id === next.runId)) return entries;
   return [...entries.filter(entry => entry.id !== next.id && entry.id !== `${DRAFT_PRESENTATION_NAMESPACE}${next.id}`), next];
+}
+
+/** 主会话结果必须同时匹配发起目录与原生身份；两个缺失 id 不构成匹配。 */
+export function presentationBelongsToSource(entry: CollaborationPresentation, conversation: PresentationConversation) {
+  if (entry.projectPath !== conversation.projectPath || entry.source.agent !== conversation.agent) return false;
+  return entry.source.sessionKey === conversation.sessionKey || Boolean(conversation.sessionId && entry.source.nativeSessionId === conversation.sessionId);
 }
 
 /** 原生身份与实际目录必须同时匹配；重复/不明确的关联保留原文。 */

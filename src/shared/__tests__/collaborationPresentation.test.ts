@@ -1,7 +1,7 @@
 // 展示关联只接受宿主身份；普通消息、跨项目和未知用量不能被重新解释。
 import { describe, expect, it } from 'vitest';
 import type { CollaborationSnapshot } from '../collaboration.js';
-import { presentationContent } from '../collaborationPresentation.js';
+import { presentationBelongsToSource, presentationContent } from '../collaborationPresentation.js';
 import { presentationForRun, presentationForDraft, mergePresentationEntry, presentationTaskForTurn, groupCollaborationSessions, usagePresentation, presentationTitle, collaborationInputTitle, collaborationGroupMatchesQuery } from '../collaborationPresentation.js';
 
 const run: CollaborationSnapshot = {
@@ -11,6 +11,12 @@ const run: CollaborationSnapshot = {
   deliveries: [{ id: 'delivery', requestKey: 'request', objective: '核对表单', executor: { agent: 'claude' }, status: 'accepted', versions: [], reviews: [] }], summary: '已核对，未运行测试',
 };
 describe('协作展示的身份边界', () => {
+  it('缺失的原生 id 不会把同后端专家线程当作主会话', () => {
+    const entry = presentationForRun({ ...run, params: { ...run.params, initiator: { ...run.params.initiator, resumeSessionId: undefined } }, tasks: [] });
+    expect(presentationBelongsToSource(entry, { agent: 'codex', projectPath: '/project', sessionKey: 'expert-key' })).toBe(false);
+    expect(presentationBelongsToSource(entry, { agent: 'codex', projectPath: '/other', sessionKey: 'source-key' })).toBe(false);
+    expect(presentationBelongsToSource(entry, { agent: 'codex', projectPath: '/project', sessionKey: 'source-key' })).toBe(true);
+  });
   it('旧的已停止汇总不展示最新成功结果，回合错误不借用全局错误', () => {
     const entry = presentationForRun({ ...run, error: '新增资料尚未核对', tasks: [
       { ...run.tasks[0]!, id: 'stopped', role: 'synthesis', status: 'cancelled', error: '本回合已停止' },
