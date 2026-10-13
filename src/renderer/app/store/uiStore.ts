@@ -5,6 +5,7 @@ import { applyTheme, type Theme } from "@/useTheme.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 
 type SidePanelState =
+  | { type: "collaboration"; viewId: string; intent?: "plan" | "records" }
   | { type: "diff"; viewId: string }
   | { type: "file"; viewId: string; source: CodeViewerSource };
 
@@ -12,8 +13,16 @@ interface UiState {
   theme: Theme;
   codePreviewSettings: CodePreviewSettings;
   sidePanel: SidePanelState | null;
+  returnPanel: SidePanelState | null;
   setSidePanel(panel: SidePanelState | null): void;
   setTheme(theme: "system" | "light" | "dark"): void;
+}
+
+/** 返回目标只属于打开证据的同一会话；关闭或跨会话导航立即撤销。 */
+function returnToCollaboration(next: SidePanelState | null, current: SidePanelState | null, previous: SidePanelState | null) {
+  if (!next || next.type === "collaboration") return null;
+  if (current?.type === "collaboration" && current.viewId === next.viewId) return current;
+  return previous?.viewId === next.viewId ? previous : null;
 }
 
 let mediaListener: (() => void) | null = null;
@@ -22,7 +31,11 @@ export const useUiStore = create<UiState>((set) => ({
   theme: "system",
   codePreviewSettings: DEFAULT_CODE_PREVIEW_SETTINGS,
   sidePanel: null,
-  setSidePanel: (sidePanel) => set({ sidePanel }),
+  returnPanel: null,
+  setSidePanel: (sidePanel) => set(state => ({
+    sidePanel,
+    returnPanel: returnToCollaboration(sidePanel, state.sidePanel, state.returnPanel),
+  })),
   setTheme(pref) {
     const theme: Theme = pref === "dark" ? "zai-dark" : pref === "light" ? "zai-light" : "system";
     applyTheme(theme);

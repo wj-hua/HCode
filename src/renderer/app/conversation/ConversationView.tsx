@@ -2,13 +2,14 @@ import { ArrowDownIcon, LoaderIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
+import { useUiStore } from "../store/uiStore";
 import { Composer } from "../composer/Composer";
 import { AGENTS } from "@hcode/shared/agents";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { Timeline } from "./Timeline";
 import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
-import { CollaborationPanel, useActiveCollaboration } from "../collaboration/CollaborationPanel";
+
 
 const STICK_THRESHOLD_PX = 80;
 
@@ -22,7 +23,8 @@ export function ConversationView({
   /** 对比分栏中的一列：不带输入框，由对比视图共用底部输入框。 */
   column?: boolean;
 }) {
-  const collaboration = useActiveCollaboration(conversation);
+  const panel = useUiStore(state => state.sidePanel);
+  const collaborationOpen = panel?.type === "collaboration" && panel.viewId === conversation.viewId;
   const permissions = useAppStore((state) => state.permissions);
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -76,7 +78,7 @@ export function ConversationView({
 
   return (
     <FilePreviewProvider viewId={conversation.viewId} workspacePath={conversation.projectPath}>
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className={cn("relative flex min-h-0 flex-1 flex-col", collaborationOpen && "collaboration-content")}>
         <div className="relative min-h-0 flex-1">
           <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto [scrollbar-gutter:stable]">
             <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
@@ -123,8 +125,7 @@ export function ConversationView({
         </div>
         <div className={cn("shrink-0", column ? "px-3" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
           <TaskListPanel conversation={conversation} />
-          {column ? null : <CollaborationPanel conversation={conversation} />}
-          {column || collaboration ? null : (
+          {column ? null : (
             <Composer
               key={conversation.viewId}
               conversation={conversation}

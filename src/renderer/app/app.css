@@ -8,3 +8,18 @@
 .app-no-drag {
   app-region: no-drag;
 }
+
+/* 协作是持续的并行工作层；宽窗口留出输入空间，窄窗口沿用可关闭的面板。 */
+.collaboration-shell {
+  container: collaboration-workspace / inline-size;
+  --collaboration-panel-width: min(30rem, 42%);
+}
+@container collaboration-workspace (min-width: 52rem) {
+  .collaboration-content { margin-right: var(--collaboration-panel-width); }
+  .collaboration-side-panel { width: var(--collaboration-panel-width); }
+}
+.composer-input { container: composer-input / inline-size; }
+@container composer-input (max-width: 40rem) {
+  .composer-toolbar-primary { flex-basis: 100%; }
+  .composer-toolbar-controls { flex-wrap: wrap; }
+}

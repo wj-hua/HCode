@@ -7,12 +7,14 @@ import { useAppStore } from "../store/appStore";
 import { hcode } from "../bridge";
 const STATUS_ORDER = { editing: 0, preparing: 1, ready: 2, blocked: 2, cancelled: 2, starting: 3, started: 4, abandoned: 4 } as const;
 
-export function useResearchDraft(conversation: Conversation, input: Omit<ResearchDraftInput, "initiator">, started: (run: CollaborationSnapshot) => void) {
+export function useResearchDraft(conversation: Conversation, input: Omit<ResearchDraftInput, "initiator">, started: (run: CollaborationSnapshot) => void, restored?: (draft: ResearchDraft) => void, prepared?: (input: string) => void) {
   const [draft, setDraft] = useState<ResearchDraft>();
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [objective, setObjective] = useState("");
+  const restore = useRef(restored);
+  restore.current = restored;
   const latest = useRef<ResearchDraft | undefined>(undefined);
   const accept = (value: ResearchDraft) => {
     const previous = latest.current;
@@ -25,7 +27,7 @@ export function useResearchDraft(conversation: Conversation, input: Omit<Researc
       if (current && (value.params.initiator.sessionKey === conversation.sessionKey || Boolean(conversation.sessionId && value.params.initiator.resumeSessionId === conversation.sessionId))) accept(value);
     });
     if (conversation.sessionKey || conversation.sessionId) void hcode.invoke("collaboration:draftList", conversation.sessionKey, conversation.sessionId).then(values => {
-      if (current && values[0] && values[0].status !== "abandoned" && values[0].status !== "started") accept(values[0]);
+      if (current && values[0] && values[0].status !== "abandoned" && values[0].status !== "started") { const firstLoad = !latest.current; accept(values[0]); if (firstLoad) restore.current?.(values[0]); }
     }).catch(reason => { if (current) setError(`读取计划失败：${String(reason)}`); }).finally(() => { if (current) setLoading(false); });
     else setLoading(false);
     return () => { current = false; dispose(); };
@@ -54,6 +56,7 @@ export function useResearchDraft(conversation: Conversation, input: Omit<Researc
     const editable = draft && !["abandoned", "started", "starting", "preparing"].includes(draft.status);
     const value = editable ? await hcode.invoke("collaboration:draftUpdate", draft.id, draft.revision, request) : await hcode.invoke("collaboration:draftCreate", { ...request, initiator });
     accept(value);
+    prepared?.(goal);
     accept(await hcode.invoke("collaboration:draftPrepare", value.id, value.revision));
   });
   const save = () => act(async () => {

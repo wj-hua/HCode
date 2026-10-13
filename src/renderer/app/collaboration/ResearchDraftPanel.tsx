@@ -1,8 +1,8 @@
-// U0 最小计划预览：先看分工，再明确开始；即时反馈和错误原因不依赖颜色。
+// 只读计划预览：先看分工，再明确开始；即时反馈和错误原因不依赖颜色。
 import { LoaderCircleIcon, FileTextIcon } from "lucide-react";
 import type { Conversation } from "../store/appStore";
 import type { CollaborationSnapshot } from "@hcode/shared/collaboration";
-import type { ResearchDraftInput } from "@hcode/shared/researchDraft";
+import type { ResearchDraft, ResearchDraftInput } from "@hcode/shared/researchDraft";
 import { COLLABORATION_LIMITS } from "@hcode/shared/collaboration";
 import { AGENTS } from "@hcode/shared/agents";
 import { Button } from "@/components/ui/button.js";
@@ -10,13 +10,15 @@ import { useResearchDraft } from "./useResearchDraft";
 const CONTROL_FEEDBACK = "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:brightness-90";
 const EDITOR_ROWS = 4;
 
-export function ResearchDraftPanel({ conversation, input, unavailable, onStarted }: {
+export function ResearchDraftPanel({ conversation, input, unavailable, onStarted, onRestored, onPrepared }: {
   conversation: Conversation;
   input: Omit<ResearchDraftInput, "initiator">;
   unavailable?: string;
   onStarted(run: CollaborationSnapshot): void;
+  onRestored?(draft: ResearchDraft): void;
+  onPrepared?(input: string): void;
 }) {
-  const plan = useResearchDraft(conversation, input, onStarted);
+  const plan = useResearchDraft(conversation, input, onStarted, onRestored, onPrepared);
   const draft = plan.draft;
   const preparing = draft?.status === "preparing";
   const terminal = draft?.status === "abandoned" || draft?.status === "started";
@@ -24,7 +26,7 @@ export function ResearchDraftPanel({ conversation, input, unavailable, onStarted
   return <section aria-label="只读协作计划" className="flex flex-col gap-3 border-t border-border pt-3">
     <div className="flex items-center gap-2 font-medium"><FileTextIcon className="size-4" />先查看计划，再开始协作</div>
     <p className="text-ui-sm text-foreground-muted">生成计划会使用当前 AI 的额度。只读取项目资料；尚未派发任务，不创建写入副本。</p>
-    <p className="text-ui-sm text-foreground-muted">本计划只使用这里的文字目标与项目文件，普通聊天输入框的附件不会带入。</p>
+    <p className="text-ui-sm text-foreground-muted">目标复用当前输入；支持文字中的 @项目文件 引用。输入附件尚未接入，有附件时不能生成或确认计划。</p>
     {plan.loading ? <p role="status">正在读取已保存计划…</p> : null}
     {unavailable && !preparing ? <p role="status">{unavailable}</p> : null}
     {!input.objective.trim() && !draft ? <p role="status">请先填写任务目标。</p> : null}
@@ -41,7 +43,7 @@ export function ResearchDraftPanel({ conversation, input, unavailable, onStarted
       <p className="text-ui-sm text-foreground-muted">计划引用 {draft.sources.length} 个文件版本 · 规划已用 {draft.turns.length} / {COLLABORATION_LIMITS.maxTurns} 回合 · 执行仍限于只读，不运行测试</p>
       {plan.changed ? <p role="status">计划或 AI 配置已修改，请先保存，再确认开始。</p> : null}
       <div className="flex flex-wrap gap-2">
-        {plan.changed ? <Button type="button" className={CONTROL_FEEDBACK} variant="outline" disabled={plan.busy || preparing || !plan.objective.trim()} onClick={() => void plan.save()}>保存计划修改</Button> : null}
+        {plan.changed ? <Button type="button" className={CONTROL_FEEDBACK} variant="outline" disabled={plan.busy || preparing || Boolean(unavailable) || !plan.objective.trim()} onClick={() => void plan.save()}>保存计划修改</Button> : null}
         <Button type="button" className={CONTROL_FEEDBACK} disabled={plan.busy || preparing || !ready || plan.changed || Boolean(unavailable)} onClick={() => void plan.confirm()}>确认计划并开始协作</Button>
         <Button type="button" className={CONTROL_FEEDBACK} variant="ghost" disabled={plan.busy || preparing || draft.status === "starting"} onClick={() => void plan.abandon()}>放弃草案</Button>
       </div>

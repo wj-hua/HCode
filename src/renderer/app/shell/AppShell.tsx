@@ -78,7 +78,7 @@ export function AppShell() {
         </div>
         <div className={cn("flex min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
           <div className="app-drag h-1 w-full" />
-          <section className={cn("relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
+          <section id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
             <Header
               conversation={conversation}
               diffOpen={diffOpen}

@@ -3,7 +3,6 @@ import {
   ArrowUpIcon,
   ChevronDownIcon,
   ClipboardListIcon,
-  Columns2Icon,
   FilePenLineIcon,
   EyeIcon,
   PlusIcon,
@@ -15,6 +14,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import type { ZCodeConfigOption } from "@zcode/shared";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
 import type { AgentKind, FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
+import { CollaborationPanel } from "../collaboration/CollaborationPanel";
+import { useActiveCollaboration } from "../collaboration/useCollaborationSession";
+import { useUiStore } from "../store/uiStore";
+import { WorkModeMenu } from "./WorkModeMenu";
+import { WORK_MODES, useWorkMode, submissionForMode } from "./workMode";
 import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
@@ -27,7 +31,6 @@ import { hcode } from "../bridge";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -127,8 +130,11 @@ export function Composer({
   const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
   // 草稿会话勾选的其他 CLI：发送时与当前 CLI 组成对比组
-  const [compareAgents, setCompareAgents] = useState<AgentKind[]>([]);
-  const extraAgents = compareAgents.filter((kind) => kind !== conversation.agent);
+  const selection = useWorkMode(state => state.views[conversation.viewId]);
+  const workMode = conversation.compareId ? "compare" : selection?.mode ?? "chat";
+  const extraAgents = (selection?.agents ?? []).filter(kind => kind !== conversation.agent);
+  const activeCollaboration = useActiveCollaboration(conversation);
+  const setSidePanel = useUiStore(state => state.setSidePanel);
   const persistedKey = draftKey(conversation);
   // 内存里的草稿优先；重启后从 localStorage 恢复
   const [text, setText] = useState(() => drafts.get(conversation.viewId) ?? loadDraft(persistedKey).text);
@@ -339,6 +345,9 @@ export function Composer({
 
   const canSend = Boolean(text.trim() || images.length > 0 || files.length > 0);
 
+  const submission = submissionForMode(workMode, { text, imageCount: images.length, fileCount: files.length, busy: running || conversation.queue.length > 0, activeCollaboration: Boolean(activeCollaboration), canCompare: isDraft || Boolean(conversation.compareId), compareCount: conversation.compareId ? 1 : extraAgents.length });
+  const attachmentBlocked = submissionForMode("collaboration", { text: "goal", imageCount: images.length, fileCount: files.length, busy: false, activeCollaboration: false, canCompare: false, compareCount: 0 }).reason;
+
   const rememberPrompt = (value: string) => {
     const projectPath = conversation.projectPath;
     const nextHistory = appendPromptHistoryEntry(readPromptHistoryEntries(projectPath), value);
@@ -348,7 +357,11 @@ export function Composer({
   };
 
   const submit = () => {
-    if (!canSend || conversation.loading || adding || submitting) return;
+    if (!canSend || conversation.loading || adding || submitting || submission.reason) return;
+    if (submission.action === "plan") {
+      setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "plan" });
+      return;
+    }
     if (running && !conversation.compareId) {
       // 运行中先排队，本轮结束后自动发送
       enqueue(text, images, files);
@@ -361,12 +374,11 @@ export function Composer({
     setSubmitting(true);
     const sending = conversation.compareId
       ? sendGroup(text, images, files)
-      : isDraft && extraAgents.length > 0
+      : submission.action === "compare" && isDraft
         ? startCompare(extraAgents, text, images, files)
         : send(text, images, files);
     void sending.then((sent) => {
       if (!sent) return;
-      setCompareAgents([]);
       rememberPrompt(text);
       setText((current) => current === text ? "" : current);
       setImages((current) => current === images ? [] : current);
@@ -426,6 +438,8 @@ export function Composer({
 
   return (
     <>
+    {!conversation.compareId ? <CollaborationPanel conversation={conversation} currentInput={text} workMode={workMode} attachmentBlocked={attachmentBlocked} onStarted={input => { setText(current => current === input ? "" : current); onSubmitted(); }} /> : null}
+    {submission.reason ? <p role="status" className="mb-2 text-ui-sm text-foreground-subtle">{submission.reason}</p> : workMode !== "chat" ? <p className="mb-2 text-ui-sm text-foreground-subtle">{WORK_MODES[workMode].description}</p> : null}
     {activeInTerminal ? (
       <div className="mb-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-ui-sm text-foreground-subtle">
         这个会话正在某个终端的 claude 中运行。在这里继续发送会与终端同时写入同一会话，建议先在终端里退出。
@@ -446,7 +460,7 @@ export function Composer({
         event.preventDefault();
         void addFiles(files);
       }}
-      className="relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-input-border bg-input p-3 transition-colors hover:border-input-border-hover focus-within:!border-input-border-focused focus-within:bg-input-focused"
+      className="composer-input relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-input-border bg-input p-3 transition-colors hover:border-input-border-hover focus-within:!border-input-border-focused focus-within:bg-input-focused"
     >
       <ImageAttachments
         images={images.map((image) => ({ src: `data:${image.mimeType};base64,${image.data}`, name: image.name ?? "图片" }))}
@@ -601,9 +615,9 @@ export function Composer({
         }}
       />
       {/* 工具条照 ZCode ChatPromptEditor：左侧 + / CLI / 权限模式，右侧模型 / 思考强度 / 发送 */}
-      <div className="group/toolbar flex items-end gap-3">
-        <div className="flex min-w-0 flex-1 items-center">
-          <div className="flex shrink-0 items-center gap-1">
+      <div className="composer-toolbar group/toolbar flex flex-wrap items-end gap-3">
+        <div className="composer-toolbar-primary flex min-w-0 flex-1 items-center">
+          <div className="composer-toolbar-controls flex shrink-0 items-center gap-1">
             <ControlHintTooltip title="添加附件（图片、视频、文档等；也可以粘贴或拖入）">
               <Button
                 type="button"
@@ -651,45 +665,7 @@ export function Composer({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-            {isDraft ? (
-              <DropdownMenu>
-                <ControlHintTooltip title="同一问题同时发给多个 CLI，分栏对比">
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className={cn("h-7 gap-1 rounded-lg px-2 text-ui-base", extraAgents.length > 0 && "text-brand hover:text-brand")}
-                    >
-                      <Columns2Icon className="size-4" />
-                      {extraAgents.length > 0 ? `对比 +${extraAgents.length}` : "对比"}
-                    </Button>
-                  </DropdownMenuTrigger>
-                </ControlHintTooltip>
-                <DropdownMenuContent side="top" align="start" sideOffset={4} className="w-64" onCloseAutoFocus={restoreInputFocus}>
-                  <DropdownMenuLabel>同时发给（多个 CLI 会同时操作同一目录）</DropdownMenuLabel>
-                  {AGENT_KINDS.filter((kind) => kind !== conversation.agent).map((kind) => {
-                    const status = agentStatuses?.find((item) => item.kind === kind);
-                    const missing = status !== undefined && !status.found;
-                    return (
-                      <DropdownMenuCheckboxItem
-                        key={kind}
-                        checked={extraAgents.includes(kind)}
-                        disabled={missing}
-                        onSelect={(event) => event.preventDefault()}
-                        onCheckedChange={(checked) =>
-                          setCompareAgents((current) => checked ? [...current, kind] : current.filter((item) => item !== kind))}
-                        className="min-h-8 gap-2"
-                      >
-                        <AgentBadge agent={kind} />
-                        <span className="flex-1">{AGENTS[kind].name}</span>
-                        {missing ? <span className="text-ui-sm text-foreground-subtlest">未安装</span> : null}
-                      </DropdownMenuCheckboxItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
+            {!conversation.compareId ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} agent={conversation.agent} agents={extraAgents} statuses={agentStatuses ?? undefined} onCompare={(kind, checked) => useWorkMode.getState().toggleCompare(conversation.viewId, kind, checked)} onClose={restoreInputFocus} /> : null}
             <DropdownMenu>
               <ControlHintTooltip title="权限模式">
                 <DropdownMenuTrigger asChild>
@@ -727,8 +703,8 @@ export function Composer({
             </DropdownMenu>
           </div>
         </div>
-        <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
-          <div className="flex min-w-0 items-center gap-1">
+        <div className="composer-toolbar-secondary ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
             <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden empty:hidden">
               <UsageIndicator usage={conversation.usage} />
               <ModelConfigSelect
@@ -765,15 +741,15 @@ export function Composer({
                 </Button>
               </ControlHintTooltip>
             ) : (
-              <ControlHintTooltip title="发送" shortcut="Enter">
+              <ControlHintTooltip title={WORK_MODES[workMode].action} shortcut="Enter">
                 <Button
                   type="submit"
-                  size="icon-md"
-                  disabled={!canSend || conversation.loading || adding > 0 || submitting}
-                  aria-label="发送"
+                  size={submission.action === "plan" ? "sm" : "icon-md"}
+                  disabled={!canSend || conversation.loading || adding > 0 || submitting || Boolean(submission.reason)}
+                  aria-label={WORK_MODES[workMode].action}
                   className="cursor-pointer gap-1 rounded-lg bg-brand text-ui-base text-foreground-inverse hover:bg-brand/80"
                 >
-                  <ArrowUpIcon className="size-4" />
+                  {submission.action === "plan" ? WORK_MODES[workMode].action : <ArrowUpIcon className="size-4" />}
                 </Button>
               </ControlHintTooltip>
             )}
