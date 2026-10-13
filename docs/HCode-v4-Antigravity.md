@@ -12,6 +12,7 @@
 | 历史内容 | transcript 每行一个 step：`USER_INPUT`（取 `<USER_REQUEST>` 内的原文）、`PLANNER_RESPONSE`（thinking / content / tool_calls）、`GENERIC`（按顺序对应工具结果）、`CHECKPOINT`（压缩） |
 | 新建 / 续聊 | 每个 HCode 会话一个 `agy --add-dir <项目> [--conversation <id>] --input-format stream-json --output-format stream-json -p=` 进程，stdin 每行 `{"event":"user","message":{...}}` 跑一轮，进程在轮次之间保持 |
 | 流式输出 | `init`（conversation_id）、`step_update`（agent_response 的 text_delta / thinking_delta，tool 的 parameters / output）、`result`（一轮结束，含 error、denied_actions） |
+| 响应指标 | TTFT 从发送到首个非空文字、思考或工具参数（包含 CLI 启动）；速度用 `agent_response` 的 DONE 事件中 `usage.output_tokens` 与 `duration_seconds` 配对求和，包含隐藏思考，排除工具执行；只有步骤完整且与本轮输出用量一致时显示，并展示对应响应耗时 |
 | 停止 | 发 SIGINT（agy 结束当前轮后退出），下次发送用 `--conversation` 重启续上 |
 | 模型列表 | `agy models`（每行 “id<TAB>名称”），发送时 `--model <id>` |
 

@@ -6,7 +6,7 @@ import { AGY_COLLABORATION_VERSION, GEMINI_MODEL_PREFIX, AGY_SOURCE_LIMITATION }
 import { CODEX_RESEARCH_PROTOCOL_VERSION } from '../sessions/researchRuntime.js';
 /** 查询不修改会话，不加载模型，不创建替代线程；元数据 IO 错误由调用方展示。 */
 export async function collaborationCapabilities(agents: AgentRegistry, platform: NodeJS.Platform, source?: CollaborationSource): Promise<CollaborationCapabilities[]> {
-  if (source) z.object({ agent: z.enum(['claude', 'codex', 'step', 'agy', 'pi']), resumeSessionId: z.string().min(1).optional() }).strict().parse(source);
+  if (source) z.object({ agent: z.enum(['claude', 'codex', 'agy', 'cline']), resumeSessionId: z.string().min(1).optional() }).strict().parse(source);
   return Promise.all(agents.all().map(async (provider) => {
     const status = await provider.getStatus(true);
     const nativeSource = status.found && (provider.kind === 'claude' || provider.kind === 'codex' && platform === 'darwin' && status.version?.includes(CODEX_RESEARCH_PROTOCOL_VERSION) === true);

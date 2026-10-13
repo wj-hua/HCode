@@ -32,8 +32,8 @@ describe("会话全文搜索", () => {
   it("先筛原始记录，再加载可能命中的会话", async () => {
     const dir = await mkdtemp(join(tmpdir(), "hcode-search-"));
     try {
-      const misses = { ...session, id: "miss", agent: "step" as const, title: "无关会话" };
-      const hit = { ...session, id: "hit", agent: "step" as const, title: "另一个会话" };
+      const misses = { ...session, id: "miss", agent: "codex" as const, title: "无关会话" };
+      const hit = { ...session, id: "hit", agent: "codex" as const, title: "另一个会话" };
       await Promise.all([
         writeFile(join(dir, "miss.jsonl"), '{"text":"其他文字"}\n'),
         writeFile(join(dir, "hit.jsonl"), '{"text":"\\u5185\\u5bb9"}\n'),

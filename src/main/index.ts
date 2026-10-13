@@ -11,9 +11,8 @@ import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS } from "../sha
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
-import { PI_VARIANT } from "./agents/pi/piAgent.js";
-import { StepAgent } from "./agents/step/stepAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
+import { ClineAgent } from "./agents/cline/clineAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
 import { beginGitTurn, commitFiles, createBranch, finishGitTurn, isGitRepository, listBranches, previewGitTurn, repositoryRoot, revertFile, switchBranch, validateTurnFiles, type GitTurnSnapshot } from "./git.js";
@@ -183,9 +182,8 @@ async function bootstrap() {
   const agents = new AgentRegistry({
     claude,
     codex,
-    step: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.step),
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration")),
-    pi: new StepAgent(events, buildAgentEnv, () => store.settings.agentPaths.pi, PI_VARIANT),
+    cline: new ClineAgent(events, buildAgentEnv, () => store.settings.agentPaths.cline, join(app.getPath("userData"), "cline-attachments")),
   });
   quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const extensions = new ExtensionsService(claude, codex, buildAgentEnv);

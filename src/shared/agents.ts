@@ -73,24 +73,6 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     models: [{ value: "", label: "默认模型" }],
     fork: true,
   },
-  step: {
-    kind: "step",
-    name: "StepCode",
-    command: "step",
-    // 对应 step 的权限预设（--approval-mode confirm / strict / auto）
-    permissionModes: [
-      { mode: "ask", label: "逐条审批", description: "只读工具直接运行，改文件、执行命令前询问你", icon: "shield" },
-      { mode: "read-only", label: "只读", description: "只允许读取和搜索类工具", icon: "readonly" },
-      {
-        mode: "bypass",
-        label: "自动执行",
-        description: "普通操作不再询问，危险命令仍会询问（谨慎使用）",
-        icon: "danger",
-        dangerous: true,
-      },
-    ],
-    models: [{ value: "", label: "默认模型" }],
-  },
   agy: {
     kind: "agy",
     name: "Antigravity",
@@ -119,26 +101,20 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     ],
     models: [{ value: "", label: "默认模型" }],
   },
-  pi: {
-    kind: "pi",
-    name: "pi",
-    command: "pi",
-    // pi 没有工具审批：默认直接执行所有工具；只读模式用 --tools 只开放读取类工具
+  cline: {
+    kind: "cline",
+    name: "Cline",
+    command: "cline",
     permissionModes: [
-      {
-        mode: "default",
-        label: "直接执行",
-        description: "pi 不做工具审批，改文件、执行命令都不会询问（谨慎使用）",
-        icon: "danger",
-        dangerous: true,
-      },
-      { mode: "read-only", label: "只读", description: "只开放读取、搜索和列目录工具", icon: "readonly" },
+      { mode: "default", label: "逐条审批", description: "工具执行前询问你", icon: "shield" },
+      { mode: "plan", label: "计划模式", description: "只允许读取和搜索类工具，分析并给出计划", icon: "plan" },
+      { mode: "bypass", label: "完全放行", description: "不再询问任何操作（谨慎使用）", icon: "danger", dangerous: true },
     ],
-    models: [{ value: "", label: "默认模型" }],
+    models: [{ value: "", label: "默认模型", efforts: ["none", "low", "medium", "high", "xhigh"] }],
   },
 };
 
-export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "step", "agy", "pi"];
+export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "agy", "cline"];
 
 /** 额度面板里的排列顺序。 */
 export const QUOTA_SOURCES: QuotaSource[] = [...AGENT_KINDS];

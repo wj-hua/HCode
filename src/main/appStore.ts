@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_SETTINGS, normalizeInterfaceMode, type SessionSummary, type Settings, type SettingsPatch } from "../shared/types.js";
+import { AGENT_KINDS } from "../shared/agents.js";
 import { sessionPinKey } from "../shared/sessionPins.js";
 
 interface ProjectPrefs {
@@ -42,6 +43,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     ...DEFAULT_SETTINGS,
     ...(raw as Partial<Settings>),
     interfaceMode: normalizeInterfaceMode(raw.interfaceMode),
+    codexSpeed: raw.codexSpeed === "fast" || raw.codexSpeed === "default" ? raw.codexSpeed : "",
     agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
     defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),
     defaultModels: pick(raw.defaultModels, DEFAULT_SETTINGS.defaultModels),
@@ -61,6 +63,8 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
   for (const key of ["claudePath", "defaultPermissionMode", "defaultModel"]) {
     delete (settings as unknown as Record<string, unknown>)[key];
   }
+  // 已移除的 CLI（step / pi）不能作为新建会话默认 CLI，回退到 claude。
+  if (!AGENT_KINDS.includes(settings.defaultAgent)) settings.defaultAgent = DEFAULT_SETTINGS.defaultAgent;
   return settings;
 }
 

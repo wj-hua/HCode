@@ -5,6 +5,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
 import type {
   AgentKind,
+  CodexSpeed,
   AgentStatus,
   ModelOption,
   ChatRunState,
@@ -77,6 +78,7 @@ export interface Conversation {
   turnPrompt?: string;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
+  codexSpeed: CodexSpeed;
   queue: QueuedMessage[];
   /** 队列暂停原因：用户停止或本轮出错后不再自动发送，等用户点「继续」。 */
   queuePaused?: "stopped" | "error";
@@ -89,6 +91,8 @@ export interface AppState {
   settings: Settings;
   agentStatuses: AgentStatus[] | null;
   models: Partial<Record<AgentKind, ModelOption[]>>;
+  modelsLoading: Partial<Record<AgentKind, boolean>>;
+  modelErrors: Partial<Record<AgentKind, string | undefined>>;
   projects: Project[];
   sessions: Record<string, SessionSummary[]>;
   sessionErrors: Record<string, string | undefined>;
@@ -100,6 +104,7 @@ export interface AppState {
   permissions: Record<string, PermissionRequestEvent>;
   sidebarCollapsed: boolean;
   settingsOpen: boolean;
+  settingsTab: "general" | "agents" | "notifications" | "extensions";
   fullscreen: boolean;
   /** 编辑重发：待写入某个会话输入框的内容，输入框挂载后取走。 */
   composerPrefill: { viewId: string; text: string; images: ImageInput[]; files: FileInput[] } | null;
@@ -117,7 +122,7 @@ export interface AppState {
   setDraftAgent(agent: AgentKind): void;
   /** 草稿会话切换工作目录。 */
   setDraftProject(projectPath: string): void;
-  loadModels(agent: AgentKind): Promise<void>;
+  loadModels(agent: AgentKind, refresh?: boolean): Promise<void>;
   send(text: string, images?: ImageInput[], files?: FileInput[]): Promise<boolean>;
   /** 草稿会话与 agents 中的其他 CLI 组成对比组，同一消息同时发给每个 CLI。 */
   startCompare(agents: AgentKind[], text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
@@ -133,6 +138,7 @@ export interface AppState {
   setModel(model: string): Promise<void>;
   /** 思考强度随下一次发送生效，并记为该 CLI 新会话的默认值。 */
   setEffort(effort: string): Promise<void>;
+  setCodexSpeed(speed: CodexSpeed): Promise<void>;
   respondPermission(interactionId: string, decision: PermissionDecision): Promise<void>;
   addProject(): Promise<void>;
   setProjectPinned(path: string, pinned: boolean): Promise<void>;
@@ -151,7 +157,7 @@ export interface AppState {
   editMessage(rowId: number): void;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
-  setSettingsOpen(open: boolean): void;
+  setSettingsOpen(open: boolean, tab?: "general" | "agents" | "notifications" | "extensions"): void;
   /** 关闭当前视图；会话记录仍保留在项目列表中。 */
   closeActiveView(): Promise<void>;
   activateView(viewId: string): void;
@@ -271,6 +277,7 @@ export const useAppStore = create<AppState>((set, get) => {
       permissionMode: settings.defaultPermissionModes[agent],
       model: settings.defaultModels[agent],
       effort: settings.defaultEfforts[agent],
+      codexSpeed: settings.codexSpeed,
       queue: [],
       turnHistory: [],
     };
@@ -349,6 +356,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: conv.permissionMode,
         ...(conv.model ? { model: conv.model } : {}),
         ...(effort ? { effort } : {}),
+        ...(conv.agent === "codex" ? { codexSpeed: conv.codexSpeed } : {}),
       });
       void notify(conv, "start", "任务正在执行");
       return true;
@@ -452,6 +460,8 @@ export const useAppStore = create<AppState>((set, get) => {
     settings: DEFAULT_SETTINGS,
     agentStatuses: null,
     models: {},
+    modelsLoading: {},
+    modelErrors: {},
     projects: [],
     sessions: {},
     sessionErrors: {},
@@ -463,6 +473,7 @@ export const useAppStore = create<AppState>((set, get) => {
     permissions: {},
     sidebarCollapsed: false,
     settingsOpen: false,
+    settingsTab: "general",
     fullscreen: false,
     composerPrefill: null,
 
@@ -537,6 +548,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: settings.defaultPermissionModes[summary.agent],
         model: settings.defaultModels[summary.agent],
         effort: settings.defaultEfforts[summary.agent],
+        codexSpeed: settings.codexSpeed,
         queue,
         turnHistory: loadTurnHistory({ agent: summary.agent, projectPath: summary.projectPath, sessionId: summary.id }),
         ...(queue.length ? { queuePaused: "stopped" as const } : {}),
@@ -597,6 +609,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: settings.defaultPermissionModes[agent],
         model: settings.defaultModels[agent],
         effort: settings.defaultEfforts[agent],
+        codexSpeed: settings.codexSpeed,
         activeModel: undefined,
       });
       void get().loadModels(agent);
@@ -609,14 +622,18 @@ export const useAppStore = create<AppState>((set, get) => {
       get().toggleProject(projectPath, true);
     },
 
-    async loadModels(agent) {
-      if (get().models[agent]) return;
-      set((state) => ({ models: { ...state.models, [agent]: AGENTS[agent].models } }));
+    async loadModels(agent, refresh = false) {
+      if (get().modelsLoading[agent] || !refresh && get().models[agent]) return;
+      const path = get().settings.agentPaths[agent];
+      set((state) => ({ modelsLoading: { ...state.modelsLoading, [agent]: true }, modelErrors: { ...state.modelErrors, [agent]: undefined } }));
       try {
         const list = await hcode.invoke("agent:models", agent);
-        set((state) => ({ models: { ...state.models, [agent]: list } }));
-      } catch {
-        // 保留内置选项
+        if (get().settings.agentPaths[agent] === path) set((state) => ({ models: { ...state.models, [agent]: list } }));
+      } catch (error) {
+        if (get().settings.agentPaths[agent] === path) set((state) => ({ modelErrors: { ...state.modelErrors, [agent]: error instanceof Error ? error.message : String(error) } }));
+      } finally {
+        set((state) => ({ modelsLoading: { ...state.modelsLoading, [agent]: false } }));
+        if (get().settings.agentPaths[agent] !== path) void get().loadModels(agent, true);
       }
     },
 
@@ -708,6 +725,13 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!conv) return;
       patchConversation(conv.viewId, { effort });
       await get().updateSettings({ defaultEfforts: { [conv.agent]: effort } });
+    },
+
+    async setCodexSpeed(codexSpeed) {
+      const conv = activeConversation();
+      if (!conv || conv.agent !== "codex") return;
+      patchConversation(conv.viewId, { codexSpeed });
+      await get().updateSettings({ codexSpeed });
     },
 
     async respondPermission(interactionId, decision) {
@@ -846,15 +870,22 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = await hcode.invoke("settings:set", patch);
       set({ settings });
       if (patch.theme) useUiStore.getState().setTheme(patch.theme);
-      if (patch.agentPaths !== undefined) set({ agentStatuses: await hcode.invoke("agent:status") });
+      if (patch.agentPaths !== undefined) {
+        set((state) => {
+          const models = { ...state.models }, modelErrors = { ...state.modelErrors };
+          for (const agent of Object.keys(patch.agentPaths!) as AgentKind[]) { delete models[agent]; delete modelErrors[agent]; }
+          return { models, modelErrors };
+        });
+        set({ agentStatuses: await hcode.invoke("agent:status") });
+      }
     },
 
     setSidebarCollapsed(collapsed) {
       set({ sidebarCollapsed: collapsed });
     },
 
-    setSettingsOpen(open) {
-      set({ settingsOpen: open });
+    setSettingsOpen(open, tab) {
+      set({ settingsOpen: open, ...(tab ? { settingsTab: tab } : {}) });
     },
 
     async closeActiveView() {

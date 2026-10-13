@@ -1,20 +1,20 @@
 # HCode
 
-macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZCode)。支持 **Claude Code**、**Codex**、**StepCode**、**Antigravity** 与 **pi** 五个 CLI（同一套界面，会话按项目混排）：
+macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZCode)。支持 **Claude Code**、**Codex**、**Antigravity** 与 **Cline** 四个 CLI（同一套界面，会话按项目混排）：
 
 - 项目列表：手动添加、置顶或移除项目文件夹；根据各 CLI 的会话统计已添加项目的会话数和最近活动时间
-- 不在项目中工作：从首页、输入框项目菜单或侧边栏“对话”旁的 + 开始非项目会话；草稿切换保留文字与附件，历史归入独立的“对话”分区，支持五种 CLI
+- 不在项目中工作：从首页、输入框项目菜单或侧边栏“对话”旁的 + 开始非项目会话；草稿切换保留文字与附件，历史归入独立的“对话”分区，支持四种 CLI
 - 会话置顶：右键置顶常用会话，在所属项目内优先显示，重启后保留；删除或归档时自动清理置顶记录
 - 会话历史：按已添加的项目列出各 CLI 的历史会话（包括终端里创建的），用 ZCode 卡片查看完整对话
 - 新建会话 / 续聊历史会话，流式输出，随时停止（Esc）
 - Git 改动面板：查看本轮差异、勾选文件提交、生成提交说明、确认撤销到发送前；新会话可创建并切换分支
 - 改动历史：每个会话保留最近 20 轮文件清单和增删行，重启后可选择轮次查看；历史预览会提示文件后续变化
 - 文件预览：点击消息中的文件链接、`@` 文件引用、附件或工具卡片里的文件，在右侧查看带语法高亮和行号的内容；支持刷新、在 Finder 显示和用默认应用打开，二进制及超过 256 KiB 的文件提示使用系统应用
-- 输出速度：输入框旁显示最近一轮 TTFT（收到首个非空模型流式输出后出现）和估算 tokens/s（本轮结束后出现）；支持五种 CLI，分段计时排除工具执行与审批等待。Claude 按主代理每次 `message_start` 到最终 `message_delta` 的完整响应时间，与该区间的累计输出 Token 增量配对，涵盖隐藏思考，并核对各次响应最终用量之和与本轮用量一致；Codex 显示平均响应吞吐，以整轮输出 Token 除以完整轮次耗时扣除可识别工具/审批等待后的时间，包含首输出前的请求等待和隐藏思考，并显示有效响应耗时；重叠工具/审批只扣一次，模型同时输出的时间不扣除，缺少工具起止事件或中断时不显示吞吐。StepCode、pi、Antigravity 按流式片段估算。TTFT 包含 CLI 启动；速度受流式缓冲影响，缺少对应的用量或计时数据时不显示，不为旧历史补算
+- 输出速度：输入框旁显示最近一轮 TTFT（收到首个非空模型流式输出后出现）和估算 tokens/s（本轮结束后出现）；支持四种 CLI，分段计时排除工具执行与审批等待。Claude 按主代理每次 `message_start` 到最终 `message_delta` 的完整响应时间，与该区间的累计输出 Token 增量配对，涵盖隐藏思考，并核对各次响应最终用量之和与本轮用量一致；Codex 显示平均响应吞吐，以整轮输出 Token 除以完整轮次耗时扣除可识别工具/审批等待后的时间，包含首输出前的请求等待和隐藏思考，并显示有效响应耗时；重叠工具/审批只扣一次，模型同时输出的时间不扣除，缺少工具起止事件或中断时不显示吞吐。Antigravity 按流式片段估算；Cline 只显示 TTFT。TTFT 包含 CLI 启动；速度受流式缓冲影响，缺少对应的用量或计时数据时不显示，不为旧历史补算
 - 应用背景：在设置中选择图片或视频（静音循环）作为全窗口背景，并可调节模糊程度和蒙层浓度
-- 任务清单：输入框上方固定显示完成进度和当前任务，可展开完整清单；支持 Claude Code、Codex、StepCode 和 pi，对比分栏分别显示
-- 附件输入：可粘贴、拖入或选择图片、视频、文档、APK 等文件；图片按各 CLI 的原生图片输入发送，其他文件将本地路径提供给 CLI 读取，发送后显示文件卡片（图片显示缩略图）
-- 审批卡片：Claude Code、Codex、StepCode 的工具审批与提问；Antigravity 无头模式不能交互审批，需要确认的操作会自动拒绝；pi 本身没有工具审批（只读模式只开放读取类工具），扩展弹出的确认 / 选择对话框显示为审批卡片
+- 任务清单：输入框上方固定显示完成进度和当前任务，可展开完整清单；支持 Claude Code、Codex 和 Cline，对比分栏分别显示
+- 附件输入：可粘贴、拖入或选择图片、视频、文档、APK 等文件；Claude Code、Codex 的图片按原生图片输入发送；Antigravity、Cline 的图片和其他文件以本地路径提供给 CLI 读取，发送后显示文件卡片（图片显示缩略图）
+- 审批卡片：Claude Code、Codex 的工具审批与提问；Antigravity 无头模式不能交互审批，需要确认的操作会自动拒绝；Cline 的工具审批走 ACP，计划模式只允许读取和搜索类工具
 - 按 CLI 提供各自支持的权限模式与模型切换
 - 多 AI 协作：当前 Claude/Codex 会话委派其他 AI，自动独立审查、有界修订并回到原会话汇总；支持七类角色/Skills 专家只读互审、单候选或两项独立副本代码交付，以及用户确认的冲突检查、安全采纳和恢复
 - 界面模式：在设置中切换编程模式与办公模式；办公模式收起命令和代码改动细节，编程模式保留完整工具信息
@@ -23,7 +23,7 @@ macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZC
 
 ## 使用
 
-需要 Node 24+、pnpm 10+，以及已登录的 `claude`、`codex`、`step`、`agy`、`pi` 中至少一个命令（默认从登录 shell 的 PATH 查找，step 优先用 `~/.stepcode/bin/step`，可在设置里指定路径）。
+需要 Node 24+、pnpm 10+，以及已登录的 `claude`、`codex`、`agy`、`cline` 中至少一个命令（默认从登录 shell 的 PATH 查找，可在设置里指定路径）。
 
 ```bash
 pnpm install
@@ -74,9 +74,8 @@ Electron 主进程为每个 CLI 实现 `AgentProvider`，由 `AgentRegistry` 按
 |---|---|---|
 | Claude Code | Agent SDK 的 `listSessions` / `getSessionMessages` | Agent SDK `query()`，审批走 `canUseTool` |
 | Codex | `codex app-server` 的 `thread/list` / `thread/turns/list` | 所有会话共用一个 app-server，使用 JSON-RPC 的 `thread/start` / `turn/start` 和审批请求 |
-| StepCode | 读取本地会话 JSONL | 每个会话一个 `step --mode rpc` 进程，审批走 `extension_ui_request` |
 | Antigravity | 读取本地 transcript 和 SQLite 元数据 | 每个会话一个 `agy` stream-json 进程；无头模式没有交互审批 |
-| pi | 读取 `~/.pi/agent/sessions` 的会话 JSONL | 与 StepCode 同一套代码：每个会话一个 `pi --mode rpc` 进程 |
+| Cline | `cline history --json` 列表 + 本地 `.messages.json` | `cline --acp` 使用 local 后端独立执行；`session/new` / `session/load` / `session/prompt`；工具审批走 `session/request_permission` |
 
 项目列表只包含手动添加的文件夹。若某个 CLI 的历史会话属于尚未添加的目录，需先添加该项目文件夹，才能从侧边栏查看会话。
 
@@ -89,8 +88,7 @@ src/main/        Electron 主进程
   agents/types.ts  AgentProvider 接口；registry.ts 按 CLI / 会话 / 审批路由
   agents/claude/   Claude 接入：Agent SDK（listSessions / getSessionMessages / query）
   agents/codex/    Codex 接入：codex app-server JSON-RPC（thread/list、thread/turns/list、turn/start、审批请求）
-  agents/step/     StepCode 接入：读 ~/.stepcode/agent/sessions 历史；每个会话一个 `step --mode rpc` 进程
-  agents/pi/       pi 接入：StepCode 基于 pi，协议与会话格式相同，复用 agents/step/，差异见 step/piVariant.ts
+  agents/cline/    Cline 接入：原生 history 列表与消息文件；ACP 流式会话、模型切换、审批和取消
   agents/agy/      Antigravity 接入：读 ~/.gemini/antigravity-cli 的 transcript 历史；每个会话一个 `agy -p` stream-json 进程
   agents/rowProjectorBase.ts  各 CLI 投影器公共部分：把记录 / 流事件投影为 ZCode v4 ConversationRow
   agents/quota.ts  订阅额度解析：Claude SDK usage 请求 / codex account/rateLimits/read / `agy -p /quota` → AgentQuota
@@ -108,6 +106,8 @@ docs/            方案文档
 以后接入其他 CLI：在 `src/main/agents/` 下实现 `AgentProvider`（历史读取、会话驱动、审批），
 投影成同样的 `ConversationRow`；同时扩展 `AgentKind`、默认设置和 `src/shared/agents.ts` 的描述，
 在主进程注册适配器，即可复用现有界面。
+Cline 使用已安装并登录的 CLI（已验证 ACP 接口：3.0.70），先在终端执行 `cline auth`，再在 HCode 选择 Cline。沿用 Cline 保存的提供商、凭据与默认模型；模型列表合并当前提供商的原生目录与用户登记的提供商模型，按“提供商 · 模型”选择，支持跨提供商切换与思考强度切换（运行中的选择从下一轮生效）。读取失败会显示原因，可在设置中刷新或重试。ACP 会话固定使用原生 local 后端，避免共享后台服务的旧提供商配置影响执行；本轮结束时核对消息文件，恢复漏发正文并显示历史中的失败原因，不把空结果当作成功。历史文件保留在 Cline 的数据目录，支持改名、全文搜索、终端续聊、历史续聊与外部更新刷新；删除前把会话文件副本保存到废纸篓。当前 ACP 未提供 Token 用量，只显示 TTFT；暂无订阅额度、分叉和多 AI 协作。图片会持久保存在 HCode 的 `cline-attachments` 目录，模型通过 Cline 文件工具读取。
+
 方案文档：`docs/HCode-v1-方案.md`、`docs/HCode-v2-Codex.md`、`docs/HCode-v3-StepCode.md`、`docs/HCode-v4-Antigravity.md`。
 
 ## 许可
