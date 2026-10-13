@@ -5,7 +5,44 @@ import { expect, it, vi } from 'vitest';
 import { codeDraftFixture } from './codeDraftFixture.js';
 import { manifest } from '../workspaces/fileManifest.js';
 import type { CodeDraft } from '../../../shared/codeDraft.js';
+import { codeDraftHash } from '../drafts/codeDraftContracts.js';
 function edit(draft: CodeDraft) { return { objective: draft.params.objective, tasks: draft.params.tasks, reviewer: draft.params.reviewer, checks: draft.params.checks, acceptWorkspace: draft.params.acceptWorkspace }; }
+it('升级后保留已移除 CLI 的历史能力快照，旧计划可读但不能按失效能力执行', async () => {
+  const data = await codeDraftFixture();
+  try {
+    const planned = await data.drafts.prepare((await data.drafts.create(data.input)).id, 1);
+    const accepted = await data.drafts.update(planned.id, planned.revision, { ...edit(planned), acceptWorkspace: true });
+    const path = join(data.drafts.repository.root, `${accepted.id}.json`);
+    const legacy = JSON.parse(await readFile(path, 'utf8'));
+    legacy.capabilities.push(...['step', 'pi'].map(agent => ({ agent, canInitiate: false, canExecute: false, canReview: false, canExecuteCode: false, models: [] })));
+    const original = JSON.stringify(legacy);
+    await writeFile(path, original);
+    const restored = await data.drafts.get(accepted.id);
+    expect(restored.capabilities).toEqual(legacy.capabilities);
+    expect(codeDraftHash(restored)).toBe(codeDraftHash(legacy));
+    expect(await data.drafts.list(data.input.initiator.sessionKey)).toEqual([restored]);
+    await expect(data.drafts.confirm(accepted.id, accepted.revision)).rejects.toThrow('后端版本或能力已变化');
+    expect(await readFile(path, 'utf8')).toBe(original);
+    expect(data.send).toHaveBeenCalledTimes(1);
+    expect(await data.repository.list()).toEqual([]);
+  } finally { await data.cleanup(); }
+});
+it.each(['unknownCapability', 'retiredExecutor'] as const)('%s 仍拒绝读取，不替换后端或启动模型', async scenario => {
+  const data = await codeDraftFixture();
+  try {
+    const draft = await data.drafts.create(data.input);
+    const path = join(data.drafts.repository.root, `${draft.id}.json`);
+    const invalid = JSON.parse(await readFile(path, 'utf8'));
+    if (scenario === 'retiredExecutor') invalid.params.backendPreferences[0].agent = 'step';
+    else invalid.capabilities.push({ agent: 'unknown', canInitiate: false, canExecute: false, canReview: false, canExecuteCode: false, models: [] });
+    const original = JSON.stringify(invalid);
+    await writeFile(path, original);
+    await expect(data.drafts.get(draft.id)).rejects.toThrow();
+    expect(await readFile(path, 'utf8')).toBe(original);
+    expect(data.send).not.toHaveBeenCalled();
+    expect(await data.repository.list()).toEqual([]);
+  } finally { await data.cleanup(); }
+});
 it('真实文件推荐只生成待确认计划，不建立副本，双任务确认幂等并逐项安全采纳', async () => {
   const data = await codeDraftFixture();
   try {
