@@ -107,20 +107,17 @@ export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
           记录保存失败：{run.persistenceError}
         </p>
       ) : null}
-      {state.participants.map((expert) => (
-        <ExpertParticipantView
-          key={expert.id}
-          expert={expert}
-          state={state}
-          reading={reading}
-          openReport={openReport}
-        />
-      ))}
       <ExpertSummaryView
         state={state}
         reading={reading}
         openReport={openReport}
       />
+      <details open={!state.summary}>
+        <summary className="cursor-pointer font-medium">专家报告与互审（{state.participants.length} 位）</summary>
+        <div className="mt-3 flex flex-col gap-3">
+          {state.participants.map(expert => <ExpertParticipantView key={expert.id} expert={expert} state={state} reading={reading} openReport={openReport} />)}
+        </div>
+      </details>
       {reading ? <p role="status">正在读取冻结报告…</p> : null}
       {error ? (
         <p role="alert" className="text-destructive">
@@ -157,7 +154,7 @@ export function ExpertRunView({ run }: { run: CollaborationSnapshot }) {
                 : entry.role === "review"
                   ? "互审"
                   : entry.role === "planning"
-                    ? "主持"
+                    ? run.approvedPlan ? "团队推荐" : "主持"
                     : "汇总"}{" "}
               · {entry.status}
             </Button>

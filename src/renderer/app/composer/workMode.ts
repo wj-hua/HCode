@@ -4,7 +4,7 @@ import type { AgentKind } from "@hcode/shared/types";
 export const WORK_MODES = {
   chat: { label: "普通对话", description: "与当前 AI 对话", action: "发送" },
   collaboration: { label: "协作执行", description: "当前 AI 制定计划，其他 AI 执行并独立审查", action: "查看协作计划" },
-  experts: { label: "专家评审", description: "手动选择专家，独立研究、互审后汇总", action: "配置专家评审" },
+  experts: { label: "专家评审", description: "推荐并调整专家团队，独立研究、互审后汇总", action: "查看专家计划" },
   compare: { label: "多模型对比", description: "同一输入分别发送，并排查看回答", action: "发送并对比" },
 } as const;
 export type WorkMode = keyof typeof WORK_MODES;

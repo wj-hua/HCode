@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ResearchDraft, ResearchDraftInput } from "@hcode/shared/researchDraft";
 import type { CollaborationSnapshot } from "@hcode/shared/collaboration";
 import type { Conversation } from "../store/appStore";
-import { useAppStore } from "../store/appStore";
+import { bindDraftSource, assertDraftSource } from "./draftSource";
 import { hcode } from "../bridge";
 const STATUS_ORDER = { editing: 0, preparing: 1, ready: 2, blocked: 2, cancelled: 2, starting: 3, started: 4, abandoned: 4 } as const;
 
@@ -39,15 +39,7 @@ export function useResearchDraft(conversation: Conversation, input: Omit<Researc
     catch (reason) { setError(String(reason)); }
     finally { setBusy(false); }
   };
-  const source = () => {
-    const current = useAppStore.getState().conversations[conversation.viewId];
-    if (!current || current.runState === "running" || current.runState === "awaitingApproval" || current.queue.length) throw new Error("请先完成当前会话的活动回合和消息队列");
-    const binding = latest.current?.params.initiator;
-    const sameSource = binding && (binding.sessionKey === current.sessionKey || Boolean(current.sessionId && current.sessionId === binding.resumeSessionId));
-    const sessionKey = sameSource ? binding.sessionKey : current.sessionKey ?? crypto.randomUUID();
-    useAppStore.setState(state => ({ conversations: { ...state.conversations, [current.viewId]: { ...current, sessionKey } } }));
-    return { agent: current.agent, projectPath: current.projectPath, permissionMode: current.permissionMode, sessionKey, ...(current.sessionId ? { resumeSessionId: current.sessionId } : {}), ...(current.model ? { model: current.model } : {}), ...(current.effort ? { effort: current.effort } : {}) };
-  };
+  const source = () => bindDraftSource(conversation.viewId, latest.current?.params.initiator);
   const generate = () => act(async () => {
     const initiator = source();
     const goal = input.objective.trim() || objective.trim();
@@ -66,7 +58,7 @@ export function useResearchDraft(conversation: Conversation, input: Omit<Researc
   const confirm = () => act(async () => {
     if (!draft) throw new Error("没有待确认计划");
     const initiator = source();
-    if (initiator.agent !== draft.params.initiator.agent || initiator.sessionKey !== draft.params.initiator.sessionKey || initiator.resumeSessionId && initiator.resumeSessionId !== draft.params.initiator.resumeSessionId || initiator.permissionMode !== draft.params.initiator.permissionMode || initiator.model !== draft.params.initiator.model) throw new Error("当前会话配置与计划已不同，请重新核对计划");
+    assertDraftSource(initiator, draft.params.initiator);
     started(await hcode.invoke("collaboration:draftConfirm", draft.id, draft.revision));
   });
   const abandon = () => act(async () => {

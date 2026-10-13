@@ -19,7 +19,7 @@ export function ExpertBackendSetup({
   return (
     <div className="flex flex-wrap gap-3">
       <label className="flex items-center gap-2">
-        后端
+        执行 AI
         <select
           className={SELECT_CLASS}
           value={expert.backend.agent}
@@ -42,7 +42,7 @@ export function ExpertBackendSetup({
           ))}
         </select>
       </label>
-      <label className="flex min-w-0 items-center gap-2">
+      <details className="w-full text-ui-sm"><summary className="cursor-pointer">模型设置</summary><label className="mt-2 flex min-w-0 items-center gap-2">
         模型
         {expert.backend.agent === "agy" ? (
           <select
@@ -80,7 +80,7 @@ export function ExpertBackendSetup({
             placeholder="留空使用 CLI 默认模型"
           />
         )}
-      </label>
+      </label></details>
     </div>
   );
 }

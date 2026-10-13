@@ -27,12 +27,13 @@ export function ExpertSummaryView({
       {entries.length ? (
         entries.map((entry, index) => (
           <div key={index} className="mt-2 border-l-2 border-border pl-3">
-            <p className="whitespace-pre-wrap">{entry.statement}</p>
+            <p className="break-words whitespace-pre-wrap">{entry.statement}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {entry.sources.map((ref, refIndex) => (
                 <Button
                   key={refIndex}
                   variant="outline"
+                  className="h-auto min-w-0 max-w-full whitespace-normal break-all text-left"
                   disabled={reading}
                   onClick={() => void openReport(ref.versionId, reference(ref))}
                 >

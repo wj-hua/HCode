@@ -4,20 +4,20 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ResearchDraft } from "../../../shared/researchDraft.js";
-import { draftSchema } from "./draftContracts.js";
+import type { PlanningDraft } from "../../../shared/planningDraft.js";
 
-export class DraftRepository {
-  constructor(readonly root: string) {}
+export class DraftRepository<T extends PlanningDraft = ResearchDraft> {
+  constructor(readonly root: string, private readonly schema: z.ZodType<T>) {}
   private path(id: string) { return join(this.root, `${z.string().uuid().parse(id)}.json`); }
-  async save(draft: ResearchDraft) {
-    const value = draftSchema.parse(draft);
+  async save(draft: T) {
+    const value = this.schema.parse(draft);
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     const temporary = join(this.root, `${value.id}-${randomUUID()}.tmp`);
     await writeFile(temporary, JSON.stringify(value), { mode: 0o600, flag: "wx" });
     await rename(temporary, this.path(value.id));
   }
-  async load(id: string): Promise<ResearchDraft> {
-    const value = draftSchema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
+  async load(id: string): Promise<T> {
+    const value = this.schema.parse(JSON.parse(await readFile(this.path(id), "utf8")));
     if (value.id !== id) throw new Error("草案身份与文件不一致");
     return value;
   }

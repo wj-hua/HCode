@@ -29,6 +29,7 @@ import { readTextFile } from "./readTextFile.js";
 import { SessionExecutionService } from "./sessions/sessionExecutionService.js";
 import {ExpertProfileService} from "./collaboration/experts/profiles/expertProfileService.js";
 import { CollaborationService } from "./collaboration/collaborationService.js";
+import { ExpertDraftService } from "./collaboration/drafts/expertDraftService.js";
 import { ResearchDraftService } from "./collaboration/drafts/researchDraftService.js";
 import { CollaborationRepository } from "./collaboration/collaborationRepository.js";
 
@@ -296,6 +297,14 @@ async function bootstrap() {
   handle("chat:send", (params) => execution!.send(params));
   const collaboration = new CollaborationService(new CollaborationRepository(join(app.getPath("userData"), "collaborations")), execution, agents, (snapshot) => send("collaboration:updated", snapshot), process.platform, new ExpertProfileService(join(app.getPath("userData"),"collaborations"),{discoverSkills:project=>extensions.expertSkills(project)}));
   const drafts = new ResearchDraftService(join(app.getPath("userData"), "collaboration-plans"), collaboration, execution, agents, draft => send("collaboration:draftUpdated", draft));
+  const expertDrafts = new ExpertDraftService(join(app.getPath("userData"), "expert-plans"), collaboration, execution, agents, draft => send("collaboration:expertDraftUpdated", draft));
+  handle("collaboration:expertDraftCreate", input => expertDrafts.create(input));
+  handle("collaboration:expertDraftList", (key, nativeId) => expertDrafts.list(key, nativeId));
+  handle("collaboration:expertDraftUpdate", (id, revision, edit) => expertDrafts.update(id, revision, edit));
+  handle("collaboration:expertDraftPrepare", (id, revision) => expertDrafts.prepare(id, revision));
+  handle("collaboration:expertDraftConfirm", (id, revision) => expertDrafts.confirm(id, revision));
+  handle("collaboration:expertDraftCancel", id => expertDrafts.cancel(id));
+  handle("collaboration:expertDraftAbandon", (id, revision) => expertDrafts.abandon(id, revision));
   handle("collaboration:draftCreate", input => drafts.create(input));
   handle("collaboration:draftList", (key, nativeId) => drafts.list(key, nativeId));
   handle("collaboration:draftUpdate", (id, revision, edit) => drafts.update(id, revision, edit));
@@ -326,6 +335,7 @@ async function bootstrap() {
   handle("collaboration:artifact", (runId, versionId) => collaboration.artifact(runId, versionId));
   handle("chat:interrupt", async (sessionKey) => {
     const runId = execution!.reservationOwner(sessionKey);
+    if (runId && expertDrafts.isPlanning(runId)) return expertDrafts.cancel(runId);
     if (runId && drafts.isPlanning(runId)) return drafts.cancel(runId);
     if (runId) return collaboration.cancel(runId);
     await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
@@ -479,7 +489,7 @@ async function bootstrap() {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(store);
   });
   app.on("before-quit", () => {
-    drafts.dispose();
+    drafts.dispose(); expertDrafts.dispose();
     collaboration.dispose();
     quota?.dispose();
     agents.dispose();

@@ -17,7 +17,7 @@ const roleSchema = z.enum(
   ],
 );
 const selectionSchema = z
-  .object({ role: roleSchema, backend: backendSchema, profileHash: profileHashSchema.optional() })
+  .object({ role: roleSchema, backend: backendSchema, profileHash: profileHashSchema.optional(), objective: startSchema.shape.objective.optional() })
   .strict();
 export const expertStartSchema = z
   .object({

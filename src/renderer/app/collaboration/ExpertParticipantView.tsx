@@ -29,6 +29,7 @@ export function ExpertParticipantView({
       <p className="font-medium">
         {label(expert.id)} · {STATUSES[expert.status]}
       </p>
+      {expert.objective ? <p className="mt-2 whitespace-pre-wrap text-ui-sm">本次任务：{expert.objective}</p> : null}
       <p className="mt-1 break-all text-ui-sm text-foreground-subtle">
         模型：{expert.backend.model ?? "CLI 默认（未核对具体模型）"}
       </p>

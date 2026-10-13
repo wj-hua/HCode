@@ -62,7 +62,7 @@ export const EXPERT_LIMITS = {
   sourceTurns: 2,
   turnsPerParticipant: 2,
 } as const;
-/** 当前会话确认/汇总各一轮，每位专家研究和受审各一轮；不计可选格式修正。 */
+/** 当前会话规划/汇总各一轮，每位专家研究和受审各一轮；不计可选格式修正。 */
 export function expertMinimumTurns(participantCount: number) {
   return (
     EXPERT_LIMITS.sourceTurns +
@@ -73,6 +73,7 @@ export interface ExpertSelection {
   role: ExpertRole;
   backend: CollaborationBackend;
   profileHash?: string;
+  objective?: string;
 }
 export interface ExpertStartParams extends Pick<
   CollaborationStartParams,

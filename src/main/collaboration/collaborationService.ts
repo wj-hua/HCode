@@ -22,6 +22,7 @@ import type { ActiveRun } from "./activeRun.js";
 import { TaskMessages } from "./taskMessages.js";
 import { RunControls } from "./runControls.js";
 import { assertEvidenceCurrent } from "./reportEvidence.js";
+import { EXPERT_LIMITS } from '../../shared/experts.js';
 import type { ExpertStartParams } from '../../shared/experts.js';
 import { expertStartSchema } from './experts/expertContracts.js';
 import { assertExpertArtifactIsolation, assertExpertBackends } from './experts/expertAdmission.js';
@@ -78,18 +79,34 @@ export class CollaborationService {
 
   /** 草案确认复用固定 Run ID；已落盘结果只读取，重启后不会再次派发。 */
   async startPrepared(input: CollaborationStartParams, approval: ApprovedResearchPlan, turns: CollaborationTask[]) {
+    if (input.code) throw new Error("只读草案不能执行代码任务");
+    return this.startFromApproved(input.initiator, approval, turns, 3, MAX_RUN_TURNS, prepared => this.startRun(input, prepared));
+  }
+
+  async startPreparedExperts(input: ExpertStartParams, approval: ApprovedResearchPlan, turns: CollaborationTask[]) {
+    const params = expertStartSchema.parse(input);
+    return this.startFromApproved(params.initiator, approval, turns, params.experts.length * EXPERT_LIMITS.turnsPerParticipant + 1, params.turnLimit ?? MAX_RUN_TURNS, prepared => this.startExpertRun(params, prepared));
+  }
+
+  /** 固定身份的已确认计划只启动一次；恢复返回保存的 Run，不重建专家或派发。 */
+  private async startFromApproved(source: CollaborationStartParams["initiator"], approval: ApprovedResearchPlan, turns: CollaborationTask[], remaining: number, limit: number, create: (prepared: { approved: ApprovedResearchPlan; turns: CollaborationTask[] }) => Promise<CollaborationSnapshot>) {
     const approved = approvedPlanSchema.parse(approval);
     return this.operations.execute(approved.draftId, async () => {
-      let existing: CollaborationSnapshot | undefined;
-      try { existing = await this.get(approved.draftId); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      if (existing) {
-        if (JSON.stringify(existing.approvedPlan) !== JSON.stringify(approved)) throw new Error("已启动计划的确认版本不一致");
-        return existing;
-      }
-      if (input.code || !turns.length || turns.length + 3 > MAX_RUN_TURNS || turns.some(turn => turn.role !== "planning" || turn.sessionKey !== input.initiator.sessionKey || turn.agent !== input.initiator.agent || turn.status === "running") || turns.at(-1)?.status !== "succeeded" || turns.at(-1)?.nativeSessionId !== input.initiator.resumeSessionId) throw new Error("计划的原会话、规划回合或预算不合法");
-      return this.startRun(input, { approved, turns });
+      const existing = await this.getApprovedPlan(approved);
+      if (existing) return existing;
+      if (!turns.length || turns.length + remaining > limit || turns.some(turn => turn.role !== "planning" || turn.sessionKey !== source.sessionKey || turn.agent !== source.agent || turn.status === "running") || turns.at(-1)?.status !== "succeeded" || turns.at(-1)?.nativeSessionId !== source.resumeSessionId) throw new Error("计划的原会话、规划回合或预算不合法");
+      return create({ approved, turns });
     });
+  }
+
+  /** 确认响应丢失后只读取相同凭据的结果，不以当前文件或后端状态重启任务。 */
+  async getApprovedPlan(approval: ApprovedResearchPlan) {
+    const approved = approvedPlanSchema.parse(approval);
+    let existing: CollaborationSnapshot;
+    try { existing = await this.get(approved.draftId); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+    if (JSON.stringify(existing.approvedPlan) !== JSON.stringify(approved)) throw new Error("已启动计划的确认版本不一致");
+    return existing;
   }
 
   private async startRun(input: CollaborationStartParams, prepared?: { approved: ApprovedResearchPlan; turns: CollaborationTask[] }): Promise<CollaborationSnapshot> {
@@ -152,20 +169,25 @@ export class CollaborationService {
     });
   }
 
+  /** 专家项目不能包含宿主报告目录，推荐和启动使用相同边界。 */
+  assertExpertProject(project: string) { return assertExpertArtifactIsolation(project, this.repository.root); }
+
   /** 冻结专家配置后启动；首轮上下文不携带其他专家产物。 */
-  async startExperts(input:ExpertStartParams):Promise<CollaborationSnapshot> {
+  async startExperts(input:ExpertStartParams):Promise<CollaborationSnapshot> { return this.startExpertRun(input); }
+
+  private async startExpertRun(input: ExpertStartParams, prepared?: { approved: ApprovedResearchPlan; turns: CollaborationTask[] }): Promise<CollaborationSnapshot> {
     const params=expertStartSchema.parse(input),root=await realpath(params.initiator.projectPath);
     if(!(await stat(root)).isDirectory())throw new Error('协作项目不是目录');
-    await assertExpertArtifactIsolation(root,this.repository.root);
+    await this.assertExpertProject(root);
     params.initiator.projectPath=root;
     const capabilities=await this.capabilities({agent:params.initiator.agent,...(params.initiator.resumeSessionId?{resumeSessionId:params.initiator.resumeSessionId}:{})});
     const source=capabilities.find(entry=>entry.agent===params.initiator.agent);
     if(!source?.canInitiate)throw new Error(source?.reason??'当前源会话不支持专家主持');
     assertExpertBackends(params.experts,capabilities);
-    const runId=randomUUID();
+    const runId=prepared?.approved.draftId ?? randomUUID();
     const profiles=params.experts.some(expert=>expert.profileHash || !["architecture","implementation","quality"].includes(expert.role)) ? await this.profiles.freeze(runId,root,params.experts,params.acceptProfileLimitations===true) : [];
     const participants=params.experts.map(expert=>({...expert,id:randomUUID(),sessionKey:randomUUID(),status:'queued' as const,versions:[],rawResults:[],...(profiles.find(profile=>profile.role===expert.role)?{profile:profiles.find(profile=>profile.role===expert.role),profileLoads:[],resourceReads:[]}:{} )}));
-    const snapshot:CollaborationSnapshot={id:runId,seq:0,createdAt:Date.now(),params,status:'running',stage:'planning',tasks:[],deliveries:[],experts:{participants,reviews:[],activeIds:participants.map(expert=>expert.id),partialAuthorized:false,rawSummaries:[],turnLimit:params.turnLimit??MAX_RUN_TURNS}};
+    const snapshot:CollaborationSnapshot={id:runId,seq:0,createdAt:Date.now(),params,status:'running',stage:'planning',tasks:structuredClone(prepared?.turns ?? []),deliveries:[],...(prepared ? { approvedPlan: prepared.approved } : {}),experts:{participants,reviews:[],activeIds:participants.map(expert=>expert.id),partialAuthorized:false,rawSummaries:[],turnLimit:params.turnLimit??MAX_RUN_TURNS}};
     this.execution.reserve(params.initiator.sessionKey,snapshot.id,params.initiator.resumeSessionId?`${params.initiator.agent}:${params.initiator.resumeSessionId}`:undefined);
     const active=this.activate(snapshot);
     try{await this.changed(active);}catch(error){this.execution.release(params.initiator.sessionKey,snapshot.id);this.runs.delete(snapshot.id);throw error;}
