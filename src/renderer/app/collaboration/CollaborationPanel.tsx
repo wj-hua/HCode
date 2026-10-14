@@ -1,5 +1,7 @@
 // 当前会话的协作入口；沿用已有会话身份，首次启动先绑定 key，防止原生行事件丢失。
 import { ResearchDraftPanel } from "./ResearchDraftPanel";
+import { useAgentInvocations } from './useAgentInvocations';
+import { AgentInvocationView } from './AgentInvocationView';
 import { createPortal } from "react-dom";
 import { SidePanel } from "../conversation/SidePanel";
 import { useUiStore } from "../store/uiStore";
@@ -39,6 +41,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
   const [reviewerModel, setReviewerModel] = useState("");
   const [selectedId, setSelectedId] = useState<string | undefined>(panelPositions.get(conversation.viewId)?.selectedId);
   const { runs, active, capabilities, checkingCapabilities, sourceCapability, sourceBusy, error: sessionError } = useCollaborationSession(conversation, open);
+  const invocations = useAgentInvocations(conversation);
   const requestedId = panel?.type === "collaboration" && panel.viewId === conversation.viewId ? panel.runId : undefined;
   const selected = requestedId ? runs.find(run => run.id === requestedId) : runs.find(run => run.id === selectedId) ?? runs[0];
   useEffect(() => { setExecutor(conversation.agent === "codex" ? "claude" : "codex"); }, [conversation.agent]);
@@ -57,16 +60,18 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
 
   return <>
     <div className="mb-2 flex items-center gap-2 text-ui-sm">
-      <Button ref={trigger} variant="ghost" size="sm" className="focus-visible:ring-2 focus-visible:ring-ring active:brightness-90" onClick={() => setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "records" })}><NetworkIcon />{active ? RUN_LABELS[active.status] : "协作计划与记录"}</Button>
+      <Button ref={trigger} variant="ghost" size="sm" className="focus-visible:ring-2 focus-visible:ring-ring active:brightness-90" onClick={() => setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "records" })}><NetworkIcon />{invocations.running ? 'AI 调用进行中' : active ? RUN_LABELS[active.status] : "协作计划与记录"}</Button>
     </div>
     {portal ? createPortal(<div hidden={!open} inert={!open}>
       <SidePanel label="协作任务面板" title="协作计划与任务" onClose={close} focus={open} collaboration>
         <div ref={scrollRef} onScroll={() => panelPositions.set(conversation.viewId, { selectedId, scrollTop: scrollRef.current?.scrollTop ?? 0 })} className="min-h-0 flex-1 overflow-y-auto p-4">
-          <p className="mb-3 text-ui-sm text-foreground-subtle">当前 AI 制定计划与汇总，其他 AI 执行和独立审查。关闭面板后任务继续。</p>
+          <p className="mb-3 text-ui-sm text-foreground-subtle">{invocations.calls.length ? '当前会话自主调用其他 AI；正常结束后，结果通过工具返回。关闭面板后调用继续。' : '当前 AI 制定计划与汇总，其他 AI 执行和独立审查。关闭面板后任务继续。'}</p>
           {sessionError ? <p role="alert" className="mb-3 whitespace-pre-wrap text-destructive">{sessionError}</p> : null}
           <CollaborationRecovery />
+          {invocations.error ? <p role="alert" className="mb-3 text-destructive">{invocations.error}</p> : null}
+          {invocations.calls.length ? <section aria-label="当前会话的 AI 工具调用" className="mb-4 space-y-3"><p className="font-medium">当前会话的 AI 调用</p><p className="text-ui-sm text-foreground-subtle">调用目标和提示词由当前 AI 决定。工具等待真实结束后返回结果，当前 AI 可以继续下一步。</p>{invocations.calls.map(call => <AgentInvocationView key={call.id} call={call} />)}</section> : null}
           {attachmentBlocked ? <p role="status" className="mb-3">{attachmentBlocked}</p> : null}
-          {active ? <p role="status" className="mb-3 text-foreground-subtle">{active.status === "stopping" ? "等待原生中断确认，尚未暂停或停止" : "关闭此窗口后协作会继续；下方可暂停接管或停止"}</p> : <details open={!selected || panel?.type === "collaboration" && panel.intent === "plan"} className="mb-4"><summary className="mb-3 cursor-pointer font-medium">{selected ? "制定新的计划" : "制定协作计划"}</summary><form onSubmit={event => event.preventDefault()} className="mb-4 flex flex-col gap-3 rounded-lg border border-border p-3">
+          {active ? <p role="status" className="mb-3 text-foreground-subtle">{active.status === "stopping" ? "等待原生中断确认，尚未暂停或停止" : "关闭此窗口后协作会继续；下方可暂停接管或停止"}</p> : <details open={panel?.type === "collaboration" && panel.intent === "plan" || !selected && !invocations.calls.length} className="mb-4"><summary className="mb-3 cursor-pointer font-medium">{selected || invocations.calls.length ? "手动制定新的计划" : "制定协作计划"}</summary><form onSubmit={event => event.preventDefault()} className="mb-4 flex flex-col gap-3 rounded-lg border border-border p-3">
             <p className="text-foreground-subtle">发起者：{AGENTS[conversation.agent].name}（当前会话）</p>
             {!sourceCapability?.canInitiate ? <p role="status">{sourceCapability?.reason ?? "正在检查当前线程的委派能力…"}</p> : <>
               {mode === "experts" ? <p className="text-ui-sm">专家评审 · 当前 AI 推荐，用户调整并确认团队</p> : <label className="flex flex-col gap-1">协作任务<select aria-label="协作任务类型" value={mode} onChange={event => setMode(event.target.value as "research" | "code")} className="min-w-0 w-full rounded-md border border-border bg-background p-1 focus-visible:ring-2 focus-visible:ring-ring"><option value="research">只读调研</option><option value="code">隔离代码交付</option></select></label>}
@@ -82,7 +87,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
             </>}
           </form></details>}
           {runs.length > 1 ? <label className="mb-3 flex items-center gap-3">协作记录<select value={selected?.id ?? ""} onChange={(event) => selectRun(event.target.value)} className="min-w-0 rounded-md border border-border bg-background p-1">{runs.map((run) => <option key={run.id} value={run.id}>{new Date(run.createdAt).toLocaleString()} · {run.experts && run.status === "completed" ? "专家互审与汇总已完成" : RUN_LABELS[run.status]}</option>)}</select></label> : null}
-          {selected ? <CollaborationRunView key={selected.id} run={selected} /> : <p className="pb-3 text-foreground-subtle">{requestedId ? "指定记录尚未加载或不属于当前会话；请核对读取错误或重新选择记录。" : "暂无协作记录。"}</p>}
+          {selected ? <CollaborationRunView key={selected.id} run={selected} /> : invocations.calls.length ? null : <p className="pb-3 text-foreground-subtle">{requestedId ? "指定记录尚未加载或不属于当前会话；请核对读取错误或重新选择记录。" : "暂无协作记录。"}</p>}
         </div>
       </SidePanel>
     </div>, portal) : null}

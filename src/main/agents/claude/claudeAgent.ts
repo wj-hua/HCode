@@ -274,6 +274,7 @@ export class ClaudeAgent implements AgentProvider {
       if (session.effort !== (params.effort || undefined)) await session.setEffort(params.effort ?? "");
     }
     await session.configureResearch(params.research);
+    await session.configureHosted(params.research ? undefined : params.hosted);
     await session.configureContinuation(params.research ? undefined : params.ordinaryContinuation);
     session.send(params.text, params.images, params.files, params.executionTurnId);
     return { sessionKey: session.key };

@@ -3,6 +3,8 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { AgentInvocationService } from './invocations/agentInvocationService.js';
+import { InvocationRepository } from './invocations/invocationRepository.js';
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerSaveBlocker, protocol, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
@@ -265,6 +267,7 @@ async function bootstrap() {
   });
 
   execution = new SessionExecutionService({
+    ordinaryTools: (params, turnId, signal) => params.agent === 'claude' || params.agent === 'codex' ? invocations.tools(params, turnId, signal) : undefined,
     ordinaryContinuation: (params): Promise<string | undefined> => continuation.forMessage(params),
     send: (params) => agents.send(params),
     interrupt: async (key) => { await requireSession(key).interrupt(key); },
@@ -297,6 +300,9 @@ async function bootstrap() {
     },
   });
   handle("chat:send", (params) => execution!.send(params));
+  const invocations = new AgentInvocationService(new InvocationRepository(join(app.getPath('userData'), 'agent-invocations')), execution, call => send('agentInvocation:updated', call), agent => store.settings.defaultModels[agent]);
+  handle('agentInvocation:list', (key, nativeId) => invocations.list(key, nativeId));
+  handle('agentInvocation:cancel', id => invocations.cancel(id));
   const collaborationRepository = new CollaborationRepository(join(app.getPath("userData"), "collaborations"));
   const collaboration = new CollaborationService(collaborationRepository, execution, agents, (snapshot) => send("collaboration:updated", snapshot), process.platform, new ExpertProfileService(join(app.getPath("userData"),"collaborations"),{discoverSkills:project=>extensions.expertSkills(project)}));
   const drafts = new ResearchDraftService(join(app.getPath("userData"), "collaboration-plans"), collaboration, execution, agents, draft => send("collaboration:draftUpdated", draft));
@@ -368,6 +374,7 @@ async function bootstrap() {
   handle("collaboration:cancel", (id) => collaboration.cancel(id));
   handle("collaboration:artifact", (runId, versionId) => collaboration.artifact(runId, versionId));
   handle("chat:interrupt", async (sessionKey) => {
+    execution!.cancelSource(sessionKey);
     const runId = execution!.reservationOwner(sessionKey);
     if (runId && codeDrafts.isPlanning(runId)) return codeDrafts.cancel(runId);
     if (runId && expertDrafts.isPlanning(runId)) return expertDrafts.cancel(runId);
@@ -375,7 +382,7 @@ async function bootstrap() {
     if (runId) return collaboration.cancel(runId);
     await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
   });
-  handle("chat:setPermissionMode", (sessionKey, mode) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改权限"); return requireSession(sessionKey).setPermissionMode(sessionKey, mode); });
+  handle("chat:setPermissionMode", async (sessionKey, mode) => { if (execution!.isReserved(sessionKey) || invocations.hasActiveSource(sessionKey)) throw new Error("请先暂停协作或停止 AI 调用再修改权限"); await requireSession(sessionKey).setPermissionMode(sessionKey, mode); execution!.updateSourcePermission(sessionKey, mode); });
   handle("chat:setModel", (sessionKey, model) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改模型"); return requireSession(sessionKey).setModel(sessionKey, model); });
   handle("chat:close", (sessionKey) => {
     if (execution!.isReserved(sessionKey)) return;
@@ -524,6 +531,7 @@ async function bootstrap() {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(store);
   });
   app.on("before-quit", () => {
+    invocations.dispose(); execution?.dispose();
     drafts.dispose(); expertDrafts.dispose(); codeDrafts.dispose();
     collaboration.dispose();
     quota?.dispose();

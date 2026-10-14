@@ -436,6 +436,7 @@ export class CodexAgent implements AgentProvider {
       await session.configureResearch(params.research);
       if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
     }
+    await session.configureHosted(params.research ? undefined : params.hosted);
     await session.configureContinuation(params.research ? undefined : params.ordinaryContinuation);
     session.effort = params.effort || undefined;
     session.speed = params.codexSpeed;

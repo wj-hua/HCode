@@ -42,6 +42,8 @@ import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "agentInvocation:list": [[sessionKey: string, sessionId?: string], import('./agentInvocation.js').AgentInvocation[]];
+  "agentInvocation:cancel": [[id: string], void];
   "collaboration:presentation": [[], import("./collaborationPresentation.js").PresentationCatalog];
   "collaboration:codeDraftCreate": [[input: CodeDraftInput], CodeDraft];
   "collaboration:codeDraftList": [[sessionKey?: string, nativeSessionId?: string], CodeDraft[]];
@@ -151,6 +153,7 @@ export interface InvokeMap {
 
 /** 主进程 → 渲染进程事件 */
 export interface EventMap {
+  "agentInvocation:updated": import('./agentInvocation.js').AgentInvocation;
   "collaboration:codeDraftUpdated": CodeDraft;
   "collaboration:draftUpdated": ResearchDraft;
   "collaboration:expertDraftUpdated": ExpertDraft;
@@ -178,6 +181,7 @@ export interface HCodeBridge {
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
+  "agentInvocation:list", "agentInvocation:cancel",
   "collaboration:codeDraftCreate", "collaboration:codeDraftList", "collaboration:codeDraftUpdate", "collaboration:codeDraftPrepare", "collaboration:codeDraftConfirm", "collaboration:codeDraftCancel", "collaboration:codeDraftAbandon",
   "collaboration:expertDraftCreate", "collaboration:expertDraftList", "collaboration:expertDraftUpdate", "collaboration:expertDraftPrepare", "collaboration:expertDraftConfirm", "collaboration:expertDraftCancel", "collaboration:expertDraftAbandon",
   "collaboration:draftCreate", "collaboration:draftList", "collaboration:draftUpdate", "collaboration:draftPrepare", "collaboration:draftConfirm", "collaboration:draftCancel", "collaboration:draftAbandon",
@@ -237,6 +241,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
+  "agentInvocation:updated",
   "collaboration:codeDraftUpdated",
   "collaboration:draftUpdated", "collaboration:expertDraftUpdated",
   "collaboration:updated",

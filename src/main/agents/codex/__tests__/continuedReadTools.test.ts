@@ -104,3 +104,37 @@ it('普通交接保留用户开发者指令和原线程，以正常配置恢复�
     expect(f.requests.find(request => request.method === 'turn/start')?.params).not.toHaveProperty('permissions');
   } finally { f.session.close(); }
 });
+it('普通新线程注册 call_agent 并返回原生工具结果，后续回合只使用新的执行闭包', async () => {
+  const f = await fixture();
+  const first = vi.fn(async () => ({ status: 'succeeded', output: '子 AI 的实际报告' }));
+  const runtime = { root: f.root, instructions: '使用 call_agent 再继续下一步', tools: [{ name: 'call_agent', description: '调用另一个 AI', schema: { prompt: z.string() }, execute: first }] };
+  try {
+    await f.session.configureHosted(runtime);
+    await f.session.send('后面都直接展示了 效果不行 你让codex调整吧');
+    expect(f.requests.find(request => request.method === 'thread/start')?.params.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'hcode_call_agent' })]));
+    expect(f.requests.find(request => request.method === 'turn/start')?.params).toMatchObject({ approvalPolicy: 'never', sandboxPolicy: { type: 'dangerFullAccess' } });
+    expect(await f.call(1, 'hcode_call_agent', { prompt: '当前 AI 生成的任务' })).toMatchObject({ success: true, contentItems: [{ type: 'inputText', text: expect.stringContaining('子 AI 的实际报告') }] });
+    expect(first).toHaveBeenCalledWith({ prompt: '当前 AI 生成的任务' });
+    f.session.handleNotification('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    const next = vi.fn(async () => ({ status: 'succeeded', output: '下一步实际报告' }));
+    await f.session.configureHosted({ ...runtime, tools: [{ ...runtime.tools[0]!, execute: next }] });
+    await f.session.send('下一轮继续');
+    expect(await f.call(2, 'hcode_call_agent', { prompt: '后续任务' })).toMatchObject({ success: true });
+    expect(next).toHaveBeenCalledWith({ prompt: '后续任务' });
+    expect(first).toHaveBeenCalledTimes(1);
+  } finally { f.session.close(); }
+});
+it('普通旧线程没有 call_agent 时仍可聊天，明确说明限制并拒绝未注册的执行调用', async () => {
+  const f = await fixture();
+  const invoke = vi.fn(async () => ({ status: 'succeeded' }));
+  try {
+    await f.session.send('之前的普通回合');
+    f.session.handleNotification('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    await f.session.configureHosted({ root: f.root, tools: [{ name: 'call_agent', description: 'call', schema: { prompt: z.string() }, execute: invoke }] });
+    await f.session.send('继续当前原生会话');
+    expect(f.requests.find(request => request.method === 'thread/inject_items')?.params).toMatchObject({ threadId: 'thread', items: [expect.objectContaining({ role: 'developer', content: [expect.objectContaining({ text: expect.stringContaining('未注册') })] })] });
+    expect(await f.call(1, 'hcode_call_agent', { prompt: '不应执行' })).toMatchObject({ success: false });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(f.requests.filter(request => request.method === 'thread/start')).toHaveLength(1);
+  } finally { f.session.close(); }
+});

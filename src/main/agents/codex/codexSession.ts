@@ -24,7 +24,7 @@ import type { AppServerClient, ServerRequest } from "./appServerClient.js";
 import { CodexRowProjector, type CodexItem, type CodexTurn } from "./codexProjector.js";
 import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
 import type { TurnOutcome } from "../../../shared/collaboration.js";
-import { codexResearchConfig, RESEARCH_PERMISSION_PROFILE, type ResearchRuntime } from "../../sessions/researchRuntime.js";
+import { codexResearchConfig, RESEARCH_PERMISSION_PROFILE, type ResearchRuntime, type HostedRuntime } from "../../sessions/researchRuntime.js";
 
 const FLUSH_INTERVAL_MS = 16;
 
@@ -135,6 +135,8 @@ export class CodexSession {
     return this.state === "running" || this.state === "awaitingApproval";
   }
   private research: ResearchRuntime | undefined;
+  private hosted: HostedRuntime | undefined;
+  private hostedAvailable = false;
   private ordinaryContinuation: string | undefined;
   private finalAnswer: string | undefined;
 
@@ -256,6 +258,7 @@ export class CodexSession {
         assertToolCatalog(catalog, this.research);
         this.catalog = catalog as CodexToolSpec[];
       }
+      if (this.hosted && !this.research && !this.catalog) this.catalog = await readToolCatalog(this.host.client, this.threadId) as CodexToolSpec[];
       const result = await this.host.client.request<{ model?: string; activePermissionProfile?: { id: string } }>("thread/resume", {
         threadId: this.threadId,
         ...common,
@@ -266,14 +269,15 @@ export class CodexSession {
     } else {
       const result = await this.host.client.request<{ thread: { id: string }; model?: string; activePermissionProfile?: { id: string } }>(
         "thread/start",
-        { ...common, ...(this.research ? { dynamicTools: codexResearchTools(this.research) } : {}) },
+        { ...common, ...(this.research || this.hosted ? { dynamicTools: codexResearchTools(this.research ?? this.hosted!) } : {}) },
       );
       this.validateResearchProfile(result.activePermissionProfile);
       this.threadId = result.thread.id;
-      this.catalog = this.research ? codexResearchTools(this.research) : [];
+      this.catalog = this.research || this.hosted ? codexResearchTools(this.research ?? this.hosted!) : [];
       this.reportedModel = result.model;
       this.host.onThreadId(this);
     }
+    this.validateHostedCatalog();
     this.attached = true;
     this.emitState();
   }
@@ -286,7 +290,7 @@ export class CodexSession {
   private async injectContinuation() {
     const instructions = this.research
       ? '本回合是新的 HCode 宿主任务。此前普通续聊交接不改变本轮的工具、权限、范围或格式；遵守当前任务和实际运行时配置。'
-      : this.ordinaryContinuation;
+      : [this.ordinaryContinuation, this.hosted ? this.hostedAvailable ? this.hosted.instructions : '此旧 Codex 线程未注册当前 HCode 的 call_agent 工具，不能实际调用另一 AI。请明确说明这个限制，不冒充已委派；普通对话和原线程保持可用。新建 Codex 会话会提供该能力。' : undefined].filter(Boolean).join('\n');
     if (!instructions) return;
     await this.host.client.request('thread/inject_items', { threadId: this.threadId, items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: instructions }] }] });
   }
@@ -424,10 +428,10 @@ export class CodexSession {
 
   // ───────────────────────── 审批 ─────────────────────────
 
-  /** 原生线程保留创建时的工具目录；普通续聊只绑定项目读取，不保留旧协作动作闭包。 */
+  /** 原生工具目录保持不变；普通回合绑定当前调用能力，拒绝旧研究阶段的委派闭包。 */
   private bindHostedTools(turnId: string) {
     if (!this.threadId || !this.isBusy || this.toolsCancelled) return;
-    this.hostedCalls.begin(this.threadId, turnId, this.research ?? this.projectReadTools);
+    this.hostedCalls.begin(this.threadId, turnId, this.research ?? (this.hostedAvailable ? this.hosted! : this.projectReadTools));
   }
 
   handleServerRequest(request: ServerRequest): boolean {
@@ -637,6 +641,16 @@ export class CodexSession {
     if (this.isBusy) throw new Error('Codex 活动回合不能更换普通续聊交接');
     this.ordinaryContinuation = instructions;
     this.attached = false;
+  }
+  /** 普通回合只更换执行闭包；工具目录来自原生创建元数据，不替换历史线程。 */
+  async configureHosted(runtime?: HostedRuntime) {
+    if (this.isBusy) throw new Error('Codex 活动回合不能更换宿主工具');
+    this.hostedCalls.cancel(); this.hosted = runtime;
+    this.validateHostedCatalog();
+  }
+  private validateHostedCatalog() {
+    this.hostedAvailable = Boolean(this.hosted && this.catalog && (this.hosted.tools ?? []).every(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)));
+    if (this.hostedAvailable) assertToolCatalog(this.catalog!, this.hosted!);
   }
   async collaborationSourceReason() {
     if (!this.threadId) return undefined;

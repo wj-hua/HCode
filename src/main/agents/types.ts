@@ -17,12 +17,13 @@ import type {
   SlashCommandOption,
 } from "../../shared/types.js";
 import type { TurnOutcome } from "../../shared/collaboration.js";
-import type { ResearchRuntime } from "../sessions/researchRuntime.js";
+import type { ResearchRuntime, HostedRuntime } from "../sessions/researchRuntime.js";
 
 /** 内部执行身份由主进程生成，不能由 Renderer 指定。 */
 export interface AgentSendParams extends ChatSendParams {
   executionTurnId?: string;
   research?: ResearchRuntime;
+  hosted?: HostedRuntime;
   /** 普通续聊的宿主交接；不属于用户消息，不赋予额外工具或权限。 */
   ordinaryContinuation?: string;
 }

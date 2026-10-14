@@ -30,7 +30,7 @@ import { withFileReferences } from "../fileAttachments.js";
 import { ClaudeRowProjector, type ClaudeRecord } from "./rowProjector.js";
 import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
 import type { TurnOutcome } from "../../../shared/collaboration.js";
-import { researchMcp, RESEARCH_MCP_NAME, type ResearchRuntime } from "../../sessions/researchRuntime.js";
+import { researchMcp, hostedMcp, RESEARCH_MCP_NAME, type ResearchRuntime, type HostedRuntime } from "../../sessions/researchRuntime.js";
 
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
 const FLUSH_INTERVAL_MS = 16;
@@ -107,6 +107,7 @@ export class ClaudeSession {
   private usageVersion = 0;
   private readonly lifecycle: TurnLifecycle;
   private research: ResearchRuntime | undefined;
+  private hosted: HostedRuntime | undefined;
   private ordinaryContinuation: string | undefined;
   private pumpPromise: Promise<void> | null = null;
 
@@ -163,6 +164,14 @@ export class ClaudeSession {
     this.ordinaryContinuation = instructions;
   }
 
+  /** 在原生身份不变的空闲边界追加普通会话工具，不套用研究模式或替换用户输入。 */
+  async configureHosted(runtime?: HostedRuntime) {
+    if (runtime === this.hosted) return;
+    if (this.isBusy) throw new Error('活动回合不能切换宿主工具');
+    await this.releaseQuery();
+    this.hosted = runtime;
+  }
+
   private async releaseQuery() {
     this.clearIdleTimer(); this.input?.end(); this.activeQuery?.close();
     await this.pumpPromise;
@@ -215,6 +224,7 @@ export class ClaudeSession {
     const input = new InputQueue<SDKUserMessage>();
     this.input = input;
     const permissionMode = this.permissionMode;
+    const instructions = [this.ordinaryContinuation, this.hosted?.instructions].filter(Boolean).join('\n');
     this.activeQuery = query({
       prompt: input,
       options: {
@@ -230,7 +240,7 @@ export class ClaudeSession {
         thinking: { type: "adaptive", display: "summarized" },
         settingSources: ["user", "project", "local"],
         // SDK 默认冻结第一轮系统提示；研究与交接必须按本次运行配置刷新，不能复用旧快照。
-        systemPrompt: { type: "preset", preset: "claude_code", ...(this.research || this.ordinaryContinuation ? { snapshot: false } : {}), ...(!this.research && this.ordinaryContinuation ? { append: this.ordinaryContinuation } : {}) },
+        systemPrompt: { type: "preset", preset: "claude_code", ...(this.research || instructions ? { snapshot: false } : {}), ...(!this.research && instructions ? { append: instructions } : {}) },
         ...(this.model ? { model: this.model } : {}),
         ...(this.effort ? { effort: this.effort as EffortLevel } : {}),
         ...(this.research ? {
@@ -238,7 +248,7 @@ export class ClaudeSession {
           mcpServers: { [RESEARCH_MCP_NAME]: researchMcp(this.research) },
           allowedTools: ["mcp__hcode__read_file", "mcp__hcode__list_files", ...(this.research.tools ?? []).map((definition) => `mcp__hcode__${definition.name}`)],
           ...(this.research.outputSchema ? { outputFormat: { type: "json_schema" as const, schema: this.research.outputSchema } } : {}),
-        } : {}),
+        } : this.hosted ? { mcpServers: { [RESEARCH_MCP_NAME]: hostedMcp(this.hosted.tools ?? []) }, allowedTools: (this.hosted.tools ?? []).map(definition => `mcp__hcode__${definition.name}`) } : {}),
         stderr: (data: string) => {
           if (process.env.HCODE_DEBUG) process.stderr.write(`[claude] ${data}`);
         },
