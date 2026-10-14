@@ -296,7 +296,7 @@ function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow
       <ImageAttachments images={images} className="justify-end" />
       <FileAttachments files={files} className="justify-end" onPreview={preview?.onOpenFilePath} />
       {row.text.trim() ? (
-        <div className="flex max-w-xl flex-col gap-2 rounded-xl rounded-tr-xs border border-border bg-surface px-4 py-3 text-ui-base text-foreground">
+        <div className="flex min-w-0 max-w-[min(100%,var(--container-xl))] flex-col gap-2 rounded-xl rounded-tr-xs border border-border bg-surface px-4 py-3 text-ui-base text-foreground">
           <ConversationUserInputBody contentText={row.text} rowId={row.rowId}>
             <ConversationUserInputContent text={row.text} onOpenFile={preview?.onOpenFilePath} />
           </ConversationUserInputBody>

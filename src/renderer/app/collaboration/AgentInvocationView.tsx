@@ -25,7 +25,7 @@ function InvocationTranscript({ call }: { call: AgentInvocation }) {
     return () => { current = false; };
   }, [call.id, call.nativeSessionId, running, live]);
   const pending = Object.values(permissions).filter(request => request.sessionKey === call.sessionKey);
-  return <div className="space-y-3">
+  return <div className="min-w-0 max-w-full space-y-3">
     {pending.map(request => <PermissionCard key={request.interactionId} request={request} workspacePath={call.source.projectPath} />)}
     {error ? <p role="alert" className="text-destructive">读取子会话失败：{error}</p> : null}
     {live || history ? <Timeline rows={live ?? history!} workspacePath={call.source.projectPath} permissions={{}} running={running} canFork={false} canResend={false} highlightedRowId={null} /> : <p className="text-ui-sm text-foreground-subtle">{running ? '等待原生执行事件…' : '原生会话记录按需读取。'}</p>}
@@ -39,7 +39,7 @@ export function AgentInvocationView({ call }: { call: AgentInvocation }) {
     try { await hcode.invoke('agentInvocation:cancel', call.id); } catch (reason) { setError(String(reason)); } finally { setCancelling(false); }
   };
   const pending = useAppStore(state => Object.values(state.permissions).some(request => request.sessionKey === call.sessionKey));
-  return <article aria-label={`${AGENTS[call.input.agent].name} 调用`} className="space-y-3 rounded-lg border border-border p-3">
+  return <article aria-label={`${AGENTS[call.input.agent].name} 调用`} className="min-w-0 max-w-full space-y-3 rounded-lg border border-border p-3">
     <div aria-live="polite"><p className="font-medium">{AGENTS[call.input.agent].name} · {call.input.mode === 'execute' ? '执行' : '只读审核 / 研究'}</p><p className="mt-1 text-ui-sm">{STATUS_LABELS[call.status]}{pending ? ' · 等待你的审批' : ''}</p></div>
     <details><summary className="cursor-pointer text-ui-sm">当前 AI 提供的提示词</summary><p className="mt-2 whitespace-pre-wrap break-words text-ui-sm">{call.input.prompt}</p></details>
     {call.input.model ? <p className="text-ui-sm text-foreground-subtle">模型：{call.input.model}</p> : null}
