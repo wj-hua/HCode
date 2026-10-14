@@ -1,7 +1,7 @@
 // 当前会话的协作入口；沿用已有会话身份，首次启动先绑定 key，防止原生行事件丢失。
 import { ResearchDraftPanel } from "./ResearchDraftPanel";
 import { useAgentInvocations } from './useAgentInvocations';
-import { AgentInvocationView } from './AgentInvocationView';
+import { AgentInvocationList } from './AgentInvocationList';
 import { createPortal } from "react-dom";
 import { SidePanel } from "../conversation/SidePanel";
 import { useUiStore } from "../store/uiStore";
@@ -69,7 +69,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
           {sessionError ? <p role="alert" className="mb-3 whitespace-pre-wrap text-destructive">{sessionError}</p> : null}
           <CollaborationRecovery />
           {invocations.error ? <p role="alert" className="mb-3 text-destructive">{invocations.error}</p> : null}
-          {invocations.calls.length ? <section aria-label="当前会话的 AI 工具调用" className="mb-4 space-y-3"><p className="font-medium">当前会话的 AI 调用</p><p className="text-ui-sm text-foreground-subtle">调用目标和提示词由当前 AI 决定。工具等待真实结束后返回结果，当前 AI 可以继续下一步。</p>{invocations.calls.map(call => <AgentInvocationView key={call.id} call={call} />)}</section> : null}
+          <AgentInvocationList calls={invocations.calls} />
           {attachmentBlocked ? <p role="status" className="mb-3">{attachmentBlocked}</p> : null}
           {active ? <p role="status" className="mb-3 text-foreground-subtle">{active.status === "stopping" ? "等待原生中断确认，尚未暂停或停止" : "关闭此窗口后协作会继续；下方可暂停接管或停止"}</p> : <details open={panel?.type === "collaboration" && panel.intent === "plan" || !selected && !invocations.calls.length} className="mb-4"><summary className="mb-3 cursor-pointer font-medium">{selected || invocations.calls.length ? "手动制定新的计划" : "制定协作计划"}</summary><form onSubmit={event => event.preventDefault()} className="mb-4 flex flex-col gap-3 rounded-lg border border-border p-3">
             <p className="text-foreground-subtle">发起者：{AGENTS[conversation.agent].name}（当前会话）</p>
