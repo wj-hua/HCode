@@ -11,6 +11,7 @@ export interface SessionExecutionHost {
   interrupt(sessionKey: string): Promise<void>;
   failedToSend(sessionKey: string): void;
   finishedSending(sessionKey: string): void;
+  ordinaryContinuation?(params: ChatSendParams): Promise<string | undefined>;
 }
 
 const CANCEL_ACK_TIMEOUT_MS = 30_000;
@@ -43,7 +44,7 @@ export class SessionExecutionService {
     const id = randomUUID();
     const tracked = params.agent === "claude" || params.agent === "codex" || params.agent === "agy";
     if (tracked) { this.busy.add(params.sessionKey); this.ordinaryTurns.set(id, params.sessionKey); this.trackNative(id, identity); }
-    try { return await this.dispatch(params, id); }
+    try { return await this.dispatch(params, id, undefined, await this.host.ordinaryContinuation?.(params)); }
     catch (error) { if (tracked) { this.ordinaryTurns.delete(id); this.busy.delete(params.sessionKey); this.releaseNative(id); } throw error; }
   }
 
@@ -141,10 +142,10 @@ export class SessionExecutionService {
     if (pending?.sessionKey === event.sessionKey) { this.pending.delete(event.executionTurnId); pending.resolve(event); }
   }
 
-  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime) {
+  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime, ordinaryContinuation?: string) {
     try {
       const prepared = await this.host.prepare(params);
-      return await this.host.send({ ...prepared, executionTurnId, research });
+      return await this.host.send({ ...prepared, executionTurnId, research, ...(ordinaryContinuation ? { ordinaryContinuation } : {}) });
     } catch (error) {
       this.host.failedToSend(params.sessionKey);
       throw error;

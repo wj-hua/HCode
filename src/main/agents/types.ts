@@ -23,6 +23,8 @@ import type { ResearchRuntime } from "../sessions/researchRuntime.js";
 export interface AgentSendParams extends ChatSendParams {
   executionTurnId?: string;
   research?: ResearchRuntime;
+  /** 普通续聊的宿主交接；不属于用户消息，不赋予额外工具或权限。 */
+  ordinaryContinuation?: string;
 }
 
 export interface AgentEvents {

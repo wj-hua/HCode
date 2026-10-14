@@ -11,10 +11,15 @@ export function useExpertReport(runId: string, citation?: ExpertClaimRef & { lab
   const [reading, setReading] = useState(false);
   const [error, setError] = useState('');
   const sequence = useRef(0);
-  useEffect(() => {
+  /** 关闭仅清理预览并撤销旧响应，不修改冻结报告或专家记录。 */
+  const clearReport = useCallback(() => {
+    sequence.current++;
     setReport(undefined); setClaimId(undefined); setReportLabel(''); setReading(false); setError('');
+  }, []);
+  useEffect(() => {
+    clearReport();
     return () => { sequence.current++; };
-  }, [runId]);
+  }, [runId, clearReport]);
 
   /** 只读宿主已校验的冻结版本；错误可见，过期响应被撤销而不是冒充新结果。 */
   const openReport = useCallback(async (versionId: string, name: string, claim?: string) => {
@@ -33,5 +38,5 @@ export function useExpertReport(runId: string, citation?: ExpertClaimRef & { lab
     if (citation) void openReport(citation.versionId, citation.label, citation.claimId);
     return () => { sequence.current++; };
   }, [citation, openReport]);
-  return { report, claimId, reportLabel, reading, error, openReport };
+  return { report, claimId, reportLabel, reading, error, openReport, clearReport };
 }

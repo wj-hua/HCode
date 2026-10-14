@@ -27,6 +27,7 @@ import { searchSessions } from "./sessionSearch.js";
 import { installApplicationMenu } from "./menu.js";
 import { readTextFile } from "./readTextFile.js";
 import { SessionExecutionService } from "./sessions/sessionExecutionService.js";
+import { OrdinaryContinuationService } from "./sessions/ordinaryContinuation.js";
 import {ExpertProfileService} from "./collaboration/experts/profiles/expertProfileService.js";
 import { CollaborationService } from "./collaboration/collaborationService.js";
 import { CodeDraftService } from "./collaboration/drafts/codeDraftService.js";
@@ -264,6 +265,7 @@ async function bootstrap() {
   });
 
   execution = new SessionExecutionService({
+    ordinaryContinuation: (params): Promise<string | undefined> => continuation.forMessage(params),
     send: (params) => agents.send(params),
     interrupt: async (key) => { await requireSession(key).interrupt(key); },
     failedToSend: finishTurn,
@@ -300,6 +302,10 @@ async function bootstrap() {
   const drafts = new ResearchDraftService(join(app.getPath("userData"), "collaboration-plans"), collaboration, execution, agents, draft => send("collaboration:draftUpdated", draft));
   const expertDrafts = new ExpertDraftService(join(app.getPath("userData"), "expert-plans"), collaboration, execution, agents, draft => send("collaboration:expertDraftUpdated", draft));
   const codeDrafts = new CodeDraftService(join(app.getPath("userData"), "code-plans"), collaboration, execution, agents, draft => send("collaboration:codeDraftUpdated", draft));
+  const continuation: OrdinaryContinuationService = new OrdinaryContinuationService({
+    runs: params => collaboration.list(params.sessionKey, params.resumeSessionId),
+    drafts: async params => (await Promise.all([drafts.list(params.sessionKey, params.resumeSessionId), expertDrafts.list(params.sessionKey, params.resumeSessionId), codeDrafts.list(params.sessionKey, params.resumeSessionId)])).flat(),
+  });
   handle("collaboration:presentation", async () => {
     const runs = await collaborationRepository.catalog();
     // 展示沿用服务的恢复和采纳状态；磁盘上的 running 不代表重启后仍在执行。

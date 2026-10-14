@@ -107,6 +107,7 @@ export class ClaudeSession {
   private usageVersion = 0;
   private readonly lifecycle: TurnLifecycle;
   private research: ResearchRuntime | undefined;
+  private ordinaryContinuation: string | undefined;
   private pumpPromise: Promise<void> | null = null;
 
   constructor(
@@ -150,11 +151,21 @@ export class ClaudeSession {
   async configureResearch(runtime: ResearchRuntime | undefined) {
     if (this.research === runtime) return;
     if (this.isBusy) throw new Error("会话运行中，不能更换协作工具");
-    this.clearIdleTimer();
-    this.input?.end();
-    this.activeQuery?.close();
-    await this.pumpPromise;
+    await this.releaseQuery();
     this.research = runtime;
+  }
+
+  /** 仅在空闲边界更换交接，按原生身份重建 query，避免旧研究限制和旧系统追加继续生效。 */
+  async configureContinuation(instructions?: string) {
+    if (instructions === this.ordinaryContinuation) return;
+    if (this.isBusy) throw new Error('会话运行中，不能更换普通续聊交接');
+    await this.releaseQuery();
+    this.ordinaryContinuation = instructions;
+  }
+
+  private async releaseQuery() {
+    this.clearIdleTimer(); this.input?.end(); this.activeQuery?.close();
+    await this.pumpPromise;
   }
 
   async listCommands(): Promise<SlashCommandOption[] | null> {
@@ -218,7 +229,8 @@ export class ClaudeSession {
         includePartialMessages: true,
         thinking: { type: "adaptive", display: "summarized" },
         settingSources: ["user", "project", "local"],
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        // SDK 默认冻结第一轮系统提示；研究与交接必须按本次运行配置刷新，不能复用旧快照。
+        systemPrompt: { type: "preset", preset: "claude_code", ...(this.research || this.ordinaryContinuation ? { snapshot: false } : {}), ...(!this.research && this.ordinaryContinuation ? { append: this.ordinaryContinuation } : {}) },
         ...(this.model ? { model: this.model } : {}),
         ...(this.effort ? { effort: this.effort as EffortLevel } : {}),
         ...(this.research ? {

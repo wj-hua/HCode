@@ -3,6 +3,7 @@ import { codexResearchTools } from "./researchTools.js";
 import { HostedToolCalls } from "./hostedToolCalls.js";
 import { assertToolCatalog, readToolCatalog, sourceCatalogReason, type CodexToolSpec } from "./toolCatalog.js";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type {
   ChatRunState,
   CodexSpeed,
@@ -111,6 +112,7 @@ export class CodexSession {
   private readonly lifecycle: TurnLifecycle;
   private readonly assistantText = new Map<string, string>();
   private readonly hostedCalls: HostedToolCalls;
+  private readonly projectReadTools: ResearchRuntime;
   private catalog: CodexToolSpec[] | undefined;
   private toolsCancelled = false;
 
@@ -125,6 +127,7 @@ export class CodexSession {
     this.model = options.model || undefined;
     this.lifecycle = new TurnLifecycle(this.key, "codex", (event) => this.host.emitTurnOutcome?.(event));
     this.research = options.research;
+    this.projectReadTools = { root: this.projectPath };
     this.hostedCalls = new HostedToolCalls({ respond: (id, result) => this.host.client.respond(id, result), failure: (error) => this.fail(`宿主工具响应失败：${String(error)}`) });
   }
 
@@ -132,6 +135,7 @@ export class CodexSession {
     return this.state === "running" || this.state === "awaitingApproval";
   }
   private research: ResearchRuntime | undefined;
+  private ordinaryContinuation: string | undefined;
   private finalAnswer: string | undefined;
 
   seedHistory(turns: readonly CodexTurn[]) {
@@ -161,6 +165,7 @@ export class CodexSession {
     this.setState("running");
     try {
       await this.attach();
+      await this.injectContinuation();
       if (/^\/compact\s*$/i.test(text)) {
         if (images.length || files.length) throw new Error("/compact 不能附带文件或图片");
         await this.host.client.request("thread/compact/start", { threadId: this.threadId });
@@ -200,6 +205,7 @@ export class CodexSession {
         ...(this.effort ? { effort: this.effort } : {}),
         ...speedParams,
         ...(this.research?.outputSchema ? { outputSchema: this.research.outputSchema } : {}),
+        ...(this.ordinaryContinuation && !this.research ? { outputSchema: null } : {}),
         summary: "auto",
       });
       if ("serviceTier" in speedParams) {
@@ -208,7 +214,7 @@ export class CodexSession {
       }
       this.currentTurnId = result.turn.id;
       this.lifecycle.bindNativeTurn(result.turn.id);
-      if (this.research && !this.toolsCancelled) this.hostedCalls.begin(this.threadId!, result.turn.id, this.research);
+      this.bindHostedTools(result.turn.id);
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
     }
@@ -232,13 +238,16 @@ export class CodexSession {
     await this.host.client.ensureStarted();
     if (this.attached && this.threadId) return;
     const policy = codexPolicy(this.permissionMode);
-    const researchConfig = this.research
-      ? codexResearchConfig(this.research.root, (await this.host.client.request<{ config: Record<string, unknown> }>("config/read", { cwd: this.projectPath, includeLayers: false })).config)
+    const config = this.research || this.ordinaryContinuation
+      ? (await this.host.client.request<{ config: Record<string, unknown> }>("config/read", { cwd: this.projectPath, includeLayers: false })).config
       : undefined;
+    const researchConfig = this.research ? codexResearchConfig(this.research.root, config!) : undefined;
+    const userInstructions = config ? z.string().nullish().parse(config.developer_instructions) : undefined;
     const common = {
       cwd: this.projectPath,
       approvalPolicy: this.research ? "never" : policy.approvalPolicy,
       ...(researchConfig ? { permissions: RESEARCH_PERMISSION_PROFILE, config: researchConfig } : { sandbox: policy.sandbox }),
+      ...(this.ordinaryContinuation && !this.research ? { config: {}, developerInstructions: userInstructions ?? '' } : researchConfig ? { developerInstructions: userInstructions ?? '' } : {}),
       ...(this.model ? { model: this.model } : {}),
     };
     if (this.threadId) {
@@ -271,6 +280,15 @@ export class CodexSession {
 
   private validateResearchProfile(profile?: { id: string }) {
     if (this.research && profile?.id !== RESEARCH_PERMISSION_PROFILE) throw new Error("Codex 未确认项目只读权限配置，已拒绝启动研究回合");
+  }
+
+  /** 0.162 原生接口明确追加模型可见开发者上下文；不换线程、不改用户气泡，也不依赖恢复时的提示词快照。 */
+  private async injectContinuation() {
+    const instructions = this.research
+      ? '本回合是新的 HCode 宿主任务。此前普通续聊交接不改变本轮的工具、权限、范围或格式；遵守当前任务和实际运行时配置。'
+      : this.ordinaryContinuation;
+    if (!instructions) return;
+    await this.host.client.request('thread/inject_items', { threadId: this.threadId, items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: instructions }] }] });
   }
 
   /** app-server 退出后需要重新 resume。 */
@@ -337,7 +355,7 @@ export class CodexSession {
         const turn = isRecord(params.turn) ? params.turn : null;
         if (turn && typeof turn.id === "string") this.currentTurnId = turn.id;
         if (turn && typeof turn.id === "string") this.lifecycle.bindNativeTurn(turn.id);
-        if (turn && typeof turn.id === "string" && this.research && this.threadId && !this.toolsCancelled) this.hostedCalls.begin(this.threadId, turn.id, this.research);
+        if (turn && typeof turn.id === "string") this.bindHostedTools(turn.id);
         break;
       }
       case "item/started":
@@ -406,12 +424,18 @@ export class CodexSession {
 
   // ───────────────────────── 审批 ─────────────────────────
 
+  /** 原生线程保留创建时的工具目录；普通续聊只绑定项目读取，不保留旧协作动作闭包。 */
+  private bindHostedTools(turnId: string) {
+    if (!this.threadId || !this.isBusy || this.toolsCancelled) return;
+    this.hostedCalls.begin(this.threadId, turnId, this.research ?? this.projectReadTools);
+  }
+
   handleServerRequest(request: ServerRequest): boolean {
+    if (request.method === "item/tool/call") {
+      this.hostedCalls.handle(request);
+      return true;
+    }
     if (this.research) {
-      if (request.method === "item/tool/call") {
-        this.hostedCalls.handle(request);
-        return true;
-      }
       if (request.method === "item/permissions/requestApproval") this.host.client.respond(request.id, { permissions: {}, scope: "turn" });
       else if (request.method === "item/tool/requestUserInput") this.host.client.respond(request.id, { answers: {} });
       else if (request.method.endsWith("requestApproval")) this.host.client.respond(request.id, { decision: "decline" });
@@ -606,6 +630,13 @@ export class CodexSession {
     if (runtime === this.research) return;
     if (this.isBusy) throw new Error("Codex 活动回合不能切换协作工具");
     this.hostedCalls.cancel(); this.research = runtime; this.attached = false;
+  }
+  /** 交接在普通回合追加原生开发者上下文；更换时重新绑定原线程配置，不改写用户输入。 */
+  async configureContinuation(instructions?: string) {
+    if (instructions === this.ordinaryContinuation) return;
+    if (this.isBusy) throw new Error('Codex 活动回合不能更换普通续聊交接');
+    this.ordinaryContinuation = instructions;
+    this.attached = false;
   }
   async collaborationSourceReason() {
     if (!this.threadId) return undefined;
