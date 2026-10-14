@@ -21,7 +21,7 @@ export class HostedToolCalls {
   handle(request: ServerRequest) {
     const parsed = paramsSchema.safeParse(request.params), scope = this.scope;
     if (!parsed.success || !scope || parsed.data.threadId !== scope.threadId || parsed.data.turnId !== scope.turnId) {
-      this.host.respond(request.id, failed('工具调用不属于当前协作线程和回合，或参数无效')); return;
+      this.host.respond(request.id, failed('工具调用不属于当前会话和回合，或参数无效')); return;
     }
     const params = parsed.data, previousRequest = this.requests.get(request.id), previous = this.calls.get(params.callId);
     if (previousRequest?.callId === params.callId && previous && isDeepStrictEqual(previous.params, params)) return;
@@ -41,7 +41,7 @@ export class HostedToolCalls {
     this.scope = undefined;
     for (const [id, entry] of this.requests) {
       if (entry.replied) continue;
-      entry.replied = true; this.host.respond(id, failed('协作工具等待已取消，迟到结果不再回传'));
+      entry.replied = true; this.host.respond(id, failed('宿主工具等待已取消，迟到结果不再回传'));
     }
   }
 }

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatSendParams, AgentKind } from "../../shared/types.js";
 import type { TurnOutcome } from "../../shared/collaboration.js";
 import type { AgentSendParams } from "../agents/types.js";
-import type { ResearchRuntime } from "./researchRuntime.js";
+import type { ResearchRuntime, HostedRuntime } from "./researchRuntime.js";
 
 export interface SessionExecutionHost {
   prepare(params: ChatSendParams): Promise<ChatSendParams>;
@@ -11,6 +11,8 @@ export interface SessionExecutionHost {
   interrupt(sessionKey: string): Promise<void>;
   failedToSend(sessionKey: string): void;
   finishedSending(sessionKey: string): void;
+  ordinaryContinuation?(params: ChatSendParams): Promise<string | undefined>;
+  ordinaryTools?(params: ChatSendParams, turnId: string, signal: AbortSignal): HostedRuntime | undefined;
 }
 
 const CANCEL_ACK_TIMEOUT_MS = 30_000;
@@ -26,6 +28,7 @@ export class SessionExecutionService {
   private readonly busy = new Set<string>();
   private readonly reservations = new Map<string, string>();
   private readonly ordinaryTurns = new Map<string, string>();
+  private readonly ordinaryControllers = new Map<string, { abort: AbortController; source: ChatSendParams }>();
   private readonly unconfirmed = new Map<string, string>();
   private readonly sessionIdentities = new Map<string, string>();
   private readonly nativeBusy = new Map<string, string>();
@@ -41,10 +44,11 @@ export class SessionExecutionService {
     if (this.reservations.has(params.sessionKey) || identity && this.nativeReservations.has(identity)) throw new Error("该会话正在协作，请先停止协作后再发送普通消息");
     if (this.busy.has(params.sessionKey) || identity && this.nativeBusy.has(identity)) throw new Error("该会话仍有活动回合或原生中断未确认");
     const id = randomUUID();
+    const abort = new AbortController();
     const tracked = params.agent === "claude" || params.agent === "codex" || params.agent === "agy";
-    if (tracked) { this.busy.add(params.sessionKey); this.ordinaryTurns.set(id, params.sessionKey); this.trackNative(id, identity); }
-    try { return await this.dispatch(params, id); }
-    catch (error) { if (tracked) { this.ordinaryTurns.delete(id); this.busy.delete(params.sessionKey); this.releaseNative(id); } throw error; }
+    if (tracked) { this.busy.add(params.sessionKey); this.ordinaryTurns.set(id, params.sessionKey); this.ordinaryControllers.set(id, { abort, source: params }); this.trackNative(id, identity); }
+    try { return await this.dispatch(params, id, undefined, await this.host.ordinaryContinuation?.(params), this.host.ordinaryTools?.(params, id, abort.signal)); }
+    catch (error) { abort.abort(); this.ordinaryControllers.delete(id); if (tracked) { this.ordinaryTurns.delete(id); this.busy.delete(params.sessionKey); this.releaseNative(id); } throw error; }
   }
 
   reserve(sessionKey: string, ownerId: string, nativeIdentity = this.sessionIdentities.get(sessionKey)) {
@@ -88,6 +92,13 @@ export class SessionExecutionService {
   }
 
   private identity(params: ChatSendParams) { return params.resumeSessionId ? `${params.agent}:${params.resumeSessionId}` : this.sessionIdentities.get(params.sessionKey); }
+  nativeSessionId(sessionKey: string, agent: AgentKind) {
+    const identity = this.sessionIdentities.get(sessionKey);
+    return identity?.startsWith(`${agent}:`) ? identity.slice(agent.length + 1) : undefined;
+  }
+  cancelSource(sessionKey: string) { for (const [id, key] of this.ordinaryTurns) if (key === sessionKey) this.ordinaryControllers.get(id)?.abort.abort(); }
+  updateSourcePermission(sessionKey: string, mode: string) { for (const entry of this.ordinaryControllers.values()) if (entry.source.sessionKey === sessionKey) entry.source.permissionMode = mode; }
+  dispose() { for (const entry of this.ordinaryControllers.values()) entry.abort.abort(); }
   private trackNative(turnId: string, identity?: string) { if (identity) { this.nativeBusy.set(identity, turnId); this.nativeByTurn.set(turnId, identity); } }
   private releaseNative(turnId: string) {
     const identity = this.nativeByTurn.get(turnId);
@@ -96,7 +107,7 @@ export class SessionExecutionService {
   }
 
   /** 先登记等待，再发送；即便 CLI 同步返回终态也不会丢结果。 */
-  async execute(params: ChatSendParams, research: ResearchRuntime, signal: AbortSignal, executionTurnId: string = randomUUID()): Promise<TurnOutcome> {
+  async execute(params: ChatSendParams, research: ResearchRuntime | undefined, signal: AbortSignal, executionTurnId: string = randomUUID()): Promise<TurnOutcome> {
     if (signal.aborted) throw new Error("执行已取消");
     const identity = this.identity(params);
     if (this.busy.has(params.sessionKey) || identity && this.nativeBusy.has(identity)) throw new Error("该会话已有活动执行回合");
@@ -135,16 +146,16 @@ export class SessionExecutionService {
     const recognized = this.ordinaryTurns.get(event.executionTurnId) === event.sessionKey || this.unconfirmed.get(event.executionTurnId) === event.sessionKey || this.pending.get(event.executionTurnId)?.sessionKey === event.sessionKey;
     if (recognized && event.nativeSessionId) this.observeIdentity(event.sessionKey, event.agent, event.nativeSessionId);
     if (recognized) this.releaseNative(event.executionTurnId);
-    if (this.ordinaryTurns.get(event.executionTurnId) === event.sessionKey) { this.ordinaryTurns.delete(event.executionTurnId); this.busy.delete(event.sessionKey); }
+    if (this.ordinaryTurns.get(event.executionTurnId) === event.sessionKey) { this.ordinaryControllers.get(event.executionTurnId)?.abort.abort(); this.ordinaryControllers.delete(event.executionTurnId); this.ordinaryTurns.delete(event.executionTurnId); this.busy.delete(event.sessionKey); }
     if (this.unconfirmed.get(event.executionTurnId) === event.sessionKey) { this.unconfirmed.delete(event.executionTurnId); this.busy.delete(event.sessionKey); }
     const pending = this.pending.get(event.executionTurnId);
     if (pending?.sessionKey === event.sessionKey) { this.pending.delete(event.executionTurnId); pending.resolve(event); }
   }
 
-  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime) {
+  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime, ordinaryContinuation?: string, hosted?: HostedRuntime) {
     try {
       const prepared = await this.host.prepare(params);
-      return await this.host.send({ ...prepared, executionTurnId, research });
+      return await this.host.send({ ...prepared, executionTurnId, research, ...(ordinaryContinuation ? { ordinaryContinuation } : {}), ...(hosted ? { hosted } : {}) });
     } catch (error) {
       this.host.failedToSend(params.sessionKey);
       throw error;

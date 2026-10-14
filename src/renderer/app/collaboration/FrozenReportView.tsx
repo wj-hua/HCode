@@ -8,7 +8,8 @@ import { useFilePreview } from '../conversation/FilePreviewContext';
 export function FrozenReportView({ artifact, claimId, workspacePath }: { artifact: { text: string; report: CollaborationReport }; claimId?: string; workspacePath?: string }) {
   const selected = useRef<HTMLElement>(null);
   const preview = useFilePreview();
-  useEffect(() => { if (claimId) { selected.current?.focus(); selected.current?.scrollIntoView({ block: 'center' }); } }, [artifact, claimId]);
+  // 长结论可能超过可视区域；从标题开始阅读，避免居中后把证据标题滚出弹窗。
+  useEffect(() => { if (claimId) { selected.current?.focus(); selected.current?.scrollIntoView({ block: 'start' }); } }, [artifact, claimId]);
   return <div className="mt-3 space-y-4">
     <p className="whitespace-pre-wrap">{artifact.report.summary}</p>
     {artifact.report.findings.map(finding => <section key={finding.id} ref={finding.id === claimId ? selected : undefined} tabIndex={finding.id === claimId ? -1 : undefined} className={`rounded-md p-2 ${finding.id === claimId ? 'bg-selected ring-1 ring-ring' : ''}`}>

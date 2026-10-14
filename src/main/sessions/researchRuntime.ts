@@ -1,4 +1,4 @@
-// 只读研究的运行时策略；权限在工具/沙箱边界执行，不由提示词承担。
+// 宿主工具协议与只读研究策略；普通工具不改变 CLI 权限，研究权限由工具和沙箱边界执行。
 import { z } from "zod";
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { realpath, readFile, stat } from "node:fs/promises";
@@ -18,9 +18,12 @@ export interface HostedTool {
   execute(input: Record<string, unknown>): Promise<unknown>;
 }
 
-export interface ResearchRuntime {
+export interface HostedRuntime {
   root: string;
   tools?: HostedTool[];
+  instructions?: string;
+}
+export interface ResearchRuntime extends HostedRuntime {
   outputSchema?: Record<string, unknown>;
   /** 宿主记录实际工具读取的证据版本；回调失败作为工具错误返回。 */
   onRead?(file: { path: string; content: string; hash: string }): Promise<void>;
@@ -54,7 +57,11 @@ export function researchTools(runtime: ResearchRuntime): HostedTool[] {
 }
 
 export function researchMcp(runtime: ResearchRuntime) {
-  const definitions = researchTools(runtime);
+  return hostedMcp(researchTools(runtime));
+}
+
+/** 普通会话只追加显式宿主工具；CLI 自身工具、配置和权限由原 Provider 保留。 */
+export function hostedMcp(definitions: HostedTool[]) {
   return createSdkMcpServer({ name: RESEARCH_MCP_NAME, version: "1.0.0", tools: definitions.map((definition) => tool(
     definition.name, definition.description, definition.schema, async (input) => {
       try {

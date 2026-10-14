@@ -1,7 +1,7 @@
-// 单位专家的冻结报告和版本互审；原始模型产物保留供失败核对。
+// 每位专家的身份、状态和最新报告常驻可见；任务、版本互审和原始产物按需展开。
 import type { ExpertParticipant, ExpertState } from "@hcode/shared/experts";
 import { expertLabel } from "./expertPresentation";
-import {ExpertProfileDetails} from "./ExpertProfileDetails";
+import { ExpertProfileDetails } from "./ExpertProfileDetails";
 import { PeerReviewView } from "./PeerReviewView";
 
 import { Button } from "@/components/ui/button.js";
@@ -24,11 +24,17 @@ export function ExpertParticipantView({
   openReport(versionId: string, name: string): Promise<void>;
 }) {
   const label = (id: string) => expertLabel(state, id);
+  const latest = expert.versions.at(-1);
   return (
-    <article key={expert.id} className="rounded-lg border border-border p-3">
-      <p className="font-medium">
-        {label(expert.id)} · {STATUSES[expert.status]}
-      </p>
+    <article aria-label={label(expert.id)} className="p-3">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 flex-1"><h3 className="font-medium">{label(expert.id)}</h3>
+          <p className="mt-1 text-ui-sm text-foreground-subtle">{STATUSES[expert.status]} · {latest ? `最新报告 v${latest.version}` : '尚无冻结报告'}</p></div>
+        {latest ? <Button variant="outline" size="sm" disabled={reading} aria-label={`查看${label(expert.id)}的报告 v${latest.version}`} onClick={() => void openReport(latest.id, `${label(expert.id)} · v${latest.version}`)}>查看报告 v{latest.version}</Button> : null}
+      </header>
+      {expert.error ? <p role="alert" className="mt-2 whitespace-pre-wrap text-ui-sm text-destructive">{expert.error}</p> : null}
+      <details className="mt-2">
+        <summary className="cursor-pointer py-1 text-ui-sm text-foreground-subtle">任务、报告版本与互审详情</summary>
       {expert.objective ? <p className="mt-2 whitespace-pre-wrap text-ui-sm">本次任务：{expert.objective}</p> : null}
       <p className="mt-1 break-all text-ui-sm text-foreground-subtle">
         模型：{expert.backend.model ?? "CLI 默认（未核对具体模型）"}
@@ -51,11 +57,6 @@ export function ExpertParticipantView({
           </Button>
         ))}
       </div>
-      {expert.error ? (
-        <p className="mt-2 whitespace-pre-wrap text-destructive">
-          {expert.error}
-        </p>
-      ) : null}
       {state.reviews
         .filter((review) => review.targetId === expert.id)
         .map((review) => (
@@ -85,6 +86,7 @@ export function ExpertParticipantView({
           ))}
         </details>
       ) : null}
+      </details>
     </article>
   );
 }
