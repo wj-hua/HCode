@@ -25,9 +25,3 @@ it('agy 从实时模型列表只开放 Gemini 研究/审查，来源委派、代
   expect((await collaborationCapabilities(agents,'darwin'))[0]).toMatchObject({canExecute:false,reason:expect.stringContaining('model service unavailable')});
 });
 
-it('已安装 Cline 的普通会话不获得协作执行、审查或发起资格', async () => {
-  const agents = new AgentRegistry({ cline: { kind: 'cline', getStatus: async () => ({ found: true, version: '3.0.70' }) } } as unknown as Record<AgentKind, AgentProvider>);
-  const capability = (await collaborationCapabilities(agents, 'darwin', { agent: 'cline', resumeSessionId: 'cline-thread' }))[0]!;
-  expect(capability).toMatchObject({ agent: 'cline', canExecute: false, canReview: false, canInitiate: false, canExecuteCode: false });
-  expect(capability.reason).toContain('尚未验证协作路径');
-});

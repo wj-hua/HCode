@@ -14,7 +14,6 @@ import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
-import { ClineAgent } from "./agents/cline/clineAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
 import { beginGitTurn, commitFiles, createBranch, finishGitTurn, isGitRepository, listBranches, previewGitTurn, repositoryRoot, revertFile, switchBranch, validateTurnFiles, type GitTurnSnapshot } from "./git.js";
@@ -186,7 +185,6 @@ async function bootstrap() {
     claude,
     codex,
     agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration")),
-    cline: new ClineAgent(events, buildAgentEnv, () => store.settings.agentPaths.cline, join(app.getPath("userData"), "cline-attachments")),
   });
   quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const extensions = new ExtensionsService(claude, codex, buildAgentEnv);

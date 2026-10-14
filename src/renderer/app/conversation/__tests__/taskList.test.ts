@@ -21,8 +21,8 @@ const header = (patch: Partial<TurnHeaderRow> = {}): TurnHeaderRow => ({
 const select = (rows: ConversationRow[], runState: "running" | "awaitingApproval" | "idle" | "error" = "running") =>
   selectTaskList({ agent: "claude", rows, runState });
 
-it("Claude、Codex 和 Cline 共用 TodoWrite 快照，Antigravity 不显示", () => {
-  for (const agent of ["claude", "codex", "cline"] as const) {
+it("Claude 和 Codex 共用 TodoWrite 快照，Antigravity 不显示", () => {
+  for (const agent of ["claude", "codex"] as const) {
     expect(selectTaskList({ agent, rows: [tool(2)], runState: "running" })).toMatchObject({
       completed: 1, current: "改代码", steps: [{ title: "读代码" }, { title: "改代码" }, { title: "验证" }],
     });

@@ -4,7 +4,7 @@ import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
 export type { ConversationRow };
 
 /** 以后接入其他 CLI 时在这里扩展。 */
-export type AgentKind = "claude" | "codex" | "agy" | "cline";
+export type AgentKind = "claude" | "codex" | "agy";
 
 /** 各 CLI 的权限模式取值不同，可选值见 shared/agents.ts 的 AGENTS[kind].permissionModes。 */
 export type PermissionMode = string;
@@ -383,10 +383,10 @@ export const DEFAULT_SETTINGS: Settings = {
   locale: "zh-CN",
   interfaceMode: "coding",
   defaultAgent: "claude",
-  agentPaths: { claude: "", codex: "", agy: "", cline: "" },
-  defaultPermissionModes: { claude: "default", codex: "on-request", agy: "default", cline: "default" },
-  defaultModels: { claude: "", codex: "", agy: "", cline: "" },
-  defaultEfforts: { claude: "", codex: "", agy: "", cline: "" },
+  agentPaths: { claude: "", codex: "", agy: "" },
+  defaultPermissionModes: { claude: "default", codex: "on-request", agy: "default" },
+  defaultModels: { claude: "", codex: "", agy: "" },
+  defaultEfforts: { claude: "", codex: "", agy: "" },
   codexSpeed: "",
   pinnedSessions: [],
   preventSleepWhileRunning: true,

@@ -23,8 +23,6 @@ export interface AgentDescriptor {
 
 /** Claude Code 的 effort 档位；模型不支持的档位由 CLI 自动降级。 */
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-// 空值 = CLI 默认：不传 --thinking，与终端行为一致；部分 OpenAI 兼容服务商会拒绝思考参数。
-export const CLINE_EFFORTS = ["", "none", "low", "medium", "high", "xhigh"];
 
 export const AGENTS: Record<AgentKind, AgentDescriptor> = {
   claude: {
@@ -103,20 +101,9 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     ],
     models: [{ value: "", label: "默认模型" }],
   },
-  cline: {
-    kind: "cline",
-    name: "Cline",
-    command: "cline",
-    permissionModes: [
-      { mode: "default", label: "逐条审批", description: "工具执行前询问你", icon: "shield" },
-      { mode: "plan", label: "计划模式", description: "只允许读取和搜索类工具，分析并给出计划", icon: "plan" },
-      { mode: "bypass", label: "完全放行", description: "不再询问任何操作（谨慎使用）", icon: "danger", dangerous: true },
-    ],
-    models: [{ value: "", label: "默认模型", efforts: CLINE_EFFORTS }],
-  },
 };
 
-export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "agy", "cline"];
+export const AGENT_KINDS: AgentKind[] = ["claude", "codex", "agy"];
 
 /** 额度面板里的排列顺序。 */
 export const QUOTA_SOURCES: QuotaSource[] = [...AGENT_KINDS];

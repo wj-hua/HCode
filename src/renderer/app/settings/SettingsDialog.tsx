@@ -64,7 +64,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
   general: ["常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "theme", "wallpaper", "blur"],
-  agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "cline", "权限", "路径", "版本", "思考", "effort", "model", "path"],
+  agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "effort", "model", "path"],
   notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify", "sleep"],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
 };

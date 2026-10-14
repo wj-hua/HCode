@@ -23,10 +23,6 @@ const LOGO: Record<QuotaSource, { viewBox: string; paths: { d: string; fill: str
       { d: "M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z", fill: "#ea4335" },
     ],
   },
-  cline: {
-    viewBox: "0 0 24 24",
-    paths: [{ d: "M7 4h10v2h3v13H4V6h3V4zm2-2h6v2H9V2zM2 9h2v7H2V9zm18 0h2v7h-2V9zM7 9v5h3V9H7zm7 0v5h3V9h-3zM8 16v1h8v-1H8z", fill: "var(--color-foreground)" }],
-  },
 };
 
 export function AgentBadge({ agent, className }: { agent: QuotaSource; className?: string }) {
