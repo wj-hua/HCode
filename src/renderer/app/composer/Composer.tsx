@@ -65,7 +65,7 @@ export function modeIcon(option: PermissionModeOption, className = "size-4"): Re
 
 /** 下拉菜单关闭后把焦点还给输入框（照 ZCode 的 focusSelectorOnClose）。 */
 const COMPOSER_INPUT_SELECTOR = "[data-composer-input]";
-/** Radix 的选项值不能为空串，「默认模型」用占位值代替。 */
+/** Radix 的选项值不能为空串，「默认模型」和「CLI 默认」思考强度用占位值代替。 */
 const DEFAULT_MODEL_VALUE = "__default__";
 
 
@@ -440,8 +440,8 @@ export function Composer({
             name: "思考强度",
             category: "thought_level",
             type: "select",
-            currentValue: efforts.includes(conversation.effort) ? conversation.effort : "",
-            options: efforts.map((value) => ({ value, name: value })),
+            currentValue: efforts.includes(conversation.effort) ? conversation.effort || DEFAULT_MODEL_VALUE : "",
+            options: efforts.map((value) => value ? { value, name: value } : { value: DEFAULT_MODEL_VALUE, name: "CLI 默认" }),
           }
         : null,
     [efforts.join(), conversation.effort],
@@ -759,7 +759,7 @@ export function Composer({
                   labelVisibilityClassName="inline-flex"
                   indicatorClassName="block"
                   option={thoughtOption}
-                  onValueChange={(value) => void setEffort(value)}
+                  onValueChange={(value) => void setEffort(value === DEFAULT_MODEL_VALUE ? "" : value)}
                   intl={intl}
                   triggerRef={thoughtTriggerRef}
                   restoreFocusSelector={COMPOSER_INPUT_SELECTOR}

@@ -1,13 +1,14 @@
 // 只在主进程读取 Cline 的提供商配置；密钥仅传给 CLI 子进程。
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { CLINE_EFFORTS } from "../../../shared/agents.js";
 import type { ModelOption } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
 import { clineDataDir } from "./clineHistory.js";
 
 const MODEL_PREFIX = "cline-model:";
 const OAUTH_PROVIDERS = new Set(["cline", "cline-pass", "openai-codex"]);
-export const CLINE_EFFORTS = ["none", "low", "medium", "high", "xhigh"];
+export { CLINE_EFFORTS };
 
 export interface ClineConfig { settings: JsonRecord; catalog: JsonRecord }
 

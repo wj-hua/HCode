@@ -23,6 +23,8 @@ export interface AgentDescriptor {
 
 /** Claude Code 的 effort 档位；模型不支持的档位由 CLI 自动降级。 */
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// 空值 = CLI 默认：不传 --thinking，与终端行为一致；部分 OpenAI 兼容服务商会拒绝思考参数。
+export const CLINE_EFFORTS = ["", "none", "low", "medium", "high", "xhigh"];
 
 export const AGENTS: Record<AgentKind, AgentDescriptor> = {
   claude: {
@@ -110,7 +112,7 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
       { mode: "plan", label: "计划模式", description: "只允许读取和搜索类工具，分析并给出计划", icon: "plan" },
       { mode: "bypass", label: "完全放行", description: "不再询问任何操作（谨慎使用）", icon: "danger", dangerous: true },
     ],
-    models: [{ value: "", label: "默认模型", efforts: ["none", "low", "medium", "high", "xhigh"] }],
+    models: [{ value: "", label: "默认模型", efforts: CLINE_EFFORTS }],
   },
 };
 
