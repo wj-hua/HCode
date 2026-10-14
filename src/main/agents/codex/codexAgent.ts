@@ -24,7 +24,7 @@ import type { AgentEvents, AgentProvider, AgentSendParams } from "../types.js";
 import { AppServerClient, type ServerRequest } from "./appServerClient.js";
 import { projectCodexTurns, type CodexTurn } from "./codexProjector.js";
 import { CodexSession } from "./codexSession.js";
-import { CODEX_RESEARCH_PROTOCOL_VERSION } from "../../sessions/researchRuntime.js";
+import { isCodexResearchVersion } from "../../sessions/researchRuntime.js";
 import { readToolCatalog, sourceCatalogReason } from "./toolCatalog.js";
 
 const CODEX_HOME = process.env.CODEX_HOME ?? join(homedir(), ".codex");
@@ -90,7 +90,7 @@ export class CodexAgent implements AgentProvider {
     this.client = new AppServerClient(async () => {
       const status = await this.getStatus();
       if (!status.found || !status.path) throw new Error("未找到 codex 命令，请在设置中指定路径");
-      return { path: status.path, env: this.getEnv(), experimentalApi: status.version?.includes(CODEX_RESEARCH_PROTOCOL_VERSION) === true };
+      return { path: status.path, env: this.getEnv(), experimentalApi: isCodexResearchVersion(status.version) };
     }, appVersion);
     this.client.on("notification", (method: string, params: Record<string, unknown>) =>
       this.onNotification(method, params),

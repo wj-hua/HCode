@@ -21,7 +21,7 @@ async function fixture(research = false, resumed = false, holdTurnReply = false)
   const delegate = vi.fn(async () => ({ deliveryId: 'must-not-dispatch' }));
   const runtime: ResearchRuntime = { root, tools: [{ name: 'delegate_task', description: 'delegate', schema: { taskId: z.string() }, execute: delegate }] };
   const client = {
-    running: true, ensureStarted: async () => {},
+    running: true, experimentalApi: true, ensureStarted: async () => {},
     request: async (method: string, params: Record<string, unknown>) => {
       requests.push({ method, params });
       if (method === 'config/read') return { config: { developer_instructions: '保留用户既有开发规范' } };

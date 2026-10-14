@@ -3,13 +3,13 @@ import { z } from 'zod';
 import type { CollaborationCapabilities, CollaborationSource } from '../../shared/collaboration.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import { AGY_COLLABORATION_VERSION, GEMINI_MODEL_PREFIX, AGY_SOURCE_LIMITATION } from "../agents/agy/agyResearchSession.js";
-import { CODEX_RESEARCH_PROTOCOL_VERSION } from '../sessions/researchRuntime.js';
+import { isCodexResearchVersion } from '../sessions/researchRuntime.js';
 /** 查询不修改会话，不加载模型，不创建替代线程；元数据 IO 错误由调用方展示。 */
 export async function collaborationCapabilities(agents: AgentRegistry, platform: NodeJS.Platform, source?: CollaborationSource): Promise<CollaborationCapabilities[]> {
   if (source) z.object({ agent: z.enum(['claude', 'codex', 'agy', 'cline']), resumeSessionId: z.string().min(1).optional() }).strict().parse(source);
   return Promise.all(agents.all().map(async (provider) => {
     const status = await provider.getStatus(true);
-    const nativeSource = status.found && (provider.kind === 'claude' || provider.kind === 'codex' && platform === 'darwin' && status.version?.includes(CODEX_RESEARCH_PROTOCOL_VERSION) === true);
+    const nativeSource = status.found && (provider.kind === 'claude' || provider.kind === 'codex' && platform === 'darwin' && isCodexResearchVersion(status.version));
     const agySupported = status.found && provider.kind === 'agy' && platform === 'darwin' && status.version === AGY_COLLABORATION_VERSION;
     let models: Awaited<ReturnType<typeof provider.listModels>> | undefined, modelError: string | undefined;
     if (agySupported) {

@@ -267,13 +267,15 @@ export class CodexSession {
       this.validateResearchProfile(result.activePermissionProfile);
       this.reportedModel = result.model;
     } else {
+      // 普通会话的宿主工具依赖实验 API；CLI 版本未协商时照常建线程，只是不提供 call_agent。
+      const tools = this.research ?? (this.hosted && this.host.client.experimentalApi ? this.hosted : undefined);
       const result = await this.host.client.request<{ thread: { id: string }; model?: string; activePermissionProfile?: { id: string } }>(
         "thread/start",
-        { ...common, ...(this.research || this.hosted ? { dynamicTools: codexResearchTools(this.research ?? this.hosted!) } : {}) },
+        { ...common, ...(tools ? { dynamicTools: codexResearchTools(tools) } : {}) },
       );
       this.validateResearchProfile(result.activePermissionProfile);
       this.threadId = result.thread.id;
-      this.catalog = this.research || this.hosted ? codexResearchTools(this.research ?? this.hosted!) : [];
+      this.catalog = tools ? codexResearchTools(tools) : [];
       this.reportedModel = result.model;
       this.host.onThreadId(this);
     }

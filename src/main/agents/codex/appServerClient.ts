@@ -28,6 +28,8 @@ export class AppServerClient extends EventEmitter {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private stderrTail = "";
+  /** initialize 是否协商了实验 API；未协商时不能发送 dynamicTools 等实验字段。 */
+  experimentalApi = false;
 
   constructor(
     private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string>; experimentalApi?: boolean }>,
@@ -55,6 +57,7 @@ export class AppServerClient extends EventEmitter {
 
   private async start() {
     const { path, env, experimentalApi } = await this.resolveLaunch();
+    this.experimentalApi = experimentalApi === true;
     const child = spawn(path, ["app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     this.buffer = "";
