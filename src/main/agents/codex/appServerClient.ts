@@ -1,6 +1,8 @@
 // codex app-server 客户端：按行分隔的 JSON-RPC（stdio），一个 HCode 进程共用一个 app-server。
 // 协议类型可用 `codex app-server generate-ts` 生成；这里只按需声明用到的字段。
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { realpath } from "node:fs/promises";
+import { dirname } from "node:path";
 import { EventEmitter } from "node:events";
 
 export interface JsonRpcMessage {
@@ -30,6 +32,8 @@ export class AppServerClient extends EventEmitter {
   private stderrTail = "";
   /** initialize 是否协商了实验 API；未协商时不能发送 dynamicTools 等实验字段。 */
   experimentalApi = false;
+  /** codex 启动路径与真实路径所在目录；0.163 起建线程会在沙箱内重新执行 codex 读取 AGENTS.md。 */
+  executableDirs: string[] = [];
 
   constructor(
     private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string>; experimentalApi?: boolean }>,
@@ -58,6 +62,7 @@ export class AppServerClient extends EventEmitter {
   private async start() {
     const { path, env, experimentalApi } = await this.resolveLaunch();
     this.experimentalApi = experimentalApi === true;
+    this.executableDirs = [...new Set([dirname(path), dirname(await realpath(path))])];
     const child = spawn(path, ["app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     this.buffer = "";

@@ -243,7 +243,7 @@ export class CodexSession {
     const config = this.research || this.ordinaryContinuation
       ? (await this.host.client.request<{ config: Record<string, unknown> }>("config/read", { cwd: this.projectPath, includeLayers: false })).config
       : undefined;
-    const researchConfig = this.research ? codexResearchConfig(this.research.root, config!) : undefined;
+    const researchConfig = this.research ? codexResearchConfig(this.research.root, config!, this.host.client.executableDirs) : undefined;
     const userInstructions = config ? z.string().nullish().parse(config.developer_instructions) : undefined;
     const common = {
       cwd: this.projectPath,
@@ -292,7 +292,7 @@ export class CodexSession {
   private async injectContinuation() {
     const instructions = this.research
       ? '本回合是新的 HCode 宿主任务。此前普通续聊交接不改变本轮的工具、权限、范围或格式；遵守当前任务和实际运行时配置。'
-      : [this.ordinaryContinuation, this.hosted ? this.hostedAvailable ? this.hosted.instructions : '此旧 Codex 线程未注册当前 HCode 的 call_agent 工具，不能实际调用另一 AI。请明确说明这个限制，不冒充已委派；普通对话和原线程保持可用。新建 Codex 会话会提供该能力。' : undefined].filter(Boolean).join('\n');
+      : [this.ordinaryContinuation, this.hosted ? this.hostedAvailable ? this.hosted.instructions : this.host.client.experimentalApi ? '此旧 Codex 线程未注册当前 HCode 的 call_agent 工具，不能实际调用另一 AI。请明确说明这个限制，不冒充已委派；普通对话和原线程保持可用。新建 Codex 会话会提供该能力。' : '当前 Codex CLI 版本尚未通过 HCode call_agent 验证，本会话没有注册该工具，不能实际调用另一 AI。请明确说明这个限制，不冒充已委派；普通对话保持可用。安装已验证的 Codex 版本后新建会话可提供该能力。' : undefined].filter(Boolean).join('\n');
     if (!instructions) return;
     await this.host.client.request('thread/inject_items', { threadId: this.threadId, items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: instructions }] }] });
   }

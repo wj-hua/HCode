@@ -7,8 +7,8 @@ import { createHash } from "node:crypto";
 import { listProjectFiles } from "../projectFiles.js";
 
 export const CODEX_RESEARCH_PROTOCOL_VERSION = "0.162.0";
-/** 补丁版本不改 app-server 协议，同一 0.162.x 系列共用已验证的实验协议。 */
-export const isCodexResearchVersion = (version?: string) => /\b0\.162\.\d+\b/.test(version ?? "");
+/** 补丁版本不改 app-server 协议；0.162.x 与 0.163.x 共用已验证的实验协议。 */
+export const isCodexResearchVersion = (version?: string) => /\b0\.16[23]\.\d+\b/.test(version ?? "");
 export const RESEARCH_PERMISSION_PROFILE = "hcode_research";
 export const RESEARCH_MCP_NAME = "hcode";
 const MAX_READ_BYTES = 256 * 1024;
@@ -77,11 +77,11 @@ export function hostedMcp(definitions: HostedTool[]) {
   )) });
 }
 
-/** 显式关闭已发现的外部 MCP/插件及 hooks，配置只传给研究线程，不写全局配置。 */
-export function codexResearchConfig(root: string, config: Record<string, unknown>) {
+/** 显式关闭已发现的外部 MCP/插件及 hooks，配置只传给研究线程，不写全局配置；executableDirs 只读，供 Codex 沙箱内执行自身。 */
+export function codexResearchConfig(root: string, config: Record<string, unknown>, executableDirs: readonly string[] = []) {
   const disableEntries = (value: unknown) => Object.fromEntries(Object.keys(z.record(z.string(), z.unknown()).parse(value ?? {})).map((name) => [name, { enabled: false }]));
   return {
-    permissions: { [RESEARCH_PERMISSION_PROFILE]: { filesystem: { ":minimal": "read", [root]: "read" }, network: { enabled: false } } },
+    permissions: { [RESEARCH_PERMISSION_PROFILE]: { filesystem: { ":minimal": "read", ...Object.fromEntries(executableDirs.map((dir) => [dir, "read"])), [root]: "read" }, network: { enabled: false } } },
     mcp_servers: disableEntries(config.mcp_servers), plugins: disableEntries(config.plugins),
     features: { hooks: false, apps: false, multi_agent: false, multi_agent_v2: false, browser_use: false, computer_use: false, image_generation: false },
     notify: [], web_search: "disabled",
