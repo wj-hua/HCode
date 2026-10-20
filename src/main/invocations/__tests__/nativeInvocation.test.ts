@@ -4,19 +4,26 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
-import type { AgentKind } from '../../../shared/types.js';
 import type { TurnOutcome } from '../../../shared/collaboration.js';
 import type { AgentInvocation } from '../../../shared/agentInvocation.js';
-import type { AgentEvents, AgentProvider } from '../../agents/types.js';
+import type { AgentEvents } from '../../agents/types.js';
 import { ClaudeAgent } from '../../agents/claude/claudeAgent.js';
 import { CodexAgent } from '../../agents/codex/codexAgent.js';
+import { AgyAgent } from '../../agents/agy/agyAgent.js';
 import { AgentRegistry } from '../../agents/registry.js';
 import { SessionExecutionService } from '../../sessions/sessionExecutionService.js';
 import { InvocationRepository } from '../invocationRepository.js';
 import { AgentInvocationService } from '../agentInvocationService.js';
 const enabled = process.env.HCODE_NATIVE_INVOCATION === '1';
+const agyEnabled = process.env.HCODE_NATIVE_AGY_SOURCE_INVOCATION === '1';
 const TIMEOUT_MS = 240_000;
-it.skipIf(!enabled).each(['claude', 'codex'] as const)('%s 普通消息实际调用另一 AI 并收到结果后在同一原生回合继续', async sourceAgent => {
+const cases = [
+  { sourceAgent: 'claude', childAgent: 'codex', enabled },
+  { sourceAgent: 'codex', childAgent: 'claude', enabled },
+  { sourceAgent: 'claude', childAgent: 'agy', enabled: agyEnabled },
+  { sourceAgent: 'codex', childAgent: 'agy', enabled: agyEnabled },
+] as const;
+for (const { sourceAgent, childAgent, enabled: caseEnabled } of cases) it.skipIf(!caseEnabled)(`${sourceAgent} 普通消息实际调用 ${childAgent}，收到结果后在同一原生回合继续`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'hcode-native-invocation-'));
   const project = join(root, 'project'); await mkdir(project);
   await writeFile(join(project, 'seed.txt'), 'SEED_FOR_NATIVE_INVOCATION');
@@ -33,10 +40,9 @@ it.skipIf(!enabled).each(['claude', 'codex'] as const)('%s 普通消息实际调
     rows: () => {}, commands: () => {}, permission: () => {}, permissionResolved: () => {}, indexChanged: () => {}, quotaStale: () => {},
   };
   const env = () => process.env as Record<string, string>;
-  const agents = new AgentRegistry({ claude: new ClaudeAgent(events, env, () => join(homedir(), '.local/bin/claude')), codex: new CodexAgent(events, env, () => '/opt/homebrew/bin/codex', 'native-invocation') } as unknown as Record<AgentKind, AgentProvider>);
+  const agents = new AgentRegistry({ claude: new ClaudeAgent(events, env, () => join(homedir(), '.local/bin/claude')), codex: new CodexAgent(events, env, () => '/opt/homebrew/bin/codex', 'native-invocation'), agy: new AgyAgent(events, env, () => '', join(root, 'agy-research')) });
   execution = new SessionExecutionService({ prepare: async params => params, send: params => agents.send(params), interrupt: async key => { await agents.bySessionKey(key)?.interrupt(key); }, failedToSend: () => {}, finishedSending: () => {}, ordinaryTools: (params, id, signal) => toolsEnabled ? invocations.tools(params, id, signal) : undefined });
-  invocations = new AgentInvocationService(new InvocationRepository(join(root, 'records')), execution, call => calls.push(call), () => '');
-  const childAgent = sourceAgent === 'claude' ? 'codex' : 'claude';
+  invocations = new AgentInvocationService(new InvocationRepository(join(root, 'records')), execution, call => calls.push(call), () => '', agents);
   try {
     let originalIdentity: string | undefined;
     if (sourceAgent === 'claude') {
@@ -46,7 +52,7 @@ it.skipIf(!enabled).each(['claude', 'codex'] as const)('%s 普通消息实际调
       toolsEnabled = true;
       sourceDone = new Promise<TurnOutcome>(resolve => { resolveSource = resolve; });
     }
-    await execution.send({ agent: sourceAgent, sessionKey: sourceKey, projectPath: project, permissionMode: sourceAgent === 'claude' ? 'bypassPermissions' : 'full-access', text: `请实际使用 HCode call_agent 工具调用 ${childAgent}，不是写一份转交说明。让它在当前项目读取 seed.txt，然后创建 child-proof.txt，内容恰好为 CHILD_REAL，确认文件内容后回复 CHILD_FINISHED。由你组织这次调用的完整 prompt，mode=execute，不要自己完成子 AI 的工作。等待工具的真实 status=succeeded 之后，你再实际创建 source-proof.txt，内容恰好为 SOURCE_CONTINUED；这一步要由你完成。最后只回复 SOURCE_AFTER_CHILD 和子 AI 返回的标记。全部工作限于这个临时项目，不联网、不提交。` });
+    await execution.send({ agent: sourceAgent, sessionKey: sourceKey, projectPath: project, permissionMode: sourceAgent === 'claude' ? 'bypassPermissions' : 'full-access', text: `请实际使用 HCode call_agent 工具调用 ${childAgent}${childAgent === 'agy' ? '/Gemini，先查询 list_agent_targets 并传入其返回的 Gemini 模型' : ''}，不是写一份转交说明。让它在当前项目读取 seed.txt，然后创建 child-proof.txt，内容恰好为 CHILD_REAL，确认文件内容后回复 CHILD_FINISHED。由你组织这次调用的完整 prompt，mode=execute，不要自己完成子 AI 的工作。等待工具的真实 status=succeeded 之后，你再实际创建 source-proof.txt，内容恰好为 SOURCE_CONTINUED；这一步要由你完成。最后只回复 SOURCE_AFTER_CHILD 和子 AI 返回的标记。全部工作限于这个临时项目，不联网、不提交。` });
     const result = await sourceDone;
     expect(result.outcome, JSON.stringify({ result, calls })).toBe('succeeded');
     if (originalIdentity) expect(result.nativeSessionId).toBe(originalIdentity);
@@ -59,7 +65,7 @@ it.skipIf(!enabled).each(['claude', 'codex'] as const)('%s 普通消息实际调
     expect(outcomes.find(outcome => outcome.sessionKey !== sourceKey)?.nativeSessionId).toBeTruthy();
     if (process.env.HCODE_NATIVE_INVOCATION_EVIDENCE) {
       await mkdir(process.env.HCODE_NATIVE_INVOCATION_EVIDENCE, { recursive: true });
-      await writeFile(join(process.env.HCODE_NATIVE_INVOCATION_EVIDENCE, `${sourceAgent}.json`), JSON.stringify({ calls, outcomes }, null, 2));
+      await writeFile(join(process.env.HCODE_NATIVE_INVOCATION_EVIDENCE, `${sourceAgent}-${childAgent}.json`), JSON.stringify({ calls, outcomes }, null, 2));
     }
   } finally { execution.dispose(); invocations.dispose(); agents.dispose(); await rm(root, { recursive: true, force: true }); }
 }, TIMEOUT_MS);
