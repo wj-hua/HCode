@@ -89,12 +89,15 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
   }, [source, patch]);
   const lines = useMemo(() => patch ? getPlainTextPatchPreviewLines(patch) : [], [patch]);
   const readsFile = source.type !== "text" && source.type !== "patch" && source.type !== "multi-file-diff";
+  const canToggleHtml = readsFile && !!path && /\.html?$/i.test(path);
+  const showsHtmlPage = canToggleHtml && htmlViewMode === "preview";
   // SVG 按文本读取，以便在预览和源码之间切换。
   const imageType = readsFile && !isSvgPath(path) ? inferImageMediaType(path) : null;
 
   useEffect(() => {
     setActionError(null);
-    if (!readsFile || !path) return;
+    // HTML 页面走隔离资源协议；只有切到源码时才读取文本，源码上限不能阻止页面加载。
+    if (!readsFile || !path || showsHtmlPage) return;
     let active = true;
     let imageUrl: string | null = null;
     setResult(null);
@@ -109,7 +112,9 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
         imageUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: imageType }));
         return { kind: "image", url: imageUrl };
       }
-      if (info.size > FILE_VIEWER_MAX_TEXT_BYTES) return { kind: "notice", notice: "文件超过 256 KiB 预览上限，请用默认应用打开。" };
+      if (info.size > FILE_VIEWER_MAX_TEXT_BYTES) return { kind: "notice", notice: canToggleHtml
+        ? "HTML 源码超过 256 KiB 高亮上限，请切回「页面」继续预览，或用默认应用查看源码。"
+        : "文件超过 256 KiB 预览上限，请用默认应用打开。" };
       const content = await hcode.invoke("fs:readText", path, FILE_VIEWER_MAX_TEXT_BYTES);
       return content === null
         ? { kind: "notice", notice: "该文件为二进制、非 UTF-8 文本或无法读取，请用默认应用打开。" }
@@ -123,7 +128,7 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
       active = false;
       if (imageUrl) URL.revokeObjectURL(imageUrl);
     };
-  }, [source, path, readsFile, imageType, revision]);
+  }, [source, path, readsFile, imageType, revision, showsHtmlPage, canToggleHtml]);
 
   const perform = async (channel: "app:showInFinder" | "app:openPath") => {
     if (!path) return;
@@ -138,7 +143,6 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
   const language = source.type === "text" ? source.language : inferCodeLanguage(path, content);
   const canToggleMarkdown = content !== undefined && language === "markdown";
   const canToggleSvg = content !== undefined && isSvgPath(path);
-  const canToggleHtml = readsFile && content !== undefined && !!path && /\.html?$/i.test(path);
   const canToggleWrap = content !== undefined && !isMermaidLanguage(language)
     && !(canToggleMarkdown && markdownViewMode === "preview") && !(canToggleSvg && svgViewMode === "preview")
     && !(canToggleHtml && htmlViewMode === "preview");
@@ -154,14 +158,14 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
     if (result?.kind === "image") {
       return <ImagePreviewContent title={source.title} imageSource={result.url} sourcePath={path} />;
     }
+    if (showsHtmlPage) {
+      return <HtmlPreviewContent path={path!} workspacePath={workspacePath} revision={revision} title={source.title} />;
+    }
     if (content === undefined) {
       const notice = !readsFile ? "该工具没有可显示的差异。" : result?.kind === "notice" ? result.notice : imageType ? "正在读取图片…" : "正在读取文件…";
       return <p role="status" className="p-4 text-ui-sm text-foreground-subtle">{notice}</p>;
     }
     if (!content.length) return <p role="status" className="p-4 text-ui-sm text-foreground-subtle">这是一个空文件。</p>;
-    if (canToggleHtml && htmlViewMode === "preview") {
-      return <HtmlPreviewContent path={path!} workspacePath={workspacePath} revision={revision} title={source.title} />;
-    }
     if (canToggleMarkdown && markdownViewMode === "preview") {
       return (
         <div className="p-4">

@@ -53,13 +53,34 @@ describe("隔离 HTML 预览", () => {
     expect((await data.service.respond(new Request(lease.url, { method: "POST" }))).status).toBe(405);
   });
 
-  it("刷新或关闭后撤销旧地址，拒绝非 HTML 和超限文件", async () => {
+  it("超过源码预览阈值的 HTML 仍能完整加载为页面", async () => {
+    const data = await fixture();
+    const html = `<!doctype html><button>大文件交互</button><!--${"x".repeat(300 * 1024)}--><script>document.body.dataset.ready = 'true';</script>`;
+    await writeFile(data.path, html);
+    const lease = await data.service.create(data.path, data.project);
+    const page = await data.service.respond(new Request(lease.url));
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe(html);
+    const head = await data.service.respond(new Request(lease.url, { method: "HEAD" }));
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+  });
+
+  it("刷新或关闭后撤销旧地址，拒绝非 HTML 和超过页面读取上限的文件", async () => {
     const data = await fixture();
     const lease = await data.service.create(data.path, data.project);
     data.service.release(lease.id);
     expect((await data.service.respond(new Request(lease.url))).status).toBe(404);
     await expect(data.service.create(join(data.project, "app.js"), data.project)).rejects.toThrow();
-    await writeFile(data.path, "x".repeat(256 * 1024 + 1));
+    await writeFile(data.path, "x".repeat(2 * 1024 * 1024 + 1));
     await expect(data.service.create(data.path, data.project)).rejects.toThrow();
+  });
+
+  it("创建预览后文件增长超过上限时，读取明确返回 413", async () => {
+    const data = await fixture();
+    const lease = await data.service.create(data.path, data.project);
+    await writeFile(data.path, "x".repeat(2 * 1024 * 1024 + 1));
+    const page = await data.service.respond(new Request(lease.url));
+    expect(page.status).toBe(413);
   });
 });

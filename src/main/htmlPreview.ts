@@ -5,7 +5,8 @@ import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import { HTML_PREVIEW_SCHEME, type HtmlPreviewLease } from "../shared/htmlPreview.js";
 import { readTextFile } from "./readTextFile.js";
 
-const MAX_HTML_BYTES = 256 * 1024;
+// 页面由隔离协议直接加载，不套用源码高亮的 256 KiB 阈值；仍遵守主进程文本读取硬上限。
+const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_RESOURCE_BYTES = 10 * 1024 * 1024;
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
@@ -46,7 +47,7 @@ export class HtmlPreviewService {
   async create(path: string, workspacePath?: string): Promise<HtmlPreviewLease> {
     const file = await realpath(path);
     if (!/^\.html?$/i.test(extname(file))) throw new Error("该文件不是 HTML 页面");
-    if (await readTextFile(file, MAX_HTML_BYTES) === null) throw new Error("HTML 无法读取、不是 UTF-8 文本或超过 256 KiB");
+    if (await readTextFile(file, MAX_HTML_BYTES) === null) throw new Error("HTML 无法读取、不是 UTF-8 文本或超过 2 MiB");
     const workspace = workspacePath ? await realpath(workspacePath) : dirname(file);
     const root = isInside(workspace, file) ? workspace : dirname(file);
     const id = randomUUID();
