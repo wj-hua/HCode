@@ -304,7 +304,7 @@ async function bootstrap() {
     },
   });
   handle("chat:send", (params) => execution!.send(params));
-  const invocations = new AgentInvocationService(new InvocationRepository(join(app.getPath('userData'), 'agent-invocations')), execution, call => send('agentInvocation:updated', call), agent => store.settings.defaultModels[agent]);
+  const invocations = new AgentInvocationService(new InvocationRepository(join(app.getPath('userData'), 'agent-invocations')), execution, call => send('agentInvocation:updated', call), agent => store.settings.defaultModels[agent], agents);
   handle('agentInvocation:list', (key, nativeId) => invocations.list(key, nativeId));
   handle('agentInvocation:cancel', id => invocations.cancel(id));
   const collaborationRepository = new CollaborationRepository(join(app.getPath("userData"), "collaborations"));
