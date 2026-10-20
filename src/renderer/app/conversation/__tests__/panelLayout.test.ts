@@ -11,4 +11,9 @@ describe('协作面板布局边界', () => {
     expect(constrainPanelWidth(320, 200)).toBe(170);
     expect(constrainPanelWidth(480, 0)).toBe(0);
   });
+  it('文件分栏在桌面最小窗口也保留消息与输入空间，更窄时各占一半', () => {
+    expect(constrainPanelWidth(480, 684, true)).toBe(324);
+    expect(constrainPanelWidth(480, 400, true)).toBe(200);
+    expect(constrainPanelWidth(900, 1200, true)).toBe(840);
+  });
 });

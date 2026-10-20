@@ -29,6 +29,7 @@ import { errorMessage } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
 import { useFilePreview } from "./FilePreviewContext";
 import { SidePanel } from "./SidePanel";
+import { HtmlPreviewContent } from "./HtmlPreviewContent";
 
 type FileResult =
   | { kind: "text"; content: string }
@@ -64,6 +65,7 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
   const [actionError, setActionError] = useState<string | null>(null);
   const [markdownViewMode, setMarkdownViewMode] = useState<ViewMode>("preview");
   const [svgViewMode, setSvgViewMode] = useState<ViewMode>("preview");
+  const [htmlViewMode, setHtmlViewMode] = useState<ViewMode>("preview");
   const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
   const settings = useUiStore((state) => state.codePreviewSettings);
   const theme = useUiStore((state) => state.theme);
@@ -136,8 +138,10 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
   const language = source.type === "text" ? source.language : inferCodeLanguage(path, content);
   const canToggleMarkdown = content !== undefined && language === "markdown";
   const canToggleSvg = content !== undefined && isSvgPath(path);
+  const canToggleHtml = readsFile && content !== undefined && !!path && /\.html?$/i.test(path);
   const canToggleWrap = content !== undefined && !isMermaidLanguage(language)
-    && !(canToggleMarkdown && markdownViewMode === "preview") && !(canToggleSvg && svgViewMode === "preview");
+    && !(canToggleMarkdown && markdownViewMode === "preview") && !(canToggleSvg && svgViewMode === "preview")
+    && !(canToggleHtml && htmlViewMode === "preview");
   const hasViewOptions = canToggleMarkdown || canToggleSvg || canToggleWrap;
 
   const renderBody = () => {
@@ -155,6 +159,9 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
       return <p role="status" className="p-4 text-ui-sm text-foreground-subtle">{notice}</p>;
     }
     if (!content.length) return <p role="status" className="p-4 text-ui-sm text-foreground-subtle">这是一个空文件。</p>;
+    if (canToggleHtml && htmlViewMode === "preview") {
+      return <HtmlPreviewContent path={path!} workspacePath={workspacePath} revision={revision} title={source.title} />;
+    }
     if (canToggleMarkdown && markdownViewMode === "preview") {
       return (
         <div className="p-4">
@@ -199,6 +206,12 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
 
   const actions = (
     <>
+      {canToggleHtml ? (
+        <div role="group" aria-label="HTML 查看方式" className="flex shrink-0 items-center rounded-md border border-border p-0.5">
+          <Button variant={htmlViewMode === "preview" ? "secondary" : "ghost"} size="sm" aria-pressed={htmlViewMode === "preview"} onClick={() => setHtmlViewMode("preview")}>页面</Button>
+          <Button variant={htmlViewMode === "code" ? "secondary" : "ghost"} size="sm" aria-pressed={htmlViewMode === "code"} onClick={() => setHtmlViewMode("code")}>源码</Button>
+        </div>
+      ) : null}
       {!readsFile && path ? (
         <Button variant="ghost" size="sm" className="gap-1 text-foreground-subtle hover:text-foreground" onClick={() => preview?.onOpenFileLink({ path, label: getPathLeaf(path) })}>
           <FileCode2Icon className="size-3.5" />查看文件
@@ -257,7 +270,7 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
   );
 
   return (
-    <SidePanel label="文件预览面板" title={title} onClose={onClose} actions={actions}>
+    <SidePanel label="文件预览面板" title={title} onClose={onClose} actions={actions} docked>
       {actionError ? <p role="alert" className="shrink-0 break-words border-b border-border px-4 py-2 text-ui-sm text-destructive">打开失败：{actionError}</p> : null}
       <div className="min-h-0 flex-1 overflow-auto">{renderBody()}</div>
     </SidePanel>

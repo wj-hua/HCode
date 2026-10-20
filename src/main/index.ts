@@ -27,6 +27,8 @@ import { ExtensionsService } from "./extensions.js";
 import { searchSessions } from "./sessionSearch.js";
 import { installApplicationMenu } from "./menu.js";
 import { readTextFile } from "./readTextFile.js";
+import { HtmlPreviewService } from "./htmlPreview.js";
+import { HTML_PREVIEW_SCHEME } from "../shared/htmlPreview.js";
 import { SessionExecutionService } from "./sessions/sessionExecutionService.js";
 import { OrdinaryContinuationService } from "./sessions/ordinaryContinuation.js";
 import {ExpertProfileService} from "./collaboration/experts/profiles/expertProfileService.js";
@@ -44,7 +46,10 @@ if (process.env.HCODE_DEV_SERVER_URL) {
 if (!app.requestSingleInstanceLock()) app.quit();
 
 // 背景图片/视频经此协议提供：视频需要 stream 才能按 Range 拖动播放。
-protocol.registerSchemesAsPrivileged([{ scheme: "hcode-media", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: "hcode-media", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+  { scheme: HTML_PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 let shellEnv: Record<string, string> = {};
@@ -421,6 +426,10 @@ async function bootstrap() {
   });
 
   handle("fs:readText", readTextFile);
+  const htmlPreview = new HtmlPreviewService();
+  handle("fs:createHtmlPreview", (path, workspacePath) => htmlPreview.create(path, workspacePath));
+  handle("fs:releaseHtmlPreview", id => htmlPreview.release(id));
+  protocol.handle(HTML_PREVIEW_SCHEME, request => htmlPreview.respond(request));
   handle("fs:stat", async (path) => {
     try {
       const info = await stat(path);

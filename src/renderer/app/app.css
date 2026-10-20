@@ -13,6 +13,11 @@
 .collaboration-shell {
   container: collaboration-workspace / inline-size;
   --collaboration-panel-width: clamp(20rem, var(--collaboration-preferred-width, 30rem), calc(100% - 22.5rem));
+  --file-preview-panel-width: clamp(20rem, var(--collaboration-preferred-width, 30rem), calc(100% - 22.5rem));
+}
+.file-preview-side-panel { width: 50%; }
+@container collaboration-workspace (min-width: 42.5rem) {
+  .file-preview-side-panel { width: var(--file-preview-panel-width); }
 }
 .collaboration-side-panel { width: min(var(--collaboration-preferred-width, 30rem), 85%); }
 @container collaboration-workspace (min-width: 52rem) {

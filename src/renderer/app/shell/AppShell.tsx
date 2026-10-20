@@ -10,6 +10,7 @@ import { hcode } from "../bridge";
 import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
 import { FilePreviewProvider } from "../conversation/FilePreviewContext";
 import { FilePreviewPanel } from "../conversation/FilePreviewPanel";
+import { FilePreviewLayout } from "../conversation/FilePreviewLayout";
 import { useUiStore } from "../store/uiStore";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
@@ -88,15 +89,7 @@ export function AppShell() {
             />
             {conversation ? (
               <>
-                {compareMembers.length > 1 ? (
-                  <CompareView members={compareMembers} active={conversation} />
-                ) : (
-                  <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
-                )}
-                {diffOpen ? (
-                  <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setSidePanel(null)} />
-                ) : null}
-                {filePreview ? (
+                <FilePreviewLayout preview={filePreview ? (
                   <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
                     <FilePreviewPanel
                       key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`}
@@ -104,6 +97,15 @@ export function AppShell() {
                       onClose={() => setSidePanel(null)}
                     />
                   </FilePreviewProvider>
+                ) : null}>
+                  {compareMembers.length > 1 ? (
+                    <CompareView members={compareMembers} active={conversation} />
+                  ) : (
+                    <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
+                  )}
+                </FilePreviewLayout>
+                {diffOpen ? (
+                  <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setSidePanel(null)} />
                 ) : null}
               </>
             ) : (

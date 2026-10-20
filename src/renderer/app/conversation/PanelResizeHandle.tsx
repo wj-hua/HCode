@@ -22,7 +22,7 @@ function saveWidth(width: number) {
   catch (reason) { console.error('保存协作面板宽度失败', reason); }
 }
 
-export function PanelResizeHandle() {
+export function PanelResizeHandle({ docked = false, label = "调整协作面板宽度" }: { docked?: boolean; label?: string }) {
   const handle = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; startX: number; width: number } | null>(null);
   const width = useUiStore(state => state.panelWidth);
@@ -35,15 +35,15 @@ export function PanelResizeHandle() {
     observer.observe(workspace);
     return () => observer.disconnect();
   }, []);
-  const bounds = panelWidthBounds(workspaceWidth);
-  const current = constrainPanelWidth(width, workspaceWidth);
+  const bounds = panelWidthBounds(workspaceWidth, docked);
+  const current = constrainPanelWidth(width, workspaceWidth, docked);
   const update = (next: number, persist = false) => {
-    const value = constrainPanelWidth(next, workspaceWidth);
+    const value = constrainPanelWidth(next, workspaceWidth, docked);
     setWidth(value);
     // 窄窗口自动收缩不覆盖用户的桌面偏好。
     if (persist) saveWidth(Math.max(PANEL_LAYOUT.minWidth, value));
   };
-  return <div ref={handle} role="separator" tabIndex={0} aria-label="调整协作面板宽度" aria-orientation="vertical" aria-valuemin={Math.round(bounds.min)} aria-valuemax={Math.round(bounds.max)} aria-valuenow={current} aria-valuetext={`${current} 像素，左右方向键调整，Home 最窄，End 最宽`} className="collaboration-resize-handle app-no-drag"
+  return <div ref={handle} role="separator" tabIndex={0} aria-label={label} aria-orientation="vertical" aria-valuemin={Math.round(bounds.min)} aria-valuemax={Math.round(bounds.max)} aria-valuenow={current} aria-valuetext={`${current} 像素，左右方向键调整，Home 最窄，End 最宽`} className="collaboration-resize-handle app-no-drag"
     onPointerDown={event => {
       if (event.button !== 0) return;
       event.preventDefault();
