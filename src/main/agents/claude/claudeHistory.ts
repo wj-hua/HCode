@@ -6,13 +6,13 @@ import { join } from "node:path";
 import {
   forkSession,
   getSessionMessages,
-  listSessions,
   renameSession,
   type SDKSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ForkParams, SessionLoadResult, SessionSummary } from "../../../shared/types.js";
 import { trashPaths } from "../../util/trash.js";
 import { projectHistory, type ClaudeRecord } from "./rowProjector.js";
+import { listClaudeSessionInfos } from "./claudeSessionIndex.js";
 
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const CLAUDE_PROJECTS_DIR = join(CLAUDE_DIR, "projects");
@@ -75,14 +75,26 @@ export class ClaudeHistory {
   private watcher: FSWatcher | null = null;
   private debounce: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
+  private projectPathsKey = "";
 
-  constructor(private readonly onChanged: (projectPaths: string[]) => void) {}
+  constructor(
+    private readonly onChanged: (projectPaths: string[]) => void,
+    private readonly getProjectPaths: () => readonly string[] = () => [],
+  ) {}
 
   async all(): Promise<SessionSummary[]> {
+    const projectPaths = [...new Set(this.getProjectPaths())].sort();
+    const projectPathsKey = JSON.stringify(projectPaths);
+    if (projectPathsKey !== this.projectPathsKey) {
+      this.generation++;
+      this.cache = null;
+      this.loading = null;
+      this.projectPathsKey = projectPathsKey;
+    }
     if (this.cache) return this.cache;
     if (!this.loading) {
       const generation = this.generation;
-      this.loading = Promise.all([listSessions(), readTerminalSessionIds()])
+      this.loading = Promise.all([listClaudeSessionInfos(projectPaths), readTerminalSessionIds()])
         .then(([list, terminalIds]) =>
           list
             .map(toSummary)
@@ -95,7 +107,7 @@ export class ClaudeHistory {
           return sorted;
         })
         .finally(() => {
-          this.loading = null;
+          if (generation === this.generation) this.loading = null;
         });
     }
     return this.loading;

@@ -41,8 +41,9 @@ export class ClaudeAgent implements AgentProvider {
     private readonly events: AgentEvents,
     private readonly getEnv: () => Record<string, string>,
     private readonly getPathOverride: () => string,
+    getProjectPaths: () => readonly string[] = () => [],
   ) {
-    this.history = new ClaudeHistory((paths) => events.indexChanged(paths));
+    this.history = new ClaudeHistory((paths) => events.indexChanged(paths), getProjectPaths);
   }
 
   async getStatus(refresh = false): Promise<AgentStatus> {

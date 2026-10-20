@@ -179,7 +179,8 @@ async function bootstrap() {
     indexChanged: (projectPaths) => send("sessions:indexChanged", { projectPaths }),
     quotaStale: (agent) => quota?.markStale(agent),
   };
-  const claude = new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude);
+  const claude = new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude,
+    () => [...store.projects.manual, conversationWorkspace.path]);
   const codex = new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion());
   const agents = new AgentRegistry({
     claude,
