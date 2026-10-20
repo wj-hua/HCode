@@ -31,11 +31,11 @@ import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
 import { playNotificationSound } from "../notificationSound";
-import { applyRowOps } from "../rows";
 import { drafts, fileDrafts, imageDrafts } from "../composer/drafts";
 import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 import { selectConversationWorkspace } from "./conversationWorkspaceActions";
+import { SessionViewSync } from "./sessionViewSync";
 import { discardTurnHistory, loadTurnHistory, saveTurnHistory, turnDiffPatch } from "../conversation/turnHistory";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
@@ -248,6 +248,7 @@ function rowAttachments(row: Extract<ConversationRow, { kind: "userInput" }>): {
 let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
+  const sessionViews = new SessionViewSync();
   // 连续置顶不同会话时逐次读取最新设置，避免后一次补丁覆盖前一次。
   let pinUpdate = Promise.resolve();
   const patchConversation = (viewId: string, patch: Partial<Conversation>) =>
@@ -387,13 +388,17 @@ export const useAppStore = create<AppState>((set, get) => {
 
   const subscribeEvents = () => {
     hcode.on("chat:rows", ({ sessionKey, ops }) => {
+      const rows = sessionViews.captureRows({ sessionKey, ops });
       const conv = findBySessionKey(sessionKey);
       if (!conv) return;
-      patchConversation(conv.viewId, { rows: applyRowOps(conv.rows, ops) });
+      patchConversation(conv.viewId, { rows, loading: false, loadError: undefined });
     });
     hcode.on("chat:state", (event) => {
-      const conv = findBySessionKey(event.sessionKey);
+      const liveState = sessionViews.captureState(event);
+      const conv = sessionViews.match(liveState, get().conversations);
       if (!conv) return;
+      const attached = conv.sessionKey !== event.sessionKey && liveState.sessionId
+        ? sessionViews.viewPatch({ ...liveState, id: liveState.sessionId }) : undefined;
       const wasBusy = conv.runState === "running" || conv.runState === "awaitingApproval";
       const willContinue = conv.queue.length > 0 && !conv.queuePaused;
       const finished = wasBusy && (event.state === "error" || (event.state === "idle" && !willContinue));
@@ -406,8 +411,9 @@ export const useAppStore = create<AppState>((set, get) => {
         void notify(conv, "done", lastAssistantText(conv.rows));
       }
       patchConversation(conv.viewId, {
+        ...attached,
         runState: event.state,
-        runStartedAt: event.state === "running" || event.state === "awaitingApproval" ? conv.runStartedAt ?? Date.now() : undefined,
+        runStartedAt: event.state === "running" || event.state === "awaitingApproval" ? attached?.runStartedAt ?? conv.runStartedAt ?? Date.now() : undefined,
         error: event.error,
         permissionMode: event.permissionMode,
         ...(event.sessionId ? { sessionId: event.sessionId } : {}),
@@ -526,10 +532,12 @@ export const useAppStore = create<AppState>((set, get) => {
 
     async openSession(summary) {
       const existing = Object.values(get().conversations).find(
-        (conv) => conv.sessionId === summary.id,
+        (conv) => conv.agent === summary.agent && conv.projectPath === summary.projectPath && conv.sessionId === summary.id,
       );
       if (existing) {
         set({ activeViewId: existing.viewId });
+        const live = sessionViews.viewPatch(summary);
+        if (live) patchConversation(existing.viewId, live);
         return;
       }
       const { settings } = get();
@@ -557,15 +565,23 @@ export const useAppStore = create<AppState>((set, get) => {
         conversations: { ...state.conversations, [viewId]: conv },
         activeViewId: viewId,
       }));
+      const live = sessionViews.viewPatch(summary);
+      if (live) patchConversation(viewId, live);
+      if (live?.rows) return;
+      const currentLoad = sessionViews.beginHistoryLoad(viewId);
       try {
         const result = await hcode.invoke("sessions:load", {
           agent: summary.agent,
           id: summary.id,
           projectPath: summary.projectPath,
         });
-        patchConversation(viewId, { rows: result.rows, loading: false });
+        if (currentLoad()) patchConversation(viewId, { rows: result.rows, ...sessionViews.viewPatch(summary), loading: false, loadError: undefined });
       } catch (error) {
-        patchConversation(viewId, { loading: false, loadError: errorMessage(error) });
+        if (!currentLoad()) return;
+        const latest = sessionViews.viewPatch(summary);
+        patchConversation(viewId, { ...latest, loading: false, loadError: latest?.rows ? undefined : errorMessage(error) });
+      } finally {
+        if (currentLoad()) sessionViews.cancelHistoryLoad(viewId);
       }
     },
 
@@ -794,7 +810,10 @@ export const useAppStore = create<AppState>((set, get) => {
       const conv = Object.values(get().conversations).find((c) => c.agent === summary.agent && c.sessionId === summary.id);
       try {
         // 先关闭主进程里的活动会话，避免 CLI 进程继续写已删除的会话文件
-        if (conv?.sessionKey) await hcode.invoke("chat:close", conv.sessionKey);
+        if (conv?.sessionKey) {
+          await hcode.invoke("chat:close", conv.sessionKey);
+          sessionViews.forget(conv.sessionKey);
+        }
         const settings = await hcode.invoke("sessions:delete", { agent: summary.agent, id: summary.id, projectPath: summary.projectPath });
         set({ settings });
       } catch (error) {
@@ -804,6 +823,7 @@ export const useAppStore = create<AppState>((set, get) => {
       discardPersisted(conv ?? { sessionId: summary.id, projectPath: summary.projectPath });
       discardTurnHistory({ agent: summary.agent, projectPath: summary.projectPath, sessionId: summary.id });
       if (conv) {
+        sessionViews.cancelHistoryLoad(conv.viewId);
         set((state) => {
           const { [conv.viewId]: _removed, ...rest } = state.conversations;
           return {
@@ -900,12 +920,14 @@ export const useAppStore = create<AppState>((set, get) => {
       if (conv.sessionKey) {
         try {
           await hcode.invoke("chat:close", conv.sessionKey);
+          sessionViews.forget(conv.sessionKey);
         } catch (error) {
           toast(`关闭会话失败：${errorMessage(error)}`, { variant: "warning" });
           return;
         }
       }
       discardPersisted(conv);
+      sessionViews.cancelHistoryLoad(activeViewId);
       discardTurnHistory(conv);
       drafts.delete(activeViewId);
       imageDrafts.delete(activeViewId);
