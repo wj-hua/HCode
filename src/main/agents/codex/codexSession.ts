@@ -651,7 +651,14 @@ export class CodexSession {
     this.validateHostedCatalog();
   }
   private validateHostedCatalog() {
-    this.hostedAvailable = Boolean(this.hosted && this.catalog && (this.hosted.tools ?? []).every(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)));
+    if (this.hosted && this.catalog) {
+      const registered = this.hosted.tools?.filter(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)) ?? [];
+      const missing = this.hosted.tools?.filter(tool => !registered.includes(tool)) ?? [];
+      // 原生线程不能补动态工具；新增批量能力不能连带关闭已有单项委派。
+      if (missing.length && registered.length) this.hosted = { ...this.hosted, tools: registered,
+        instructions: `${this.hosted.instructions ?? ''}\n本线程未注册 ${missing.map(tool => tool.name).join('、')}，不能调用或冒充已派发。仅使用本线程已有工具；需要新增并行工具请新建 Codex 会话，已有 call_agent 可继续顺序委派。` };
+    }
+    this.hostedAvailable = Boolean(this.hosted?.tools?.length && this.catalog && this.hosted.tools.every(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)));
     if (this.hostedAvailable) assertToolCatalog(this.catalog!, this.hosted!);
   }
   async collaborationSourceReason() {

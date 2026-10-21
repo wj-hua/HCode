@@ -1,15 +1,15 @@
 // 独立目录的快照、独占租约、受控文本写入和候选冻结；写回由独立采纳模块负责。
-import { cp, rmdir, lstat, readlink, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { cp, rmdir, lstat, readlink, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { CodeAdmission, CodeVersion, CodeWorkspace, CandidatePreview } from '../../../shared/codeDelivery.js';
-import { CODE_WORKSPACE_LIMITS } from '../../../shared/codeDelivery.js';
 import { readResearchFile } from "../../sessions/researchRuntime.js";
 import type { HostedTool } from '../../sessions/researchRuntime.js';
 import { hashBytes, inside, manifest, type FileManifest } from './fileManifest.js';
 import { candidateChanges } from './candidateChanges.js';
+import { ScopedFileWriter } from '../../sessions/scopedFileWriter.js';
 
 export class WorkspaceService {
   private readonly leases = new Map<string, string>();
@@ -64,54 +64,17 @@ export class WorkspaceService {
   private assertLease(workspace: CodeWorkspace, owner: string) {
     if (workspace.state === 'discarded' || this.leases.get(workspace.id) !== owner) throw new Error('没有当前工作区写入租约');
   }
-  private async writePath(workspace: CodeWorkspace, input: string) {
-    const path = resolve(workspace.path, input);
-    if (!input || !inside(workspace.path, path) || path === workspace.path || input.split('/').includes('.git')) throw new Error('写入路径超出候选范围');
-    if (input.split('/').includes('node_modules')) throw new Error('依赖目录不开放模型写入');
-    // 所有已有祖先必须是目录，拒绝符号链接别名，避免写入另一受审路径。
-    const parts = resolve(path).slice(workspace.path.length + 1).split('/');
-    let ancestor = workspace.path;
-    for (const part of parts) {
-      ancestor = join(ancestor, part);
-      const info = await this.optionalStat(ancestor);
-      if (info?.isSymbolicLink()) throw new Error('写入路径含符号链接');
-      if (ancestor !== path && info && !info.isDirectory()) throw new Error('写入路径祖先不是目录');
-    }
-    return path;
-  }
-  private async optionalStat(path: string) {
-    try { return await lstat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
-  }
   async fileHash(workspace: CodeWorkspace, path: string): Promise<string | null> {
-    const destination = await this.writePath(workspace, path);
-    if (!await this.optionalStat(destination)) return null;
-    return hashBytes(await readFile(destination));
+    return new ScopedFileWriter(workspace.path, () => {}).fileHash(path);
   }
   writerTools(workspace: CodeWorkspace, owner: string, allowedPaths?: string[]): HostedTool[] {
-    const common = { path: z.string().min(1), expectedHash: z.string().regex(/^[a-f0-9]{64}$/).nullable() };
-    return [
-      { name: 'write_file', description: '在独立候选目录写入完整文本。expectedHash 来自 read_file；新文件为 null。不可写原项目、依赖或符号链接。', schema: { ...common, content: z.string().max(CODE_WORKSPACE_LIMITS.maxWriteBytes) }, execute: async (input) => {
-        this.assertLease(workspace, owner);
-        if(allowedPaths && !allowedPaths.includes(String(input.path)))throw new Error('写入路径超出用户确认的任务范围');
-        const path = await this.writePath(workspace, String(input.path)), content = String(input.content);
-        if (Buffer.byteLength(content) > CODE_WORKSPACE_LIMITS.maxWriteBytes) throw new Error('写入内容超过 256 KiB');
-        if (await this.fileHash(workspace, String(input.path)) !== input.expectedHash) throw new Error('文件 hash 已变化，需重新读取');
-        const info = await this.optionalStat(path);
-        await mkdir(resolve(path, '..'), { recursive: true });
-        const temporary = `${path}.${randomUUID()}.tmp`;
-        await writeFile(temporary, content, { mode: info ? info.mode & 0o777 : 0o644 });
-        this.assertLease(workspace, owner);
-        await rename(temporary, path);
-        return { path: input.path, hash: hashBytes(content) };
-      } },
-      { name: 'delete_file', description: '删除候选目录内单个文本文件，必须匹配当前 hash；不支持递归目录删除。', schema: common, execute: async (input) => {
-        this.assertLease(workspace, owner);
-        if(allowedPaths && !allowedPaths.includes(String(input.path)))throw new Error('写入路径超出用户确认的任务范围');
-        const path = await this.writePath(workspace, String(input.path));
-        if (input.expectedHash === null || await this.fileHash(workspace, String(input.path)) !== input.expectedHash) throw new Error('删除文件 hash 不匹配');
-        await rm(path); return { deleted: input.path };
-      } },
-    ];
+    // 保留已有线程的工具目录描述；路径和 hash 规则与普通并行委派共用同一写入边界。
+    return new ScopedFileWriter(workspace.path, () => this.assertLease(workspace, owner), allowedPaths).tools().map(tool => {
+      tool.description = tool.name === 'write_file'
+        ? '在独立候选目录写入完整文本。expectedHash 来自 read_file；新文件为 null。不可写原项目、依赖或符号链接。'
+        : '删除候选目录内单个文本文件，必须匹配当前 hash；不支持递归目录删除。';
+      return tool;
+    });
   }
 
   /** 每次冻结保留累计差异及完整清单；二进制与权限变化不被文本预览遗漏。 */

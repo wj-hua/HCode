@@ -1,9 +1,10 @@
 // HTTP/MCP 公开边界验证真实宿主读取、认证、作用域与工具权限，不替换研究规则。
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, realpath, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { AgyResearchBridge } from '../agyResearchBridge.js';
+import { ScopedFileWriter } from '../../../sessions/scopedFileWriter.js';
 
 it('MCP 只返回本项目真实证据，越界、写入、额外参数、未认证及已结束作用域拒绝', async () => {
   const root = await mkdtemp(join(tmpdir(), 'hcode-agy-mcp-')), bridge = new AgyResearchBridge();
@@ -50,4 +51,30 @@ it('研究桥接受宿主只读 Skill 资源工具，仍拒绝委派和写入工
   expect(JSON.parse(result.result.content[0]!.text)).toEqual({content:'frozen method'});
   expect(()=>bridge.begin({root:tmpdir(),tools:[{name:'write_file',description:'unauthorized',schema:{},execute:async()=>null}]})).toThrow('未开放');
  }finally{bridge.close();}
+});
+
+it('只有宿主签发的写入闭包可经 Gemini MCP 修改授权文件，越界与关闭后的请求均拒绝', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'hcode-agy-writer-'))), bridge = new AgyResearchBridge();
+  let active = true;
+  const feedback: unknown[] = [];
+  try {
+    const tools = new ScopedFileWriter(root, () => { if (!active) throw new Error('写入租约已结束'); }, ['ui.txt'], async event => { feedback.push(event); }).tools();
+    bridge.begin({ root, tools }); await bridge.listen();
+    let id = 0;
+    const request = async (method: string, params: unknown) => {
+      const response = await fetch(bridge.config.serverUrl, { method: 'POST', headers: { ...bridge.config.headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) });
+      return await response.json() as { result: { content: { text: string }[]; isError?: boolean; tools: { name: string; annotations: { readOnlyHint: boolean } }[] } };
+    };
+    const listing = await request('tools/list', {});
+    expect(listing.result.tools.find(tool => tool.name === 'write_file')!.annotations.readOnlyHint).toBe(false);
+    const rejected = await request('tools/call', { name: 'write_file', arguments: { path: 'business.txt', expectedHash: null, content: 'wrong' } });
+    expect(rejected.result.isError).toBe(true);
+    expect(JSON.parse(rejected.result.content[0]!.text)).toMatchObject({ code: 'write_scope_violation', path: 'business.txt' });
+    expect(feedback).toHaveLength(1);
+    expect((await request('tools/call', { name: 'write_file', arguments: { path: 'ui.txt', expectedHash: null, content: 'allowed' } })).result.isError).toBeUndefined();
+    active = false;
+    const rejectedLate = await request('tools/call', { name: 'delete_file', arguments: { path: 'ui.txt', expectedHash: null } });
+    expect(rejectedLate.result.isError).toBe(true);
+    expect(await readFile(join(root, 'ui.txt'), 'utf8')).toBe('allowed');
+  } finally { bridge.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -3,6 +3,7 @@ import { INVOCATION_AGENTS, type AgentInvocationInput, type InvocationAgent } fr
 import { AGENTS } from '../../shared/agents.js';
 import type { AgentRegistry } from '../agents/registry.js';
 import { AGY_COLLABORATION_VERSION, GEMINI_MODEL_PREFIX } from '../agents/agy/agyResearchSession.js';
+import { isCodexResearchVersion } from '../sessions/researchRuntime.js';
 
 const AGY_READ_ONLY_VERSIONS: readonly string[] = [AGY_COLLABORATION_VERSION, '1.4.3'];
 const AGY_LIMITATION = 'agy/Gemini 无头模式不支持交互审批，需要确认的操作会被拒绝；只读调用使用隔离研究角色，仅支持已验证版本。';
@@ -25,6 +26,8 @@ export async function listInvocationTargets(agents: AgentRegistry, platform: Nod
       return {
         agent, available: true, version: status.version,
         canReadOnly: agent !== 'agy' || agyReadOnlySupported(status.version, platform), canExecute: true,
+        canExecuteParallel: agent === 'codex' ? isCodexResearchVersion(status.version) : agent !== 'agy' || agyReadOnlySupported(status.version, platform),
+        parallelExecution: 'call_agents 要求互不重叠的准确文件清单；原生命令和写入关闭，仅宿主文件工具可写清单内文件。子任务不运行测试，由主 AI 随后做集成验证。',
         models: selectableModels,
         ...(agent === 'agy' ? { limitation: AGY_LIMITATION } : {}),
       };
@@ -32,6 +35,13 @@ export async function listInvocationTargets(agents: AgentRegistry, platform: Nod
       return { agent, available: false, reason: `CLI 能力读取失败：${error instanceof Error ? error.message : String(error)}` };
     }
   }));
+}
+
+/** 并行写入依赖可核验的受限运行时，不能以普通原生执行替代。 */
+export async function validateScopedInvocationTarget(agents: AgentRegistry, input: AgentInvocationInput) {
+  await validateInvocationTarget(agents, { ...input, mode: 'read-only' });
+  const status = await agents.get(input.agent).getStatus();
+  if (input.agent === 'codex' && !isCodexResearchVersion(status.version)) throw new Error(`Codex ${status.version ?? '未知版本'} 尚未通过文件范围受限执行验证，不能降级为普通执行`);
 }
 
 /** 发送前重核对目标与 Gemini 模型；不自动降级、换模型或扩大权限。 */

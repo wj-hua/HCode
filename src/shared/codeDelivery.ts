@@ -18,3 +18,4 @@ export interface CodeVersion { id: string; version: number; hash: string; change
 export interface ValidationResult { checkId: ValidationCheckId; command: string; versionId: string; versionHash: string; exitCode: number | null; status: 'passed' | 'failed' | 'interrupted'; stdout: string; stderr: string; logTruncated: boolean }
 export interface CodeDeliveryState { allowedPaths?: string[]; adoption?: AdoptionState; stopUnconfirmed?: boolean; workspace: CodeWorkspace; versions: CodeVersion[]; validations: ValidationResult[]; phase: 'execution' | 'validation' | 'review' | 'candidate' | 'manual' | 'discarded' }
 export interface CandidatePreview { version: CodeVersion; changes: { path: string; before: string | null; after: string | null; binary: boolean }[] }
+export interface ScopedWriteFeedback { code: string; path: string; error: string; guidance: string }

@@ -11,6 +11,7 @@ import type { AgentInvocation } from '../../../shared/agentInvocation.js';
 import { SessionExecutionService } from '../../sessions/sessionExecutionService.js';
 import { InvocationRepository } from '../invocationRepository.js';
 import { AgentInvocationService } from '../agentInvocationService.js';
+import { callResearchTool } from '../../agents/codex/researchTools.js';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const source: ChatSendParams = { agent: 'claude', sessionKey: 'source', resumeSessionId: 'native-source', projectPath: '/project', permissionMode: 'bypassPermissions', text: '后面都直接展示了 效果不行 你让codex调整吧' };
@@ -115,6 +116,39 @@ it('agy 调用同样保留项目写入互斥，源取消等待可信子回合终
   await expect(f.call({ agent: 'codex', mode: 'execute', prompt: '冲突写入' })).rejects.toThrow('已有 AI');
   f.abort.abort();
   expect(await pending).toMatchObject({ status: 'cancelled' });
+});
+it('写入受阻时通过主 AI 工具协议返回占用任务与调整提示词的反馈，不启动第二个任务', async () => {
+  const f = await fixture('succeeded', true);
+  const prompt = '只修改 Views/Island.swift；业务文件由 Codex 负责，不得改动。';
+  const pending = f.call({ agent: 'agy', mode: 'execute', model: 'gemini-fixture', prompt });
+  await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+  try {
+    const response = await callResearchTool(f.runtime, { tool: 'hcode_call_agent', arguments: { agent: 'codex', mode: 'execute', prompt: '修改 Views/Island.swift 与业务模型' } });
+    expect(response.success).toBe(false);
+    const feedback = JSON.parse(response.contentItems[0]!.text);
+    expect(feedback).toMatchObject({ code: 'project_write_busy', status: 'blocked', dispatched: false, scope: 'project', conflictingPaths: null,
+      blockedBy: [{ invocationId: f.updates[0]!.id, agent: 'agy', status: 'running', prompt }] });
+    expect(feedback.guidance.join('\n')).toMatch(/调整提示词/);
+    expect(feedback.guidance.join('\n')).toMatch(/同一文件/);
+    expect(feedback.guidance.join('\n')).toMatch(/等待/);
+    expect(f.sent).toHaveLength(1);
+    expect(await f.service.list('source')).toHaveLength(1);
+  } finally { f.finish(); await pending; }
+});
+it('其他源会话收到项目占用原因，但不泄露活动任务的提示词', async () => {
+  const f = await fixture('succeeded', true);
+  const pending = f.call({ agent: 'codex', mode: 'execute', prompt: '当前源会话的完整私有任务资料' });
+  await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+  try {
+    const other = f.service.tools({ ...source, sessionKey: 'other', resumeSessionId: 'other-native' }, 'other-turn', new AbortController().signal);
+    const response = await callResearchTool(other, { tool: 'hcode_call_agent', arguments: { agent: 'codex', mode: 'execute', prompt: '另一个会话的写入' } });
+    expect(response.success).toBe(false);
+    const feedback = JSON.parse(response.contentItems[0]!.text);
+    expect(feedback.blockedBy[0]).toMatchObject({ agent: 'codex', status: 'running' });
+    expect(feedback.blockedBy[0]).not.toHaveProperty('prompt');
+    expect(response.contentItems[0]!.text).not.toContain('完整私有任务资料');
+    expect(f.sent).toHaveLength(1);
+  } finally { f.finish(); await pending; }
 });
 it('查询模型期间取消，不启动 CLI，并将尚未派发的调用标为取消', async () => {
   const f = await fixture();

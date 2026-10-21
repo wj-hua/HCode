@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { researchTools, type ResearchRuntime } from '../../sessions/researchRuntime.js';
+import { isScopedWriteTool } from '../../sessions/scopedFileWriter.js';
 const MAX_CALLS_PER_TURN = 128;
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const MAX_REQUEST_BYTES = 256 * 1024;
@@ -28,9 +29,9 @@ export class AgyResearchBridge {
     if (!address || typeof address === 'string') throw new Error('HCode agy MCP 未建立本地端口');
     this.origin = `http://${LOOPBACK_HOST}:${address.port}`;
   }
-  /** 工具目录固定在可信宿主定义内，拒绝代码写入和协作发起工具。 */
+  /** 仅准入只读工具和宿主签发的文件范围写入闭包；任意同名工具不能取得写权限。 */
   begin(runtime: ResearchRuntime) {
-    if (researchTools(runtime).some((tool) => !ALLOWED_RESEARCH_TOOLS.has(tool.name))) throw new Error('agy 当前只支持受限研究/审查工具，未开放代码写入或自主委派');
+    if (researchTools(runtime).some(tool => !ALLOWED_RESEARCH_TOOLS.has(tool.name) && !isScopedWriteTool(tool))) throw new Error('agy 未开放非宿主授权的写入工具或自主委派');
     this.scope = { runtime }; this.calls.clear();
   }
   stop() { this.scope = undefined; this.calls.clear(); }
@@ -56,7 +57,7 @@ export class AgyResearchBridge {
     if (method === 'initialize') return { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'hcode', version: '1.0.0' } };
     const scope = this.scope;
     if (!scope) throw new Error('本次 agy 宿主工具作用域已结束');
-    if (method === 'tools/list') return { tools: researchTools(scope.runtime).map((tool) => ({ name: tool.name, description: tool.description, inputSchema: z.toJSONSchema(z.object(tool.schema).strict(), { target: 'draft-7' }), annotations: { readOnlyHint: tool.name !== 'request_context', destructiveHint: false, openWorldHint: false }, _meta: { 'antigravity/alwaysLoad': true } })) };
+    if (method === 'tools/list') return { tools: researchTools(scope.runtime).map((tool) => ({ name: tool.name, description: tool.description, inputSchema: z.toJSONSchema(z.object(tool.schema).strict(), { target: 'draft-7' }), annotations: { readOnlyHint: tool.name !== 'request_context' && !isScopedWriteTool(tool), destructiveHint: tool.name === 'delete_file', openWorldHint: false }, _meta: { 'antigravity/alwaysLoad': true } })) };
     if (method !== 'tools/call') throw new Error(`未支持的 MCP 方法：${method}`);
     const input = callSchema.parse(params), previous = this.calls.get(id);
     if (previous) return isDeepStrictEqual(previous.input, input) ? previous.result : toolFailure('重复 MCP 请求 id 与参数冲突');
