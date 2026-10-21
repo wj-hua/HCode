@@ -239,6 +239,7 @@ export class ClaudeAgent implements AgentProvider {
           env: this.getEnv(),
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
+          emitPromptSuggestion: event => this.events.promptSuggestion?.(event),
           emitTurnOutcome: (event) => this.events.turnOutcome?.(event),
           emitPermission: (event) => {
             this.interactionOwner.set(event.interactionId, event.sessionKey);

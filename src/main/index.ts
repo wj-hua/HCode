@@ -176,6 +176,7 @@ async function bootstrap() {
       send("chat:state", event);
     },
     commands: (sessionKey, commands) => send("chat:commands", { sessionKey, commands }),
+    promptSuggestion: event => send('chat:promptSuggestion', event),
     permission: (event) => {
       send("permission:requested", event);
       if (mainWindow && !mainWindow.isFocused()) app.dock?.bounce("informational");

@@ -14,6 +14,7 @@ import {
 import type {
   ChatRunState,
   ChatStateEvent,
+  ChatPromptSuggestionEvent,
   ChatUsage,
   FileInput,
   ImageInput,
@@ -31,6 +32,7 @@ import { ClaudeRowProjector, type ClaudeRecord } from "./rowProjector.js";
 import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
 import type { TurnOutcome } from "../../../shared/collaboration.js";
 import { researchMcp, hostedMcp, RESEARCH_MCP_NAME, type ResearchRuntime, type HostedRuntime } from "../../sessions/researchRuntime.js";
+import { ClaudePromptSuggestions } from './claudePromptSuggestions.js';
 
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
 const FLUSH_INTERVAL_MS = 16;
@@ -41,6 +43,7 @@ export interface ClaudeSessionHost {
   env: Record<string, string>;
   emitRows(sessionKey: string, ops: RowOp[]): void;
   emitState(event: ChatStateEvent): void;
+  emitPromptSuggestion?(event: ChatPromptSuggestionEvent): void;
   emitPermission(event: PermissionRequestEvent): void;
   emitPermissionResolved(event: PermissionResolvedEvent): void;
   onSessionId(sessionKey: string, sessionId: string, projectPath: string): void;
@@ -110,6 +113,7 @@ export class ClaudeSession {
   private hosted: HostedRuntime | undefined;
   private ordinaryContinuation: string | undefined;
   private pumpPromise: Promise<void> | null = null;
+  private readonly promptSuggestions: ClaudePromptSuggestions;
 
   constructor(
     private readonly host: ClaudeSessionHost,
@@ -129,6 +133,7 @@ export class ClaudeSession {
     this.model = options.model || undefined;
     this.effort = options.effort || undefined;
     this.lifecycle = new TurnLifecycle(this.key, "claude", (event) => this.host.emitTurnOutcome?.(event));
+    this.promptSuggestions = new ClaudePromptSuggestions({ sessionKey: this.key, projectPath: this.projectPath }, event => this.host.emitPromptSuggestion?.(event));
   }
 
   /** 续聊时先把历史喂给投影器，保证新行的 rowId 接在历史后面。 */
@@ -173,6 +178,7 @@ export class ClaudeSession {
   }
 
   private async releaseQuery() {
+    this.promptSuggestions.clear();
     this.clearIdleTimer(); this.input?.end(); this.activeQuery?.close();
     await this.pumpPromise;
   }
@@ -188,6 +194,7 @@ export class ClaudeSession {
   send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], executionTurnId: string = randomUUID()) {
     if (this.closed) throw new Error("会话已关闭");
     this.lifecycle.begin(executionTurnId);
+    this.promptSuggestions.begin(executionTurnId, this.sessionId, !this.research && this.permissionMode !== 'plan', !this.activeQuery);
     this.clearIdleTimer();
     this.error = undefined;
     this.responseMetrics.start();
@@ -237,6 +244,7 @@ export class ClaudeSession {
         allowDangerouslySkipPermissions: true,
         canUseTool: this.research ? undefined : this.canUseTool,
         includePartialMessages: true,
+        promptSuggestions: !this.research,
         thinking: { type: "adaptive", display: "summarized" },
         settingSources: ["user", "project", "local"],
         // SDK 默认冻结第一轮系统提示；研究与交接必须按本次运行配置刷新，不能复用旧快照。
@@ -260,10 +268,15 @@ export class ClaudeSession {
   private async pump(activeQuery: Query) {
     try {
       for await (const message of activeQuery) {
+        if (message.type === 'prompt_suggestion') {
+          if (!this.closed && this.activeQuery === activeQuery) this.promptSuggestions.receive(message.suggestion, message.session_id);
+          continue;
+        }
         this.handleMessage(message);
       }
     } catch (error) {
       if (!this.closed) {
+        this.promptSuggestions.clear();
         const message = error instanceof Error ? error.message : String(error);
         this.projector.failTurn(`Claude 进程异常：${message}`, Date.now());
         this.error = message;
@@ -301,6 +314,7 @@ export class ClaudeSession {
     if (message.type === "rate_limit_event") this.host.onQuotaChanged();
     this.projector.consume(message as unknown as ClaudeRecord);
     if (message.type === "result") {
+      this.promptSuggestions.complete(message.subtype === 'success' && !message.is_error, message.session_id);
       const version = this.usageVersion;
       const input = message.usage.input_tokens + message.usage.cache_read_input_tokens + message.usage.cache_creation_input_tokens;
       this.usage = {
@@ -436,6 +450,7 @@ export class ClaudeSession {
 
   async interrupt() {
     if (!this.isBusy) return;
+    this.promptSuggestions.clear();
     this.lifecycle.requestCancellation();
     this.projector.markInterrupted();
     this.rejectAllPending("用户已停止");
@@ -450,6 +465,7 @@ export class ClaudeSession {
   async setPermissionMode(mode: PermissionMode) {
     if (this.research && mode !== "default" && mode !== "plan") throw new Error("协作研究期间不能扩大权限");
     this.permissionMode = mode;
+    if (mode === 'plan') this.promptSuggestions.clear();
     this.emitState();
     try {
       await this.activeQuery?.setPermissionMode(mode as ClaudePermissionMode);
@@ -478,6 +494,7 @@ export class ClaudeSession {
   }
 
   close() {
+    this.promptSuggestions.clear();
     this.closed = true;
     this.clearIdleTimer();
     this.rejectAllPending("会话已关闭");

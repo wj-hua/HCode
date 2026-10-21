@@ -25,6 +25,8 @@ import { AgentBadge } from "../AgentBadge";
 import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
+import { PromptSuggestionHint } from './PromptSuggestionHint';
+import { usePromptSuggestion } from './usePromptSuggestion';
 import { drafts, fileDrafts, imageDrafts, consumeSubmittedDraft } from "./drafts";
 import { draftKey, loadDraft, saveDraft, consumePersistedDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
@@ -165,6 +167,16 @@ export function Composer({
   const historyIndexRef = useRef<number | null>(null);
   const caretToEndRef = useRef(false);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
+  const prediction = usePromptSuggestion(conversation, text, conversation.runState === 'idle' && !conversation.loading && !conversation.compareId && workMode === 'chat' && !activeCollaboration && conversation.queue.length === 0 && !images.length && !files.length && !adding && !submitting);
+  const acceptPrediction = () => {
+    if (!prediction.suggestion) return;
+    const suggestion = prediction.suggestion;
+    prediction.dismiss();
+    historyIndexRef.current = null;
+    caretToEndRef.current = true;
+    setText(suggestion); setCaret(suggestion.length);
+    textareaRef.current?.focus();
+  };
   const activeInTerminal = useAppStore(
     (state) =>
       !conversation.sessionKey &&
@@ -283,6 +295,7 @@ export function Composer({
   const prefill = useAppStore((state) => state.composerPrefill);
   useEffect(() => {
     if (!prefill || prefill.viewId !== conversation.viewId) return;
+    prediction.dismiss();
     setText(prefill.text);
     setImages(prefill.images);
     setFiles(prefill.files);
@@ -294,6 +307,7 @@ export function Composer({
   /** 本地文件只传路径；剪贴板文件没有路径时暂存到 HCode 数据目录。 */
   const addFiles = async (selected: readonly File[]) => {
     if (selected.length === 0) return;
+    prediction.dismiss();
     setAdding((count) => count + 1);
     try {
       const results = await Promise.allSettled(selected.map(async (file) => {
@@ -346,7 +360,7 @@ export function Composer({
       caretToEndRef.current = false;
       el.setSelectionRange(el.value.length, el.value.length);
     }
-  }, [text]);
+  }, [text, prediction.suggestion]);
 
   const canSend = Boolean(text.trim() || images.length > 0 || files.length > 0);
 
@@ -483,7 +497,9 @@ export function Composer({
         value={text}
         rows={1}
         data-composer-input
+        aria-label={`给 ${agent.name} 发消息`}
         onChange={(event) => {
+          prediction.dismiss();
           const index = historyIndexRef.current;
           // 手动改过回填的历史后退出浏览态，上下键恢复为移动光标
           if (index !== null && event.target.value !== promptHistory[index]) historyIndexRef.current = null;
@@ -538,6 +554,12 @@ export function Composer({
               }
             }
           }
+          if (prediction.suggestion && !event.nativeEvent.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === 'Tab' || event.key === 'Escape')) {
+            event.preventDefault();
+            if (event.key === 'Tab') acceptPrediction();
+            else prediction.dismiss();
+            return;
+          }
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
             submit();
@@ -556,6 +578,7 @@ export function Composer({
             if (historyIndexRef.current === null && text.length > 0) return;
             const result = navigatePromptHistory(promptHistory, historyIndexRef.current, event.key === "ArrowUp" ? "up" : "down");
             if (!result.shouldHandle) return;
+            prediction.dismiss();
             event.preventDefault();
             historyIndexRef.current = result.nextIndex;
             if (result.nextValue !== text) {
@@ -564,9 +587,10 @@ export function Composer({
             }
           }
         }}
-        placeholder={conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`}
+        placeholder={prediction.suggestion ?? (conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`)}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
+      {prediction.suggestion ? <PromptSuggestionHint onAccept={acceptPrediction} onDismiss={prediction.dismiss} /> : null}
       {showSlashResults ? (
         <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="斜杠命令">
           {slashResults.key !== slashContext || slashResults.loading ? (

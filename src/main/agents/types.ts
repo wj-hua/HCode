@@ -5,6 +5,7 @@ import type {
   AgentStatus,
   ChatSendParams,
   ChatStateEvent,
+  ChatPromptSuggestionEvent,
   ForkParams,
   ModelOption,
   PermissionDecision,
@@ -32,6 +33,7 @@ export interface AgentEvents {
   turnOutcome?(event: TurnOutcome): void;
   rows(sessionKey: string, ops: RowOp[]): void;
   state(event: ChatStateEvent): void;
+  promptSuggestion?(event: ChatPromptSuggestionEvent): void;
   commands(sessionKey: string, commands: SlashCommandOption[]): void;
   permission(event: PermissionRequestEvent): void;
   permissionResolved(event: PermissionResolvedEvent): void;

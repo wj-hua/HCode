@@ -32,6 +32,7 @@ import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
 import { playNotificationSound } from "../notificationSound";
 import { drafts, fileDrafts, imageDrafts } from "../composer/drafts";
+import { usePromptSuggestionStore } from '../composer/promptSuggestionStore';
 import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 import { selectConversationWorkspace } from "./conversationWorkspaceActions";
@@ -387,6 +388,7 @@ export const useAppStore = create<AppState>((set, get) => {
   };
 
   const subscribeEvents = () => {
+    hcode.on('chat:promptSuggestion', event => usePromptSuggestionStore.getState().accept(event));
     hcode.on("chat:rows", ({ sessionKey, ops }) => {
       const rows = sessionViews.captureRows({ sessionKey, ops });
       const conv = findBySessionKey(sessionKey);

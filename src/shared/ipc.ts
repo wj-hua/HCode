@@ -165,6 +165,7 @@ export interface EventMap {
   "chat:rows": ChatRowsEvent;
   "chat:state": ChatStateEvent;
   "chat:commands": SlashCommandsEvent;
+  "chat:promptSuggestion": import('./types.js').ChatPromptSuggestionEvent;
   "git:turnDiff": { sessionKey: string; diff: GitTurnDiff | null; turnId?: string };
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
@@ -254,6 +255,7 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "chat:rows",
   "chat:state",
   "chat:commands",
+  "chat:promptSuggestion",
   "git:turnDiff",
   "permission:requested",
   "permission:resolved",
