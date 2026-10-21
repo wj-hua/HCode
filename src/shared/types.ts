@@ -207,6 +207,17 @@ export interface ChatStateEvent {
   usage?: ChatUsage;
 }
 
+/** 原生下一步输入建议是临时 UI 数据，不属于消息正文、用户草稿或执行授权。 */
+export interface ChatPromptSuggestionEvent {
+  sessionKey: string;
+  agent: 'claude';
+  projectPath: string;
+  sessionId?: string;
+  turnId: string;
+  revision: number;
+  suggestion: string | null;
+}
+
 /** 当前会话最近一轮的用量。 */
 export interface ChatUsage {
   /** 从本轮发送到首个非空模型流式输出的时间，包含 CLI 启动；毫秒。 */

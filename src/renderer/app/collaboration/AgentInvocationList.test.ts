@@ -37,3 +37,14 @@ it('单条调用直接展示，没有历史入口；无记录时不展示空列�
   expect(render([call('only', 'failed', 1)])).not.toContain('历史调用');
   expect(render([])).toBe('');
 });
+
+it.each(['running', 'succeeded'] as const)('同批另一项 %s 时，已完成任务仍留在当前列表展示文件范围', status => {
+  const first = { ...call('ui', 'succeeded', 1), writeScope: { batchId: 'batch', taskKey: 'ui', allowedPaths: ['ui.txt'] } };
+  const second = { ...call('business', status, 2), writeScope: { batchId: 'batch', taskKey: 'business', allowedPaths: ['business.txt'] } };
+  const html = render([second, first, call('older', 'succeeded', 0)]);
+  expect(html).toContain('结果-ui');
+  expect(html).toContain('并行任务：');
+  expect(html).toContain('ui.txt'); expect(html).toContain('business.txt');
+  expect(html).not.toContain('结果-older');
+  expect(html).toContain('历史调用（1）');
+});

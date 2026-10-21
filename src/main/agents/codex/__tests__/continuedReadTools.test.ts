@@ -138,3 +138,22 @@ it('普通旧线程没有 call_agent 时仍可聊天，明确说明限制并拒�
     expect(f.requests.filter(request => request.method === 'thread/start')).toHaveLength(1);
   } finally { f.session.close(); }
 });
+
+it('新增并行工具不关闭旧 Codex 线程已有的单项委派，未注册批量工具明确拒绝', async () => {
+  const f = await fixture();
+  const execute = vi.fn(async () => ({ status: 'succeeded' }));
+  const single = { name: 'call_agent', description: 'call', schema: { prompt: z.string() }, execute };
+  const parallel = { name: 'call_agents', description: 'parallel', schema: {}, execute };
+  try {
+    await f.session.configureHosted({ root: f.root, tools: [single] });
+    await f.session.send('旧版单项委派');
+    f.session.handleNotification('turn/completed', { turn: { id: 'turn-1', status: 'completed' } });
+    await f.session.configureHosted({ root: f.root, instructions: '支持 call_agent 和 call_agents', tools: [single, parallel] });
+    await f.session.send('升级后继续');
+    expect(await f.call(1, 'hcode_call_agent', { prompt: '仍可调用' })).toMatchObject({ success: true });
+    expect(await f.call(2, 'hcode_call_agents', {})).toMatchObject({ success: false });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(f.requests.findLast(request => request.method === 'thread/inject_items')!.params).toMatchObject({ items: [expect.objectContaining({ content: [expect.objectContaining({ text: expect.stringContaining('call_agents') })] })] });
+    expect(f.requests.filter(request => request.method === 'thread/start')).toHaveLength(1);
+  } finally { f.session.close(); }
+});
