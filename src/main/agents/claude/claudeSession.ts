@@ -114,6 +114,8 @@ export class ClaudeSession {
   private ordinaryContinuation: string | undefined;
   private pumpPromise: Promise<void> | null = null;
   private readonly promptSuggestions: ClaudePromptSuggestions;
+  /** CLI 进程内仍在运行的后台任务数（不含常驻监视类）；回合结束后它们仍可能在跑。 */
+  private backgroundTasks = 0;
 
   constructor(
     private readonly host: ClaudeSessionHost,
@@ -151,6 +153,10 @@ export class ClaudeSession {
 
   get isBusy(): boolean {
     return this.state === "running" || this.state === "awaitingApproval";
+  }
+
+  get hasBackgroundTasks(): boolean {
+    return this.backgroundTasks > 0;
   }
 
   /** 只在空闲回合边界更换工具，停止旧 query 后保留原生身份与投影历史。 */
@@ -230,6 +236,8 @@ export class ClaudeSession {
   private start() {
     const input = new InputQueue<SDKUserMessage>();
     this.input = input;
+    // 后台任务快照按进程计；新进程启动时不会补发，必须先清零
+    this.setBackgroundTasks(0);
     const permissionMode = this.permissionMode;
     const instructions = [this.ordinaryContinuation, this.hosted?.instructions].filter(Boolean).join('\n');
     this.activeQuery = query({
@@ -289,6 +297,7 @@ export class ClaudeSession {
         this.input = null;
       }
       this.rejectAllPending("会话已结束");
+      if (!this.closed) this.setBackgroundTasks(0);
       if (this.projector.hasOpenTurn) this.projector.closeTurn(Date.now(), this.error ? "failed" : undefined);
       this.flushNow();
       if (!this.closed) this.setState(this.error ? "error" : "idle");
@@ -303,7 +312,13 @@ export class ClaudeSession {
         name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
       })));
     }
+    if (message.type === "system" && message.subtype === "background_tasks_changed") {
+      this.setBackgroundTasks(message.tasks.filter((task) => !task.ambient).length);
+      if (!this.isBusy) this.scheduleIdleClose();
+    }
     if (message.type === "system" && message.subtype === "init") {
+      // 后台任务结束后 CLI 会自行开启新一轮回复，这一轮不经过 send()
+      if (!this.isBusy) this.beginNativeTurn();
       if (message.session_id && message.session_id !== this.sessionId) {
         this.sessionId = message.session_id;
         this.host.onSessionId(this.key, message.session_id, this.projectPath);
@@ -352,6 +367,15 @@ export class ClaudeSession {
       return;
     }
     this.scheduleFlush();
+  }
+
+  private beginNativeTurn() {
+    this.promptSuggestions.clear();
+    this.clearIdleTimer();
+    this.error = undefined;
+    this.responseMetrics.start();
+    this.usageVersion++;
+    this.setState("running");
   }
 
   private readonly canUseTool: CanUseTool = (toolName, input, options) => {
@@ -510,7 +534,8 @@ export class ClaudeSession {
   private scheduleIdleClose() {
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
-      if (this.isBusy) return;
+      // 关闭进程会连带结束后台任务；任务结束时会重新计时
+      if (this.isBusy || this.hasBackgroundTasks) return;
       // 空闲时释放子进程；下次发送会自动用 resume 重建
       this.input?.end();
       this.activeQuery?.close();
@@ -532,6 +557,12 @@ export class ClaudeSession {
     this.emitState();
   }
 
+  private setBackgroundTasks(count: number) {
+    if (this.backgroundTasks === count) return;
+    this.backgroundTasks = count;
+    this.emitState();
+  }
+
   emitState() {
     this.host.emitState({
       sessionKey: this.key,
@@ -539,6 +570,7 @@ export class ClaudeSession {
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       projectPath: this.projectPath,
       state: this.state,
+      ...(this.backgroundTasks ? { backgroundTasks: this.backgroundTasks } : {}),
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(this.model ? { model: this.model } : {}),

@@ -165,7 +165,7 @@ async function bootstrap() {
     state: (event) => {
       if (event.sessionId) execution?.observeIdentity(event.sessionKey, event.agent, event.sessionId);
       const wasActive = activeGitTurns.has(event.sessionKey);
-      if (event.state === "running") runningSessions.add(event.sessionKey);
+      if (event.state === "running" || event.backgroundTasks) runningSessions.add(event.sessionKey);
       else runningSessions.delete(event.sessionKey);
       if (event.state === "running" || event.state === "awaitingApproval") activeGitTurns.add(event.sessionKey);
       else activeGitTurns.delete(event.sessionKey);

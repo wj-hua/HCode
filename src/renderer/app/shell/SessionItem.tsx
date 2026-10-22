@@ -49,7 +49,7 @@ export function SessionItem({ session }: { session: SessionSummary }) {
 
   const runState = conversation?.runState;
   const indicator =
-    runState === "awaitingApproval" ? "approval" : runState === "running" ? "running" : null;
+    runState === "awaitingApproval" ? "approval" : runState === "running" || conversation?.backgroundTasks ? "running" : null;
   // Codex 只能归档；运行中（HCode 或终端里）的会话不能删除，否则 CLI 会继续写会话文件
   const deleteLabel = session.agent === "codex" ? "归档" : "删除";
   const deleteDisabled = indicator !== null || session.activeInTerminal === true;

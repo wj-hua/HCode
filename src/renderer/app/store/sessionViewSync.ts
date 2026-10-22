@@ -40,7 +40,7 @@ export class SessionViewSync {
     const state = { ...event, sessionId: event.sessionId ?? previous?.sessionId, model: event.model ?? previous?.model };
     this.states.set(event.sessionKey, state);
     if (state.sessionId) this.nativeKeys.set(identityKey({ ...state, id: state.sessionId }), state.sessionKey);
-    if (state.state === "running" || state.state === "awaitingApproval") {
+    if (state.state === "running" || state.state === "awaitingApproval" || state.backgroundTasks) {
       if (!this.startedAt.has(state.sessionKey)) this.startedAt.set(state.sessionKey, Date.now());
     } else this.startedAt.delete(state.sessionKey);
     return state;
@@ -62,6 +62,7 @@ export class SessionViewSync {
     return {
       sessionKey: state.sessionKey,
       runState: state.state,
+      backgroundTasks: state.backgroundTasks,
       runStartedAt: this.startedAt.get(state.sessionKey),
       error: state.error,
       permissionMode: state.permissionMode,

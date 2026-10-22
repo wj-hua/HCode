@@ -26,7 +26,7 @@ export function RunningTasks() {
 
   const tasks = useMemo(() => {
     const busy = Object.values(conversations).filter(
-      (conv) => conv.runState === "running" || conv.runState === "awaitingApproval",
+      (conv) => conv.runState === "running" || conv.runState === "awaitingApproval" || !!conv.backgroundTasks,
     );
     const groups = new Map<string, typeof busy>();
     for (const conv of busy) {

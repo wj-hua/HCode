@@ -201,6 +201,8 @@ export interface ChatStateEvent {
   sessionId?: string;
   projectPath: string;
   state: ChatRunState;
+  /** 回合外仍在运行的原生后台任务数（如后台命令、后台子代理）；没有时省略。 */
+  backgroundTasks?: number;
   error?: string;
   permissionMode: PermissionMode;
   model?: string;

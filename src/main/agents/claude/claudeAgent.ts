@@ -308,7 +308,8 @@ export class ClaudeAgent implements AgentProvider {
 
   closeSession(sessionKey: string) {
     const session = this.sessions.get(sessionKey);
-    if (!session || session.isBusy) return;
+    // 关闭会结束 CLI 进程及其后台任务
+    if (!session || session.isBusy || session.hasBackgroundTasks) return;
     session.close();
     this.sessions.delete(sessionKey);
   }
