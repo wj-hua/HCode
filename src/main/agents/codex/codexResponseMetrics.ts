@@ -57,8 +57,10 @@ export class CodexResponseMetrics extends ResponseMetrics {
     return this.turnId !== undefined && (typeof id !== "string" || id === this.turnId);
   }
 
-  item(type: string, id: string, started: boolean) {
-    if (this.complete || this.turnStartedAt === undefined || !id) return;
+  /** 返回 true 时首次输出刚到达。工具调用开始说明模型已输出调用参数，与 Claude/agy 的工具参数口径一致。 */
+  item(type: string, id: string, started: boolean): boolean {
+    if (this.complete || this.turnStartedAt === undefined || !id) return false;
+    const first = started && TOOL_ITEMS.has(type) && this.output(type);
     if (MODEL_ITEMS.has(type)) {
       if (started) this.modelItems.add(id);
       else this.modelItems.delete(id);
@@ -72,6 +74,7 @@ export class CodexResponseMetrics extends ResponseMetrics {
       }
     }
     this.syncPause();
+    return first;
   }
 
   approval(id: string, pending: boolean) {

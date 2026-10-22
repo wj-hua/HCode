@@ -316,12 +316,12 @@ export class CodexSession {
     const metricsTurn = this.responseMetrics.acceptsTurn(turnId);
     if (method === "thread/tokenUsage/updated" && !metricsTurn) return;
     if (metricsTurn && (method === "item/agentMessage/delta" || method === "item/reasoning/summaryTextDelta" ||
-      method === "item/reasoning/textDelta")) {
+      method === "item/reasoning/textDelta" || method === "item/plan/delta")) {
       if (this.responseMetrics.output(params.delta)) this.emitState();
     }
     if (metricsTurn && (method === "item/started" || method === "item/completed") && isRecord(params.item) &&
       typeof params.item.type === "string" && typeof params.item.id === "string") {
-      this.responseMetrics.item(params.item.type, params.item.id, method === "item/started");
+      if (this.responseMetrics.item(params.item.type, params.item.id, method === "item/started")) this.emitState();
     }
     switch (method) {
       case "thread/tokenUsage/updated": {

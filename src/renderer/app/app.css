@@ -50,7 +50,6 @@
 .expert-summary { line-height: 1.65; }
 .composer-toolbar { gap: 0.5rem 0.75rem; }
 .composer-toolbar-secondary { flex: 1 1 18rem; }
-.composer-metrics-row:has(> *) { margin-bottom: 0.25rem; }
 .collaboration-resize-handle {
   position: absolute;
   inset-block: 0;

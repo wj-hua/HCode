@@ -1,61 +1,66 @@
-import { Button } from "@/components/ui/button.js";
 import {
   Context,
   ContextContent,
   ContextContentBody,
-  ContextIcon,
   ContextTrigger,
 } from "@/components/ai-elements/context.js";
 import { cn } from "@/components/lib/utils.js";
+import { Progress } from "@/components/ui/progress.js";
+import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
 import type { ChatUsage } from "@hcode/shared/types";
 
-const tokens = new Intl.NumberFormat("zh-CN");
+const LOCALE = "zh-CN";
+const tokens = new Intl.NumberFormat(LOCALE);
+const percentFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1, style: "percent" });
 
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-ui-sm">
+      <span className="min-w-0 truncate text-foreground-subtle">{label}</span>
+      <span className="ml-auto shrink-0 text-right font-mono tabular-nums text-foreground">{value}</span>
+    </div>
+  );
+}
+
+// 照 ZCode ChatContextUsage：输入框工具条只放圆环，hover 弹出紧凑的上下文容量面板。
 export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
   if (!usage) return null;
   const used = usage.contextUsedTokens;
   const window = usage.contextWindowTokens;
   const hasContext = used !== undefined && window !== undefined && window > 0;
-  const percent = hasContext ? used / window * 100 : undefined;
-  const tone = percent !== undefined && percent >= 90
-    ? "text-destructive"
-    : percent !== undefined && percent >= 75 ? "text-warning" : "text-foreground-subtle";
+  const ratio = hasContext ? used / window : 0;
+  const tone = ratio >= 0.9 ? "text-destructive" : ratio >= 0.75 ? "text-warning" : "text-foreground-subtle";
   const hasTurnUsage = usage.inputTokens !== undefined || usage.outputTokens !== undefined;
   const hasMetrics = usage.ttftMs !== undefined || usage.outputTokensPerSecond !== undefined;
   if (!hasContext && !hasTurnUsage && !hasMetrics) return null;
 
   return (
     <Context usedTokens={hasContext ? used : 0} maxTokens={hasContext ? window : 1}>
-      <ContextTrigger>
-        <Button type="button" variant="ghost" size="sm" className={cn("h-auto min-h-7 max-w-full flex-wrap gap-x-2 gap-y-1 whitespace-normal rounded-lg px-2 py-1 text-ui-sm tabular-nums", tone)} aria-label="上下文、本轮用量与输出速度">
-          {hasContext ? <ContextIcon /> : null}
-          {hasContext ? <span>{`上下文 ${Math.round(percent!)}%`}</span> : !hasMetrics ? <span>本轮用量</span> : null}
-          {usage.ttftMs !== undefined ? <span>TTFT {(usage.ttftMs / 1000).toFixed(2)}s</span> : null}
-          {usage.outputTokensPerSecond !== undefined ? <span>≈{usage.outputTokensPerSecond.toFixed(1)} tokens/s</span> : null}
-        </Button>
-      </ContextTrigger>
-      <ContextContent side="top" align="end" className="!w-80">
-        <ContextContentBody className="space-y-2 text-ui-sm">
-          <div className="font-medium text-foreground">上下文、本轮用量与输出速度</div>
+      <ContextTrigger aria-label="上下文容量" className={tone} />
+      <ContextContent className="!w-80 !rounded-xl !shadow-md" side="top" sideOffset={2}>
+        <ContextContentBody className="space-y-3">
           {hasContext ? (
-            <>
-              <div className="flex justify-between gap-3"><span>上下文占用</span><span className={tone}>{tokens.format(used)} / {tokens.format(window)}（{percent!.toFixed(1)}%）</span></div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-surface"><div className={cn("h-full rounded-full", percent! >= 90 ? "bg-destructive" : percent! >= 75 ? "bg-warning" : "bg-brand")} style={{ width: `${Math.min(100, percent!)}%` }} /></div>
-            </>
+            <div className="space-y-2">
+              <div className="mb-3 flex min-w-0 items-center gap-3">
+                <span className="shrink-0 text-ui-base font-medium text-foreground">上下文容量</span>
+                <span className="ml-auto shrink-0 text-right font-mono text-ui-sm text-foreground-subtle">
+                  {`${formatCompactTokenNumber(LOCALE, used)}/${formatCompactTokenNumber(LOCALE, window, { maximumFractionDigits: 0 })} (${percentFormat.format(ratio)})`}
+                </span>
+              </div>
+              <Progress
+                className="h-2 bg-surface"
+                indicatorClassName={cn("min-w-2", ratio >= 0.9 ? "bg-destructive" : ratio >= 0.75 ? "bg-warning" : "bg-(--color-usage-chart-1)")}
+                value={ratio * 100}
+              />
+            </div>
           ) : null}
-          {usage.inputTokens !== undefined ? <div className="flex justify-between gap-3"><span>本轮输入</span><span>{tokens.format(usage.inputTokens)} tokens</span></div> : null}
-          {usage.outputTokens !== undefined ? <div className="flex justify-between gap-3"><span>本轮输出</span><span>{tokens.format(usage.outputTokens)} tokens</span></div> : null}
-          {usage.ttftMs !== undefined ? <div className="flex justify-between gap-3"><span>首输出延迟（TTFT）</span><span>{(usage.ttftMs / 1000).toFixed(2)} s</span></div> : null}
-          {usage.outputSpeedDurationMs !== undefined ? <div className="flex justify-between gap-3"><span>有效响应耗时</span><span>{(usage.outputSpeedDurationMs / 1000).toFixed(2)} s</span></div> : null}
-          {usage.outputTokensPerSecond !== undefined ? <div className="flex justify-between gap-3"><span>{usage.outputSpeedBasis === "activeTurn" ? "平均响应吞吐（估算）" : "输出速度（估算）"}</span><span>≈{usage.outputTokensPerSecond.toFixed(1)} tokens/s</span></div> : null}
-          {hasMetrics ? (
-            <div className="space-y-1 text-foreground-subtle">
-              <p>TTFT 从发送到首次收到文字、思考或工具参数，包含 CLI 启动。</p>
-              {usage.outputSpeedBasis === "activeTurn"
-                ? <p>平均响应吞吐 = 本轮输出 Token ÷ 响应计时。计时包含首输出前的请求等待、隐藏思考及流式输出，扣除能识别的工具执行和审批等待。它衡量整轮响应效率，不能等同于模型逐 Token 解码速度；数据不完整时不显示吞吐。</p>
-                : usage.outputSpeedBasis === "response"
-                ? <p>速度按各次完整模型响应的输出 Token 与对应耗时计算，包含隐藏思考，排除响应之间的工具执行和审批等待。耗时采用 CLI 报告值或客户端计时，客户端计时可能受流式缓冲影响。</p>
-                : <p>速度按输出 Token 与各段首尾输出间隔估算，不计段间工具执行及审批等待。流式缓冲、隐藏思考及工具 Token 会影响估算；缺少对应的用量或计时数据时不显示速度。</p>}
+          {hasTurnUsage || hasMetrics ? (
+            <div className={cn("grid gap-1.5", hasContext && "border-t border-border pt-3")}>
+              {usage.inputTokens !== undefined ? <Row label="本轮输入" value={`${tokens.format(usage.inputTokens)} tokens`} /> : null}
+              {usage.outputTokens !== undefined ? <Row label="本轮输出" value={`${tokens.format(usage.outputTokens)} tokens`} /> : null}
+              {usage.ttftMs !== undefined ? <Row label="首输出延迟（TTFT）" value={`${(usage.ttftMs / 1000).toFixed(2)} s`} /> : null}
+              {usage.outputSpeedDurationMs !== undefined ? <Row label="有效响应耗时" value={`${(usage.outputSpeedDurationMs / 1000).toFixed(2)} s`} /> : null}
+              {usage.outputTokensPerSecond !== undefined ? <Row label={usage.outputSpeedBasis === "activeTurn" ? "平均响应吞吐（估算）" : "输出速度（估算）"} value={`${usage.outputTokensPerSecond.toFixed(1)} tokens/s`} /> : null}
             </div>
           ) : null}
         </ContextContentBody>

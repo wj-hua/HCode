@@ -9,11 +9,9 @@ import {
   ShieldCheckIcon,
   ShieldOffIcon,
   SquareIcon,
-  RefreshCwIcon,
   ZapIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { ZCodeConfigOption } from "@zcode/shared";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
 import type { AgentKind, FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
 import { CollaborationPanel } from "../collaboration/CollaborationPanel";
@@ -43,7 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
-import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
+import { getThoughtLevelLabel } from "@/chat-input-toolbar/thoughtLevelOptions.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
@@ -67,7 +65,7 @@ export function modeIcon(option: PermissionModeOption, className = "size-4"): Re
 
 /** 下拉菜单关闭后把焦点还给输入框（照 ZCode 的 focusSelectorOnClose）。 */
 const COMPOSER_INPUT_SELECTOR = "[data-composer-input]";
-/** Radix 的选项值不能为空串，「默认模型」和「CLI 默认」思考强度用占位值代替。 */
+/** Radix 的模型选项值不能为空串，默认模型用占位值代替。 */
 const DEFAULT_MODEL_VALUE = "__default__";
 
 
@@ -157,7 +155,6 @@ export function Composer({
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlash, setDismissedSlash] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const thoughtTriggerRef = useRef<HTMLSpanElement>(null);
   const { intl } = useZCodeIntl();
   const fileInputRef = useRef<HTMLInputElement>(null);
   // ↑/↓ 历史输入：照 ZCode PromptHistoryPlugin，按项目存 localStorage；index 为 null 表示不在历史浏览态
@@ -431,35 +428,49 @@ export function Composer({
     agent.permissionModes.find((item) => item.mode === conversation.permissionMode) ?? agent.permissionModes[0]!;
   const modelLabel = models.find((item) => item.value === conversation.model)?.label ?? conversation.model;
   const modelGroups = useMemo<ModelSelectGroup[]>(
-    () => [
-      {
-        key: conversation.agent,
-        label: AGENTS[conversation.agent].name,
-        items: models.map((item) => ({
-          key: item.value || DEFAULT_MODEL_VALUE,
-          value: item.value || DEFAULT_MODEL_VALUE,
-          name: item.label,
-        })),
-      },
-    ],
-    [conversation.agent, models],
+    () => (isDraft ? AGENT_KINDS : [conversation.agent]).map((kind) => ({
+      key: kind,
+      label: AGENTS[kind].name,
+      labelBadge: "CLI",
+      icon: <AgentBadge agent={kind} className="size-4" />,
+      disabled: agentStatuses?.some((status) => status.kind === kind && !status.found),
+      // CLI 可能返回相同模型值（包括默认值），只展示当前 CLI 的模型目录。
+      items: kind === conversation.agent ? models.map((item) => ({
+        key: item.value || DEFAULT_MODEL_VALUE,
+        value: item.value || DEFAULT_MODEL_VALUE,
+        name: item.label,
+      })) : [],
+    })),
+    [conversation.agent, models, isDraft, agentStatuses],
   );
-  // 思考强度照 ZCode：候选档位来自当前模型，未选或当前模型不支持时显示占位
   const efforts = modelEfforts(models, conversation.model);
-  const thoughtOption = useMemo<ZCodeConfigOption | null>(
-    () =>
-      efforts.length > 0
-        ? {
-            id: "thought_level",
-            name: "思考强度",
-            category: "thought_level",
-            type: "select",
-            currentValue: efforts.includes(conversation.effort) ? conversation.effort || DEFAULT_MODEL_VALUE : "",
-            options: efforts.map((value) => value ? { value, name: value } : { value: DEFAULT_MODEL_VALUE, name: "CLI 默认" }),
-          }
-        : null,
-    [efforts.join(), conversation.effort],
-  );
+  const effortOption = { id: "thought_level", name: "思考强度", category: "thought_level", type: "select" as const, currentValue: conversation.effort };
+  // CLI 默认是独立选择，不把未设置的值误显示成最低档。
+  const effortLevels = efforts.length > 0 ? [
+    ...(efforts.length > 1 ? [{ value: "", label: "CLI 默认" }] : []),
+    ...efforts.filter(Boolean).map((value) => ({
+      value,
+      label: getThoughtLevelLabel(intl, undefined, effortOption, { value, name: value }),
+    })),
+  ] : [];
+  const effortValue = effortLevels.length === 1
+    ? effortLevels[0]!.value
+    : efforts.includes(conversation.effort) ? conversation.effort : "";
+
+  useEffect(() => {
+    if (effortLevels.length < 2) return;
+    const cycleEffort = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== "t") return;
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || (!textareaRef.current?.closest("form")?.contains(target) && !target.closest("[data-composer-model-menu]"))) return;
+      event.preventDefault();
+      if (modelsLoading) return;
+      const index = effortLevels.findIndex((level) => level.value === effortValue);
+      void setEffort(effortLevels[(index + 1) % effortLevels.length]!.value);
+    };
+    window.addEventListener("keydown", cycleEffort, true);
+    return () => window.removeEventListener("keydown", cycleEffort, true);
+  }, [effortLevels, effortValue, modelsLoading, setEffort]);
 
   return (
     <>
@@ -649,8 +660,7 @@ export function Composer({
           event.target.value = "";
         }}
       />
-      <div className="composer-metrics-row min-w-0"><UsageIndicator usage={conversation.usage} /></div>
-      {/* 工具条照 ZCode ChatPromptEditor：左侧 + / CLI / 权限模式，右侧模型 / 思考强度 / 发送 */}
+      {/* 工具条照 ZCode ChatPromptEditor：左侧 + / 权限模式，右侧模型与思考强度合并入口 / 发送 */}
       <div className="composer-toolbar group/toolbar flex flex-wrap items-end gap-3">
         <div className="composer-toolbar-primary flex min-w-0 flex-wrap items-center">
           <div className="composer-toolbar-controls flex min-w-0 flex-wrap items-center gap-1">
@@ -666,41 +676,6 @@ export function Composer({
                 <PlusIcon className="size-4" />
               </Button>
             </ControlHintTooltip>
-            {isDraft ? (
-              <DropdownMenu>
-                <ControlHintTooltip title="使用的 CLI">
-                  <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 rounded-lg px-2 text-ui-base">
-                      <AgentBadge agent={conversation.agent} />
-                      {agent.name}
-                      <ChevronDownIcon className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </ControlHintTooltip>
-                <DropdownMenuContent side="top" align="start" sideOffset={4} className="w-56" onCloseAutoFocus={restoreInputFocus}>
-                  <DropdownMenuLabel>使用的 CLI</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup value={conversation.agent}>
-                    {AGENT_KINDS.map((kind) => {
-                      const status = agentStatuses?.find((item) => item.kind === kind);
-                      const missing = status !== undefined && !status.found;
-                      return (
-                        <DropdownMenuRadioItem
-                          key={kind}
-                          value={kind}
-                          disabled={missing}
-                          onSelect={() => setDraftAgent(kind)}
-                          className="min-h-8 gap-2"
-                        >
-                          <AgentBadge agent={kind} />
-                          <span className="flex-1">{AGENTS[kind].name}</span>
-                          {missing ? <span className="text-ui-sm text-foreground-subtlest">未安装</span> : null}
-                        </DropdownMenuRadioItem>
-                      );
-                    })}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
             {!conversation.compareId ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} agent={conversation.agent} agents={extraAgents} statuses={agentStatuses ?? undefined} onCompare={(kind, checked) => useWorkMode.getState().toggleCompare(conversation.viewId, kind, checked)} onClose={restoreInputFocus} /> : null}
             <DropdownMenu>
               <ControlHintTooltip title="权限模式">
@@ -742,7 +717,25 @@ export function Composer({
         <div className="composer-toolbar-secondary ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
             <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 empty:hidden">
+              <UsageIndicator usage={conversation.usage} />
               <ModelConfigSelect
+                composerOptions={{
+                  selectedGroupKey: conversation.agent,
+                  providerLabel: "使用的 CLI",
+                  modelsLabel: "模型",
+                  effortLabel: "思考强度",
+                  effortShortcutLabel: "⌃T",
+                  selectModelLabel: "选择模型",
+                  levels: effortLevels,
+                  value: effortValue,
+                  onValueChange: (value) => void setEffort(value),
+                  onGroupChange: isDraft ? (group) => {
+                    if (AGENT_KINDS.includes(group.key as AgentKind)) setDraftAgent(group.key as AgentKind);
+                  } : undefined,
+                  loading: modelsLoading,
+                  error: modelError,
+                  onRetry: () => void loadModels(conversation.agent, true),
+                }}
                 modelGroups={modelGroups}
                 showProviderLevel={false}
                 normalizedValue={conversation.model || DEFAULT_MODEL_VALUE}
@@ -756,9 +749,6 @@ export function Composer({
                 triggerLabelClassName="block min-w-0 max-w-48 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate"
                 focusSelectorOnClose={COMPOSER_INPUT_SELECTOR}
               />
-              {modelError && <button type="button" onClick={() => void loadModels(conversation.agent, true)} disabled={modelsLoading} title={modelError} className="flex shrink-0 items-center gap-1 text-ui-xs text-destructive disabled:opacity-50">
-                <RefreshCwIcon className={cn("size-3", modelsLoading && "animate-spin")} />模型读取失败，重试
-              </button>}
               {conversation.agent === "codex" ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -776,18 +766,6 @@ export function Composer({
                     </DropdownMenuRadioGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
-              ) : null}
-              {thoughtOption ? (
-                <ThoughtLevelCycleControl
-                  composerCollapsePriority={3}
-                  labelVisibilityClassName="inline-flex"
-                  indicatorClassName="block"
-                  option={thoughtOption}
-                  onValueChange={(value) => void setEffort(value === DEFAULT_MODEL_VALUE ? "" : value)}
-                  intl={intl}
-                  triggerRef={thoughtTriggerRef}
-                  restoreFocusSelector={COMPOSER_INPUT_SELECTOR}
-                />
               ) : null}
             </span>
             {running ? (

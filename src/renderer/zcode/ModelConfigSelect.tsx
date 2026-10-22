@@ -46,6 +46,11 @@ import {
 } from "@/lib/pickerFocus.js";
 import { RollingToolbarLabel } from "@/chat-input-toolbar/RollingToolbarLabel.js";
 import { ModelInputCapabilityBadge } from "@/components/ModelInputCapabilityBadge.js";
+import {
+  ComposerModelMenu,
+  ComposerThoughtIndicator,
+  type ComposerModelOptions,
+} from "@/chat-input-toolbar/ComposerModelMenu.js";
 
 export interface ModelSelectGroupItem {
   key: string;
@@ -70,6 +75,8 @@ export interface ModelSelectGroup {
   key: string;
   label: string;
   labelBadge?: string;
+  icon?: ReactNode;
+  disabled?: boolean;
   directItems?: boolean;
   selectedOptionKey?: string;
   connectionOptions?: ModelSelectConnectionOption[];
@@ -133,6 +140,8 @@ function getModelTriggerLabelClassName({
 }
 
 interface ModelConfigSelectProps {
+  /** 输入框合并模型与思考强度；其余使用方保留独立模型菜单。 */
+  composerOptions?: ComposerModelOptions;
   modelGroups: readonly ModelSelectGroup[];
   normalizedValue: string;
   triggerLabel: string;
@@ -184,6 +193,7 @@ interface ModelConfigSelectProps {
 }
 
 export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
+  composerOptions,
   modelGroups,
   normalizedValue,
   triggerLabel,
@@ -227,6 +237,8 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
 }: ModelConfigSelectProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [expandedWidth, setExpandedWidth] = useState<number>();
   const lastOpenRequestKeyRef = useRef(openRequestKey);
   const hasSelectableModel = modelGroups.length > 0;
   // 闲时任务白名单只有一层模型值；只要存在 group 就强制展示 provider 层的话，
@@ -248,12 +260,15 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
 
   const handlePopoverOpenChange = useCallback(
     (nextOpen: boolean) => {
+      if (nextOpen && composerOptions && buttonRef.current) {
+        setExpandedWidth(buttonRef.current.getBoundingClientRect().width);
+      }
       if (controlledOpen === undefined) {
         setUncontrolledOpen(nextOpen);
       }
       onOpenChange?.(nextOpen);
     },
-    [controlledOpen, onOpenChange],
+    [controlledOpen, onOpenChange, composerOptions],
   );
 
   useEffect(() => {
@@ -355,9 +370,11 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
           {...commonProps}
           value={item.value}
           className="min-h-8 gap-2 pl-2 pr-8 text-ui-base"
-          onSelect={() => {
+          onSelect={(event) => {
+            // 合并菜单选模后继续调档，不能让 Radix 默认关闭整个弹窗。
+            if (composerOptions) event.preventDefault();
             handleModelValueChange(item.value);
-            handlePopoverOpenChange(false);
+            if (!composerOptions) handlePopoverOpenChange(false);
           }}
         >
           {content}
@@ -365,6 +382,7 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
       );
     },
     [
+      composerOptions,
       handleModelValueChange,
       handlePopoverOpenChange,
       isItemLocked,
@@ -482,6 +500,8 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
   const modelTrigger = (
     <DropdownMenuTrigger asChild>
       <Button
+        ref={buttonRef}
+        style={composerOptions && open ? { width: Math.max(expandedWidth ?? 0, 128) } : undefined}
         type="button"
         variant="ghost"
         size="default"
@@ -489,36 +509,45 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
         data-chat-toolbar-popover-trigger="true"
         data-testid={triggerTestId}
         data-model-current-value={normalizedValue}
-        aria-label={triggerAriaLabel}
+        data-composer-combined-model={composerOptions ? "true" : undefined}
+        aria-label={composerOptions ? `${triggerAriaLabel} ${composerOptions.levels.find((level) => level.value === composerOptions.value)?.label ?? ""}`.trim() : triggerAriaLabel}
         onClick={guideTooltipOpen ? onGuideTooltipDismiss : undefined}
         className={cn(
           "w-fit justify-between gap-1 rounded-lg pl-2 pr-1.5 text-ui-base whitespace-nowrap",
           triggerClassName,
+          composerOptions && open && "relative bg-surface-hover",
         )}
       >
-        <PackageIcon
-          className={cn("pointer-events-none size-4 shrink-0 text-current", triggerIconClassName)}
-          aria-hidden="true"
-        />
-        <span className={triggerLabelClassName} title={currentTriggerTitle}>
-          <RollingToolbarLabel
-            label={currentTriggerLabel}
-            prefix={pending ? undefined : triggerLabelPrefix}
-            prefixClassName={triggerLabelPrefixClassName}
-            value={pending ? undefined : triggerLabelValue}
-          />
-        </span>
-        {triggerBadge}
-        {pending ? (
-          <LoaderIcon className="pointer-events-none size-3.5 animate-spin text-foreground" />
-        ) : null}
-        {!pending && (
-          <ChevronDownIcon
-            className={cn(
-              "pointer-events-none size-3.5 text-foreground-subtle",
-              indicatorClassName,
+        {composerOptions && open ? (
+          <span className="block w-full truncate text-center text-foreground-subtle" data-composer-open-label>{composerOptions.selectModelLabel}</span>
+        ) : (
+          <>
+            <PackageIcon
+              className={cn("pointer-events-none size-4 shrink-0 text-current", triggerIconClassName)}
+              aria-hidden="true"
+            />
+            <span className={triggerLabelClassName} title={currentTriggerTitle}>
+              <RollingToolbarLabel
+                label={currentTriggerLabel}
+                prefix={pending ? undefined : triggerLabelPrefix}
+                prefixClassName={triggerLabelPrefixClassName}
+                value={pending ? undefined : triggerLabelValue}
+              />
+            </span>
+            {composerOptions && composerOptions.levels.length > 0 ? <ComposerThoughtIndicator options={composerOptions} /> : null}
+            {triggerBadge}
+            {pending ? (
+              <LoaderIcon className="pointer-events-none size-3.5 animate-spin text-foreground" />
+            ) : null}
+            {!pending && (
+              <ChevronDownIcon
+                className={cn(
+                  "pointer-events-none size-3.5 text-foreground-subtle",
+                  indicatorClassName,
+                )}
+              />
             )}
-          />
+          </>
         )}
       </Button>
     </DropdownMenuTrigger>
@@ -531,7 +560,7 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
           title={guideTooltipOpen && guideTooltipTitle ? guideTooltipTitle : tooltipTitle}
           shortcut={guideTooltipOpen ? undefined : shortcutLabel}
           triggerRef={triggerRef}
-          open={guideTooltipOpen ? true : undefined}
+          open={open ? false : guideTooltipOpen ? true : undefined}
           className={guideTooltipOpen ? "bg-background py-0.5 pr-0.5 pl-2" : undefined}
         >
           {modelTrigger}
@@ -542,9 +571,13 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
       {open ? (
         <DropdownMenuContent
           className={cn(
-            "w-max min-w-48 max-w-[calc(100vw-2rem)]",
-            !shouldShowProviderLevel && "max-h-72 overflow-y-auto",
+            composerOptions
+              ? "w-72 max-w-[calc(100vw-1.5rem)] overflow-y-hidden [app-region:no-drag] [&>*:not([data-composer-model-list]):not([data-composer-provider-list])]:shrink-0"
+              : "w-max min-w-48 max-w-[calc(100vw-2rem)]",
+            !composerOptions && !shouldShowProviderLevel && "max-h-72 overflow-y-auto",
           )}
+          collisionPadding={composerOptions ? 12 : undefined}
+          data-composer-model-menu={composerOptions ? "true" : undefined}
           align={contentAlign}
           side={contentSide}
           onCloseAutoFocus={(event) => {
@@ -567,13 +600,20 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
             input?.focus();
           }}
         >
-          {leadingItems !== undefined && leadingItems.length > 0 ? (
+          {!composerOptions && leadingItems !== undefined && leadingItems.length > 0 ? (
             <>
               {renderModelItems(leadingItems)}
               {hasSelectableModel ? <DropdownMenuSeparator /> : null}
             </>
           ) : null}
-          {hasSelectableModel && shouldShowProviderLevel
+          {composerOptions ? (
+            <ComposerModelMenu
+              groups={modelGroups}
+              normalizedValue={normalizedValue}
+              options={composerOptions}
+              renderItems={renderModelItems}
+            />
+          ) : hasSelectableModel && shouldShowProviderLevel
             ? modelGroups.map((group, index) => {
                 const groupSeparator = shouldRenderModelGroupSeparator(
                   modelGroups[index - 1],
