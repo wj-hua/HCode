@@ -5,6 +5,7 @@ export const INVOCATION_LIMITS = { maxPromptLength: 24_000, maxCallsPerTurn: 8, 
 export const CALL_AGENT_TOOL = 'call_agent';
 export const CALL_AGENTS_TOOL = 'call_agents';
 export const LIST_AGENT_TARGETS_TOOL = 'list_agent_targets';
+export const LIST_AGENT_INVOCATIONS_TOOL = 'list_agent_invocations';
 export const INVOCATION_AGENTS = ['claude', 'codex', 'agy'] as const;
 export type InvocationAgent = typeof INVOCATION_AGENTS[number];
 export interface AgentInvocationInput {

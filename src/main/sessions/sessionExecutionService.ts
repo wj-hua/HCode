@@ -107,7 +107,7 @@ export class SessionExecutionService {
   }
 
   /** 先登记等待，再发送；即便 CLI 同步返回终态也不会丢结果。 */
-  async execute(params: ChatSendParams, research: ResearchRuntime | undefined, signal: AbortSignal, executionTurnId: string = randomUUID()): Promise<TurnOutcome> {
+  async execute(params: ChatSendParams, research: ResearchRuntime | undefined, signal: AbortSignal, executionTurnId: string = randomUUID(), onNativeSession?: AgentSendParams['onNativeSession']): Promise<TurnOutcome> {
     if (signal.aborted) throw new Error("执行已取消");
     const identity = this.identity(params);
     if (this.busy.has(params.sessionKey) || identity && this.nativeBusy.has(identity)) throw new Error("该会话已有活动执行回合");
@@ -129,7 +129,7 @@ export class SessionExecutionService {
     };
     signal.addEventListener("abort", cancel, { once: true });
     try {
-      await this.dispatch(params, executionTurnId, research);
+      await this.dispatch(params, executionTurnId, research, undefined, undefined, onNativeSession);
       if (signal.aborted) cancel();
       const settled = await observed;
       if ("error" in settled) throw settled.error;
@@ -152,10 +152,10 @@ export class SessionExecutionService {
     if (pending?.sessionKey === event.sessionKey) { this.pending.delete(event.executionTurnId); pending.resolve(event); }
   }
 
-  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime, ordinaryContinuation?: string, hosted?: HostedRuntime) {
+  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime, ordinaryContinuation?: string, hosted?: HostedRuntime, onNativeSession?: AgentSendParams['onNativeSession']) {
     try {
       const prepared = await this.host.prepare(params);
-      return await this.host.send({ ...prepared, executionTurnId, research, ...(ordinaryContinuation ? { ordinaryContinuation } : {}), ...(hosted ? { hosted } : {}) });
+      return await this.host.send({ ...prepared, executionTurnId, research, ...(ordinaryContinuation ? { ordinaryContinuation } : {}), ...(hosted ? { hosted } : {}), ...(onNativeSession ? { onNativeSession } : {}) });
     } catch (error) {
       this.host.failedToSend(params.sessionKey);
       throw error;

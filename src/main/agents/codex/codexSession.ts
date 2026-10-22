@@ -1,6 +1,8 @@
 // 一个正在进行的 Codex 会话（对应 app-server 的一个 thread）。
 import { codexResearchTools } from "./researchTools.js";
 import { HostedToolCalls } from "./hostedToolCalls.js";
+import { assertInvocationThreadIdle } from './invocationRecovery.js';
+import type { AgentSendParams } from '../types.js';
 import { assertToolCatalog, readToolCatalog, sourceCatalogReason, type CodexToolSpec } from "./toolCatalog.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -146,7 +148,7 @@ export class CodexSession {
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
-  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], skill?: InvokedSkill, executionTurnId: string = randomUUID()) {
+  async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], skill?: InvokedSkill, executionTurnId: string = randomUUID(), onNativeSession?: AgentSendParams['onNativeSession']) {
     if (this.closed) throw new Error("会话已关闭");
     this.lifecycle.begin(executionTurnId);
     this.currentTurnId = null;
@@ -166,7 +168,16 @@ export class CodexSession {
     this.flushNow();
     this.setState("running");
     try {
+      if (onNativeSession && this.threadId) {
+        await this.host.client.ensureStarted();
+        await assertInvocationThreadIdle(this.host.client, this.threadId, this.projectPath, this.attached);
+      }
       await this.attach();
+      if (onNativeSession) {
+        if (!this.threadId) throw new Error('Codex 未返回原生会话 ID，不能开始委派任务');
+        await assertInvocationThreadIdle(this.host.client, this.threadId, this.projectPath, true);
+        await onNativeSession(this.threadId);
+      }
       await this.injectContinuation();
       if (/^\/compact\s*$/i.test(text)) {
         if (images.length || files.length) throw new Error("/compact 不能附带文件或图片");

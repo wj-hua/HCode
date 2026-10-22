@@ -15,7 +15,7 @@ import { callResearchTool } from '../../agents/codex/researchTools.js';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const source: ChatSendParams = { agent: 'claude', sessionKey: 'source', resumeSessionId: 'native-source', projectPath: '/project', permissionMode: 'bypassPermissions', text: '后面都直接展示了 效果不行 你让codex调整吧' };
-async function fixture(outcome: 'succeeded' | 'failed' = 'succeeded', hold = false, acknowledgeStop = true, sendError?: Error) {
+async function fixture(outcome: 'succeeded' | 'failed' = 'succeeded', hold = false, acknowledgeStop = true, sendError?: Error, checkpoint = false) {
   const root = await mkdtemp(join(tmpdir(), 'hcode-invoke-')); roots.push(root);
   const sent: AgentSendParams[] = [], updates: AgentInvocation[] = [];
   let execution: SessionExecutionService;
@@ -27,6 +27,7 @@ async function fixture(outcome: 'succeeded' | 'failed' = 'succeeded', hold = fal
   }, send: async params => {
     sent.push(params);
     if (sendError) throw sendError;
+    if (checkpoint) await params.onNativeSession?.('native-worker');
     finish = () => execution.acceptOutcome({ sessionKey: params.sessionKey, agent: params.agent, executionTurnId: params.executionTurnId!, nativeSessionId: 'native-worker', outcome, text: 'CODEX_ACTUAL_RESULT', ...(outcome === 'failed' ? { error: 'quota exhausted' } : {}) });
     if (!hold) finish();
     return { sessionKey: params.sessionKey };
@@ -202,6 +203,65 @@ it('重启不会把磁盘上的 running 当成继续执行或已成功', async (
   await f.repository.save(call);
   expect((await f.service.list('source'))[0]).toMatchObject({ status: 'interrupted', error: expect.stringContaining('未自动续跑') });
   expect(f.sent).toHaveLength(0);
+});
+it.each(['running', 'stopping', 'interrupted', 'cancelled', 'failed'] as const)('重启后查询 %s 调用并续接原生 Codex 身份，保留原任务和模型', async status => {
+  const f = await fixture();
+  const saved: AgentInvocation = { id: randomUUID(), seq: 1, createdAt: 1, source, sourceTurnId: 'old-turn', input: { agent: 'codex', mode: 'execute', model: 'selected-model', prompt: '实现原任务，已有部分修改' }, sessionKey: randomUUID(), nativeSessionId: 'native-worker', status };
+  await f.repository.save(saved);
+  const restarted = new AgentInvocationService(f.repository, f.execution, () => {}, () => 'different-default', f.agents);
+  const runtime = restarted.tools({ ...source, sessionKey: 'reopened-source', text: '继续' }, 'new-turn', new AbortController().signal);
+  const discover = runtime.tools!.find(tool => tool.name === 'list_agent_invocations');
+  expect(discover).toBeDefined();
+  expect(await discover!.execute({})).toMatchObject({ invocations: [{ invocationId: saved.id, nativeSessionId: 'native-worker', prompt: saved.input.prompt, canContinue: true }] });
+  expect(f.sent).toHaveLength(0);
+  const result = await runtime.tools![0]!.execute({ agent: 'codex', mode: 'execute', prompt: '继续原任务，先检查已有修改', continueInvocationId: saved.id });
+  expect(result).toMatchObject({ status: 'succeeded', nativeSessionId: 'native-worker' });
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]).toMatchObject({ resumeSessionId: 'native-worker', model: 'selected-model' });
+  expect((await f.repository.load(saved.id)).status).toBe(status);
+  const latest = await discover!.execute({}) as { invocations: { invocationId: string }[] };
+  expect(latest.invocations).toHaveLength(1);
+  expect(latest.invocations[0]!.invocationId).not.toBe(saved.id);
+  await expect(runtime.tools![0]!.execute({ agent: 'codex', mode: 'execute', prompt: '重复旧任务', continueInvocationId: saved.id })).rejects.toThrow('后续调用');
+  expect(f.sent).toHaveLength(1);
+});
+it('运行中即保存原生线程 ID，意外退出前已有可恢复关联', async () => {
+  const f = await fixture('succeeded', true, true, undefined, true);
+  const pending = f.call({ agent: 'codex', mode: 'execute', prompt: '长任务' });
+  try {
+    await vi.waitFor(async () => expect((await f.repository.list())[0]).toMatchObject({ status: 'running', nativeSessionId: 'native-worker' }));
+  } finally { f.finish(); await pending; }
+});
+it('查询只返回当前来源；缺少原生身份的旧记录明确阻止恢复，不新开线程', async () => {
+  const f = await fixture();
+  const saved: AgentInvocation = { id: randomUUID(), seq: 1, createdAt: 1, source, sourceTurnId: 'old-turn', input: { agent: 'codex', mode: 'execute', prompt: '未保存身份的旧任务' }, sessionKey: randomUUID(), status: 'running' };
+  await f.repository.save(saved);
+  await f.repository.save({ ...saved, id: randomUUID(), source: { ...source, projectPath: '/another-project' }, nativeSessionId: 'other' });
+  const discover = f.runtime.tools!.find(tool => tool.name === 'list_agent_invocations');
+  expect(discover).toBeDefined();
+  expect(await discover!.execute({})).toMatchObject({ invocations: [{ invocationId: saved.id, canContinue: false, blockedReason: expect.stringContaining('原生会话') }] });
+  await expect(f.call({ agent: 'codex', mode: 'execute', prompt: '继续', continueInvocationId: saved.id })).rejects.toThrow('原生会话');
+  expect(f.sent).toHaveLength(0);
+});
+it('未完成任务不能借恢复切换执行模式或突破当前来源权限', async () => {
+  const f = await fixture();
+  const saved: AgentInvocation = { id: randomUUID(), seq: 1, createdAt: 1, source, sourceTurnId: 'old-turn', input: { agent: 'codex', mode: 'execute', prompt: '旧任务' }, sessionKey: randomUUID(), nativeSessionId: 'native-worker', status: 'interrupted' };
+  await f.repository.save(saved);
+  await expect(f.call({ agent: 'codex', mode: 'read-only', prompt: '继续', continueInvocationId: saved.id })).rejects.toThrow('保持原执行模式');
+  const runtime = f.service.tools({ ...source, permissionMode: 'plan' }, 'new-turn', new AbortController().signal);
+  await expect(runtime.tools![0]!.execute({ agent: 'codex', mode: 'execute', prompt: '继续', continueInvocationId: saved.id })).rejects.toThrow('计划模式');
+  expect(f.sent).toHaveLength(0);
+});
+it('同一原生会话的恢复尚未结束时，重复请求也不能通过只读模式并行续跑', async () => {
+  const f = await fixture('succeeded', true);
+  const saved: AgentInvocation = { id: randomUUID(), seq: 1, createdAt: 1, source, sourceTurnId: 'old-turn', input: { agent: 'codex', mode: 'read-only', prompt: '旧研究任务' }, sessionKey: randomUUID(), nativeSessionId: 'native-worker', status: 'interrupted' };
+  await f.repository.save(saved);
+  const pending = f.call({ agent: 'codex', mode: 'read-only', prompt: '继续', continueInvocationId: saved.id });
+  try {
+    await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+    await expect(f.call({ agent: 'codex', mode: 'read-only', prompt: '重复继续', continueInvocationId: saved.id })).rejects.toThrow('仍在运行');
+    expect(f.sent).toHaveLength(1);
+  } finally { f.finish(); await pending; }
 });
 it('停止未获确认时仍保留项目写入锁，迟到原生终态之后才允许新调用', async () => {
   const f = await fixture('succeeded', true, false);

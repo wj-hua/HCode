@@ -22,6 +22,8 @@ import type { ResearchRuntime, HostedRuntime } from "../sessions/researchRuntime
 
 /** 内部执行身份由主进程生成，不能由 Renderer 指定。 */
 export interface AgentSendParams extends ChatSendParams {
+  /** 委派任务的持久化屏障；Codex 必须保存原生身份后才开始执行，失败不得发送任务。 */
+  onNativeSession?(nativeSessionId: string): Promise<void>;
   executionTurnId?: string;
   research?: ResearchRuntime;
   hosted?: HostedRuntime;

@@ -444,7 +444,7 @@ export class CodexAgent implements AgentProvider {
     const skill = match && !["review", "compact"].includes(match[1]!.toLowerCase())
       ? (await this.listSkills(params.projectPath)).find((item) => item.name === match[1])
       : undefined;
-    void session.send(params.text, params.images, params.files, skill, params.executionTurnId);
+    void session.send(params.text, params.images, params.files, skill, params.executionTurnId, params.onNativeSession);
     return { sessionKey: session.key };
   }
 
