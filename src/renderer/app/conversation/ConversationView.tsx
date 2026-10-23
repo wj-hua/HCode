@@ -13,6 +13,7 @@ import { useAppStore, type Conversation } from "../store/appStore";
 import { Timeline } from "./Timeline";
 import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
+import { BackgroundTaskPanel } from './BackgroundTaskPanel';
 
 
 export function ConversationView({
@@ -92,6 +93,7 @@ export function ConversationView({
         </div>
         <div className={cn("shrink-0", column ? "px-3" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
           <TaskListPanel conversation={conversation} />
+          <BackgroundTaskPanel conversation={conversation} />
           {column ? null : (
             <Composer
               key={conversation.viewId}

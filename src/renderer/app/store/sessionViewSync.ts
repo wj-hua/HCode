@@ -63,6 +63,7 @@ export class SessionViewSync {
       sessionKey: state.sessionKey,
       runState: state.state,
       backgroundTasks: state.backgroundTasks,
+      backgroundTaskDetails: state.backgroundTaskDetails,
       runStartedAt: this.startedAt.get(state.sessionKey),
       error: state.error,
       permissionMode: state.permissionMode,

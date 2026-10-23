@@ -1,5 +1,6 @@
 // HCode 渲染进程主状态：项目、会话列表、打开的对话、审批请求。
 import { presentationTitle } from "@hcode/shared/collaborationPresentation";
+import type { BackgroundTask } from '@hcode/shared/backgroundTasks';
 import { usePresentationStore } from "../collaboration/presentationStore";
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
@@ -62,6 +63,7 @@ export interface Conversation {
   runState: ChatRunState;
   /** 回合结束后仍在运行的原生后台任务数。 */
   backgroundTasks?: number;
+  backgroundTaskDetails?: BackgroundTask[];
   /** 当前轮开始运行的时间；空闲或出错时为 undefined。 */
   runStartedAt?: number;
   /** 后台完成 / 出错后还没查看：会话在侧边栏显示未读点，看过后清除。 */
@@ -418,6 +420,7 @@ export const useAppStore = create<AppState>((set, get) => {
         ...attached,
         runState: event.state,
         backgroundTasks: event.backgroundTasks,
+        backgroundTaskDetails: event.backgroundTaskDetails,
         runStartedAt: event.state === "running" || event.state === "awaitingApproval" || event.backgroundTasks ? attached?.runStartedAt ?? conv.runStartedAt ?? Date.now() : undefined,
         error: event.error,
         permissionMode: event.permissionMode,

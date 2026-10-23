@@ -46,6 +46,23 @@ beforeEach(async () => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it('后台任务在空闲会话和切换页面时保持详情，结束后同步清除运行数并保留结果', async () => {
+  summary.agent = 'claude';
+  const task = { id: 'test', description: '全量测试', status: 'running' as const };
+  emitState('idle', { backgroundTasks: 1, backgroundTaskDetails: [task] });
+  await useAppStore.getState().openSession(summary);
+  expect(useAppStore.getState().conversations[summary.id]).toMatchObject({ runState: 'idle', backgroundTasks: 1, backgroundTaskDetails: [task] });
+  useAppStore.getState().newChat('/other-project', 'claude');
+  const result = { ...task, status: 'failed' as const, summary: '测试失败', outputFile: '/tmp/test.log' };
+  emitState('idle', { backgroundTaskDetails: [result] });
+  await useAppStore.getState().openSession(summary);
+  expect(useAppStore.getState().conversations[summary.id]).toMatchObject({ runState: 'idle', backgroundTaskDetails: [result] });
+  expect(useAppStore.getState().conversations[summary.id]!.backgroundTasks).toBeUndefined();
+  expect(useAppStore.getState().conversations[summary.id]!.runStartedAt).toBeUndefined();
+  emitState('idle', { backgroundTaskDetails: [] });
+  expect(useAppStore.getState().conversations[summary.id]!.backgroundTaskDetails).toEqual([]);
+});
+
 it.each<AgentKind>(["claude", "codex", "agy"])("%s 子会话在独立打开后接收已有进度、流式追加和终态", async agent => {
   summary.agent = agent;
   emitRows("已生成");

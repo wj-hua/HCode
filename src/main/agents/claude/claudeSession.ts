@@ -33,6 +33,7 @@ import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
 import type { TurnOutcome } from "../../../shared/collaboration.js";
 import { researchMcp, hostedMcp, RESEARCH_MCP_NAME, type ResearchRuntime, type HostedRuntime } from "../../sessions/researchRuntime.js";
 import { ClaudePromptSuggestions } from './claudePromptSuggestions.js';
+import { ClaudeBackgroundTasks } from './claudeBackgroundTasks.js';
 
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
 const FLUSH_INTERVAL_MS = 16;
@@ -114,8 +115,7 @@ export class ClaudeSession {
   private ordinaryContinuation: string | undefined;
   private pumpPromise: Promise<void> | null = null;
   private readonly promptSuggestions: ClaudePromptSuggestions;
-  /** CLI 进程内仍在运行的后台任务数（不含常驻监视类）；回合结束后它们仍可能在跑。 */
-  private backgroundTasks = 0;
+  private readonly backgroundTasks = new ClaudeBackgroundTasks();
 
   constructor(
     private readonly host: ClaudeSessionHost,
@@ -156,7 +156,7 @@ export class ClaudeSession {
   }
 
   get hasBackgroundTasks(): boolean {
-    return this.backgroundTasks > 0;
+    return this.backgroundTasks.count > 0;
   }
 
   /** 只在空闲回合边界更换工具，停止旧 query 后保留原生身份与投影历史。 */
@@ -237,7 +237,7 @@ export class ClaudeSession {
     const input = new InputQueue<SDKUserMessage>();
     this.input = input;
     // 后台任务快照按进程计；新进程启动时不会补发，必须先清零
-    this.setBackgroundTasks(0);
+    this.backgroundTasks.reset();
     const permissionMode = this.permissionMode;
     const instructions = [this.ordinaryContinuation, this.hosted?.instructions].filter(Boolean).join('\n');
     this.activeQuery = query({
@@ -297,7 +297,7 @@ export class ClaudeSession {
         this.input = null;
       }
       this.rejectAllPending("会话已结束");
-      if (!this.closed) this.setBackgroundTasks(0);
+      if (!this.closed && this.backgroundTasks.endProcess()) this.emitState();
       if (this.projector.hasOpenTurn) this.projector.closeTurn(Date.now(), this.error ? "failed" : undefined);
       this.flushNow();
       if (!this.closed) this.setState(this.error ? "error" : "idle");
@@ -312,8 +312,8 @@ export class ClaudeSession {
         name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
       })));
     }
-    if (message.type === "system" && message.subtype === "background_tasks_changed") {
-      this.setBackgroundTasks(message.tasks.filter((task) => !task.ambient).length);
+    if (this.backgroundTasks.consume(message)) {
+      this.emitState();
       if (!this.isBusy) this.scheduleIdleClose();
     }
     if (message.type === "system" && message.subtype === "init") {
@@ -520,6 +520,7 @@ export class ClaudeSession {
   close() {
     this.promptSuggestions.clear();
     this.closed = true;
+    if (this.backgroundTasks.endProcess()) this.emitState();
     this.clearIdleTimer();
     this.rejectAllPending("会话已关闭");
     this.input?.end();
@@ -557,12 +558,6 @@ export class ClaudeSession {
     this.emitState();
   }
 
-  private setBackgroundTasks(count: number) {
-    if (this.backgroundTasks === count) return;
-    this.backgroundTasks = count;
-    this.emitState();
-  }
-
   emitState() {
     this.host.emitState({
       sessionKey: this.key,
@@ -570,7 +565,8 @@ export class ClaudeSession {
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       projectPath: this.projectPath,
       state: this.state,
-      ...(this.backgroundTasks ? { backgroundTasks: this.backgroundTasks } : {}),
+      ...(this.backgroundTasks.count ? { backgroundTasks: this.backgroundTasks.count } : {}),
+      backgroundTaskDetails: this.backgroundTasks.snapshot(),
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(this.model ? { model: this.model } : {}),
