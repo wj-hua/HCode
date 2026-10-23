@@ -1,5 +1,6 @@
 // 主进程与渲染进程共用的数据类型（只放纯类型，不放实现）。
 import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
+import type { BackgroundTask } from './backgroundTasks.js';
 
 export type { ConversationRow };
 
@@ -203,6 +204,8 @@ export interface ChatStateEvent {
   state: ChatRunState;
   /** 回合外仍在运行的原生后台任务数（如后台命令、后台子代理）；没有时省略。 */
   backgroundTasks?: number;
+  /** 本进程收到的后台任务详情及最近结束结果。 */
+  backgroundTaskDetails?: BackgroundTask[];
   error?: string;
   permissionMode: PermissionMode;
   model?: string;

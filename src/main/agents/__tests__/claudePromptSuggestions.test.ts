@@ -36,6 +36,23 @@ function result(success = true): SDKMessage {
 }
 const suggestion = (text = '请继续下一步', sessionId = 'native'): SDKMessage => ({ type: 'prompt_suggestion', suggestion: text, session_id: sessionId, uuid: randomUUID() });
 
+it('原生后台事件在回合结束后仍发布详情，进度和完成结果不依赖下一次发送', async () => {
+  const data = fixture(); await data.start();
+  expect(data.states[0]?.state).toBe('running');
+  const base = { type: 'system' as const, uuid: randomUUID(), session_id: 'native' };
+  data.stream.push({ ...base, subtype: 'background_tasks_changed' as const, tasks: [{ task_id: 'test', task_type: 'local_bash', description: '全量测试' }] });
+  data.stream.push(result());
+  await vi.waitFor(() => expect(data.states.at(-1)).toMatchObject({ state: 'idle', backgroundTasks: 1, backgroundTaskDetails: [{ id: 'test', status: 'running' }] }));
+  data.stream.push({ ...base, subtype: 'task_progress' as const, task_id: 'test', description: '全量测试', summary: 'UI 测试中', usage: { duration_ms: 3000, total_tokens: 0, tool_uses: 1 } });
+  await vi.waitFor(() => expect(data.states.at(-1)?.backgroundTaskDetails?.[0]?.summary).toBe('UI 测试中'));
+  data.stream.push({ ...base, subtype: 'background_tasks_changed' as const, tasks: [] });
+  data.stream.push({ ...base, subtype: 'task_notification' as const, task_id: 'test', status: 'completed' as const, output_file: '/tmp/test.log', summary: '全部通过' });
+  await vi.waitFor(() => expect(data.states.at(-1)).toMatchObject({ state: 'idle', backgroundTaskDetails: [{ id: 'test', status: 'completed', summary: '全部通过' }] }));
+  expect(data.states.at(-1)?.backgroundTasks).toBeUndefined();
+  expect(data.session.hasBackgroundTasks).toBe(false);
+  expect(sdk.query).toHaveBeenCalledTimes(1);
+});
+
 it('普通会话启用原生建议，result 后继续接收建议并关联原回合，不再次运行或改动终态', async () => {
   const data = fixture(); await data.start();
   expect(sdk.query.mock.calls[0]![0].options.promptSuggestions).toBe(true);
