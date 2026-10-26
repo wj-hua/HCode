@@ -7,8 +7,8 @@ import { createHash } from "node:crypto";
 import { listProjectFiles } from "../projectFiles.js";
 
 export const CODEX_RESEARCH_PROTOCOL_VERSION = "0.162.0";
-/** 补丁版本不改 app-server 协议；0.162.x 与 0.163.x 共用已验证的实验协议。 */
-export const isCodexResearchVersion = (version?: string) => /\b0\.16[23]\.\d+\b/.test(version ?? "");
+/** 既有 0.162.x/0.163.x 协议与单独通过原生工具验收的 0.164.0；新版逐一准入。 */
+export const isCodexResearchVersion = (version?: string) => /^(?:0\.16[23]\.\d+|0\.164\.0)$/.test(version ?? "");
 export const RESEARCH_PERMISSION_PROFILE = "hcode_research";
 export const RESEARCH_MCP_NAME = "hcode";
 const MAX_READ_BYTES = 256 * 1024;

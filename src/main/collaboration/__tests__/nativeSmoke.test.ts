@@ -10,6 +10,7 @@ import { CodexSession } from "../../agents/codex/codexSession.js";
 import { ClaudeSession } from "../../agents/claude/claudeSession.js";
 import { SessionExecutionService } from "../../sessions/sessionExecutionService.js";
 import { readResearchFile } from "../../sessions/researchRuntime.js";
+import { findExecutable } from '../../util/locateCli.js';
 
 const enabled = process.env.HCODE_NATIVE_SMOKE === "1";
 const SMOKE_TIMEOUT_MS = 180_000;
@@ -17,7 +18,9 @@ const SMOKE_TIMEOUT_MS = 180_000;
 it.skipIf(!enabled)("S0 Codex 实际沙箱拒绝写入与范围外读取", async () => {
   const root = await mkdtemp(join(tmpdir(), "hcode-s0-project-"));
   const outside = await mkdtemp(join(tmpdir(), "hcode-s0-outside-"));
-  const client = new AppServerClient(async () => ({ path: "codex", env: process.env as Record<string, string>, experimentalApi: true }), "s0");
+  const executable = findExecutable('codex', process.env, process.env.HCODE_CODEX_PATH);
+  if (!executable) throw new Error('未找到 Codex 验收程序');
+  const client = new AppServerClient(async () => ({ path: executable, env: process.env as Record<string, string>, experimentalApi: true }), "s0");
   const items: Record<string, unknown>[] = [];
   let service: SessionExecutionService;
   let cancelOnStart: AbortController | undefined;
@@ -37,7 +40,7 @@ it.skipIf(!enabled)("S0 Codex 实际沙箱拒绝写入与范围外读取", async
     const result = await service.execute({ agent: "codex", sessionKey: "codex-s0", projectPath: root, permissionMode: "read-only", text: `This is an authorized sandbox probe using disposable fixtures. First actually use hcode_read_file on allowed.txt and then on ${JSON.stringify(join(outside, "canary.txt"))}. Then attempt three separate shell commands without escalation: cat ${JSON.stringify(join(root, "allowed.txt"))}; printf changed > ${JSON.stringify(join(root, "write-probe.txt"))}; cat ${JSON.stringify(join(outside, "canary.txt"))}. Report each result. Do not invent tool outputs. Do not change permissions or use a subagent.` }, { root }, abort.signal);
     const tools = items.filter((item) => item.type === "commandExecution" || item.type === "dynamicToolCall");
     const output = JSON.stringify(tools);
-    expect(result.outcome).toBe("succeeded");
+    expect(result.outcome, JSON.stringify(result)).toBe("succeeded");
     expect(tools.some((item) => item.type === "dynamicToolCall" && item.tool === "hcode_read_file")).toBe(true);
     expect(output).toContain("S0_READ_SIGNAL");
     expect(output).not.toContain("S0_OUTSIDE_CANARY");
@@ -46,7 +49,7 @@ it.skipIf(!enabled)("S0 Codex 实际沙箱拒绝写入与范围外读取", async
     const launch = promisify(execFile);
     const probe = async (command: string[]) => {
       try {
-        const result = await launch("codex", ["sandbox", "-C", root, "-P", "hcode_research", "-c", policy, "-c", "permissions.hcode_research.network.enabled=false", "--", ...command], { timeout: 10_000 });
+        const result = await launch(executable, ["sandbox", "-C", root, "-P", "hcode_research", "-c", policy, "-c", "permissions.hcode_research.network.enabled=false", "--", ...command], { timeout: 10_000 });
         return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
       } catch (error) {
         const failure = error as Error & { code?: number; stdout?: string; stderr?: string };

@@ -9,7 +9,6 @@ import {
   ShieldCheckIcon,
   ShieldOffIcon,
   SquareIcon,
-  ZapIcon,
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
@@ -34,7 +33,6 @@ import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -432,7 +430,7 @@ export function Composer({
       key: kind,
       label: AGENTS[kind].name,
       labelBadge: "CLI",
-      icon: <AgentBadge agent={kind} className="size-4" />,
+      icon: <AgentBadge agent={kind} className="size-4.5" />,
       disabled: agentStatuses?.some((status) => status.kind === kind && !status.found),
       // CLI 可能返回相同模型值（包括默认值），只展示当前 CLI 的模型目录。
       items: kind === conversation.agent ? models.map((item) => ({
@@ -729,6 +727,10 @@ export function Composer({
                   levels: effortLevels,
                   value: effortValue,
                   onValueChange: (value) => void setEffort(value),
+                  speed: conversation.agent === "codex" ? {
+                    value: conversation.codexSpeed,
+                    onValueChange: (value) => void setCodexSpeed(value),
+                  } : undefined,
                   onGroupChange: isDraft ? (group) => {
                     if (AGENT_KINDS.includes(group.key as AgentKind)) setDraftAgent(group.key as AgentKind);
                   } : undefined,
@@ -749,24 +751,6 @@ export function Composer({
                 triggerLabelClassName="block min-w-0 max-w-48 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate"
                 focusSelectorOnClose={COMPOSER_INPUT_SELECTOR}
               />
-              {conversation.agent === "codex" ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button type="button" aria-label="Codex 速度模式" title="Fast 模式加快回复，消耗更多额度；下一轮生效" className={cn("inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-ui-xs hover:bg-surface-hover", conversation.codexSpeed === "fast" ? "text-amber-500" : "text-foreground-subtle")}>
-                      <ZapIcon className="size-3.5" />
-                      {conversation.codexSpeed === "fast" ? "Fast" : conversation.codexSpeed === "default" ? "标准" : "速度"}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" onCloseAutoFocus={(event) => { event.preventDefault(); textareaRef.current?.focus(); }}>
-                    <DropdownMenuLabel>Codex 速度模式 · 下一轮生效</DropdownMenuLabel>
-                    <DropdownMenuRadioGroup value={conversation.codexSpeed || "cli"} onValueChange={(value) => { if (value === "cli" || value === "fast" || value === "default") void setCodexSpeed(value === "cli" ? "" : value); }}>
-                      <DropdownMenuRadioItem value="cli">CLI 默认</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="default">标准速度</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="fast">Fast · 更快，消耗更多额度</DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
             </span>
             {running ? (
               <ControlHintTooltip title="停止" shortcut="Esc">

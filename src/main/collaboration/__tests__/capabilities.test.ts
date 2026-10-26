@@ -4,7 +4,7 @@ import type { AgentKind } from '../../../shared/types.js';
 import type { AgentProvider } from '../../agents/types.js';
 import { AgentRegistry } from '../../agents/registry.js';
 import { collaborationCapabilities } from '../collaborationCapabilities.js';
-it.each(['0.162.0', '0.163.0', '0.161.0'])('Codex %s 的源资格按版本和当前线程工具核验', async (version) => {
+it.each(['0.162.0', '0.163.0', '0.164.0', '0.161.0'])('Codex %s 的源资格按版本和当前线程工具核验', async (version) => {
   const agents = new AgentRegistry({ codex: { kind: 'codex', getStatus: async () => ({ found: true, version }), collaborationSourceReason: async () => '旧线程缺工具，不能补工具' } } as unknown as Record<AgentKind, AgentProvider>);
   const fresh = (await collaborationCapabilities(agents, 'darwin'))[0]!;
   expect(fresh.canInitiate).toBe(version !== '0.161.0');

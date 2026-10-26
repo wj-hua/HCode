@@ -3,7 +3,15 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { codexResearchConfig, readResearchFile } from "../researchRuntime.js";
+import { codexResearchConfig, isCodexResearchVersion, readResearchFile } from "../researchRuntime.js";
+
+it.each([
+  ['0.162.0', true], ['0.163.0', true], ['0.163.42', true], ['0.164.0', true],
+  ['0.164.1', false], ['0.165.0', false], ['0.161.0', false], ['0.164.0-preview', false],
+  ['10.164.0', false], [undefined, false],
+] as const)('Codex %s 仅在已验证版本范围内启用实验工具', (version, expected) => {
+  expect(isCodexResearchVersion(version)).toBe(expected);
+});
 
 describe("研究文件边界", () => {
   it("返回真实文本/hash，并拒绝越界、外部符号链接、二进制和大文件", async () => {

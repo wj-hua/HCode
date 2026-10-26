@@ -3,12 +3,17 @@ import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import type { ModelSelectGroup } from "@/ModelConfigSelect.js";
 import { isNoThoughtLevel } from "@/chat-input-toolbar/thoughtLevelOptions.js";
 import { RollingToolbarLabel } from "@/chat-input-toolbar/RollingToolbarLabel.js";
-import { LoaderIcon, RefreshCwIcon } from "lucide-react";
+import { LoaderIcon, RefreshCwIcon, ZapIcon } from "lucide-react";
 import { ComposerProviderMenu } from "@/chat-input-toolbar/ComposerProviderMenu.js";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import "@/chat-input-toolbar/composer-thought-slider.css";
 
@@ -49,6 +54,10 @@ export interface ComposerModelOptions {
   levels: readonly { value: string; label: string }[];
   value: string;
   onValueChange: (value: string) => void;
+  speed?: {
+    value: "" | "default" | "fast";
+    onValueChange: (value: "" | "default" | "fast") => void;
+  };
 }
 
 export function getComposerThoughtDisplay(options: ComposerModelOptions) {
@@ -171,120 +180,74 @@ export function ComposerModelMenu({
   };
   return (
     <>
-      <ComposerProviderMenu
-        groups={groups}
-        group={group}
-        label={options.providerLabel}
-        onSelect={options.onGroupChange}
-      >
-        <DropdownMenuSeparator className="bg-border/50" />
-        <DropdownMenuLabel className="text-ui-sm text-foreground-subtle">
-          {options.modelsLabel}
-        </DropdownMenuLabel>
-        {options.loading ? (
-          <div
-            role="status"
-            className="flex items-center gap-2 px-2 py-1 text-ui-sm text-foreground-subtle"
-          >
-            <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
-            正在读取模型…
-          </div>
-        ) : null}
-        {options.error ? (
-          <div role="alert" className="px-2 py-1 text-ui-sm text-destructive">
-            <p className="truncate" title={options.error}>
-              {options.error}
-            </p>
+      {showEffort ? (
+        <>
+          {options.levels.length === 1 ? (
+            // 单一档位没有可调范围；旧逻辑渲染禁用滑杆并提示快捷键，误导用户可调档。
+            <div className="px-2 py-2">
+              <ComposerEffortHeading
+                label={options.effortLabel}
+                value={currentGroupSelected ? label : "—"}
+              />
+            </div>
+          ) : (
             <DropdownMenuItem
-              className="text-destructive"
-              onSelect={(event) => {
-                event.preventDefault();
-                options.onRetry?.();
+              className="block px-2 py-2 focus:bg-transparent"
+              aria-disabled={sliderDisabled}
+              onSelect={(event) => event.preventDefault()}
+              onFocus={(event) => {
+                if (event.target === event.currentTarget)
+                  sliderRef.current?.focus();
               }}
             >
-              <RefreshCwIcon className="size-3.5" />
-              模型读取失败，重试
-            </DropdownMenuItem>
-          </div>
-        ) : null}
-        <ScrollFadeViewport
-          className="max-h-60 flex-initial overflow-x-hidden"
-          inert={options.loading || undefined}
-          data-composer-model-list
-        >
-          {group ? renderItems(group.items) : null}
-        </ScrollFadeViewport>
-        {showEffort ? (
-          <>
-            <DropdownMenuSeparator className="bg-border/50" />
-            {options.levels.length === 1 ? (
-              // 单一档位没有可调范围；旧逻辑渲染禁用滑杆并提示快捷键，误导用户可调档。
-              <div className="px-2 py-2">
-                <ComposerEffortHeading
-                  label={options.effortLabel}
-                  value={currentGroupSelected ? label : "—"}
-                />
-              </div>
-            ) : (
-              <DropdownMenuItem
-                className="block px-2 py-2 focus:bg-transparent"
-                aria-disabled={sliderDisabled}
-                onSelect={(event) => event.preventDefault()}
-                onFocus={(event) => {
-                  if (event.target === event.currentTarget)
-                    sliderRef.current?.focus();
-                }}
+              <ComposerEffortHeading
+                label={options.effortLabel}
+                value={currentGroupSelected ? label : "—"}
+                shortcut={options.effortShortcutLabel}
+              />
+              <div
+                className="composer-thought-slider relative h-8 w-full rounded-full"
+                data-disabled={sliderDisabled}
               >
-                <ComposerEffortHeading
-                  label={options.effortLabel}
-                  value={currentGroupSelected ? label : "—"}
-                  shortcut={options.effortShortcutLabel}
-                />
                 <div
-                  className="composer-thought-slider relative h-8 w-full rounded-full"
-                  data-disabled={sliderDisabled}
+                  // 模型或档位目录变化时只重置视觉层，避免跨模型补间，同时保留 input 焦点。
+                  key={JSON.stringify([
+                    normalizedValue,
+                    group?.key,
+                    options.levels.map((level) => level.value),
+                  ])}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0"
                 >
                   <div
-                    // 模型或档位目录变化时只重置视觉层，避免跨模型补间，同时保留 input 焦点。
-                    key={JSON.stringify([
-                      normalizedValue,
-                      group?.key,
-                      options.levels.map((level) => level.value),
-                    ])}
-                    aria-hidden="true"
-                    className="pointer-events-none absolute inset-0"
+                    data-testid="composer-thought-track"
+                    data-progress={sliderFilled ? sliderProgress : 0}
+                    className="absolute inset-x-0 top-1 h-6 overflow-hidden rounded-full bg-foreground/10"
                   >
+                    {/* 外层 border 会包住绿色填充；描边放到底层，让选中区域完全覆盖它。 */}
+                    <div className="absolute inset-0 rounded-full border border-foreground/10" />
                     <div
-                      data-testid="composer-thought-track"
-                      data-progress={sliderFilled ? sliderProgress : 0}
-                      className="absolute inset-x-0 top-1 h-6 overflow-hidden rounded-full bg-foreground/10"
+                      className="composer-thought-slider-fill absolute inset-y-0 left-0 overflow-hidden rounded-full"
+                      data-max={
+                        sliderFilled &&
+                        currentIndex === options.levels.length - 1
+                      }
+                      data-highspeed={highspeed && currentGroupSelected}
+                      style={{
+                        width: sliderFilled
+                          ? `calc(14px + (100% - 28px) * ${sliderProgress / 100})`
+                          : 0,
+                      }}
                     >
-                      {/* 外层 border 会包住绿色填充；描边放到底层，让选中区域完全覆盖它。 */}
-                      <div className="absolute inset-0 rounded-full border border-foreground/10" />
-                      <div
-                        className="composer-thought-slider-fill absolute inset-y-0 left-0 overflow-hidden rounded-full"
-                        data-max={
-                          sliderFilled &&
-                          currentIndex === options.levels.length - 1
-                        }
-                        data-highspeed={highspeed && currentGroupSelected}
-                        style={{
-                          width: sliderFilled
-                            ? `calc(14px + (100% - 28px) * ${sliderProgress / 100})`
-                            : 0,
-                        }}
-                      >
-                        {sliderFilled &&
-                        currentIndex === options.levels.length - 1 &&
-                        !sliderDisabled ? (
-                          <div
-                            data-testid="composer-thought-bubbles"
-                            className="composer-thought-bubbles absolute inset-0"
-                          >
-                            {(highspeed
-                              ? HIGHSPEED_BUBBLES
-                              : EFFORT_BUBBLES
-                            ).map((bubble, index) => (
+                      {sliderFilled &&
+                      currentIndex === options.levels.length - 1 &&
+                      !sliderDisabled ? (
+                        <div
+                          data-testid="composer-thought-bubbles"
+                          className="composer-thought-bubbles absolute inset-0"
+                        >
+                          {(highspeed ? HIGHSPEED_BUBBLES : EFFORT_BUBBLES).map(
+                            (bubble, index) => (
                               <span
                                 key={index}
                                 className="composer-thought-bubble absolute inset-x-0"
@@ -302,114 +265,189 @@ export function ComposerModelMenu({
                                   }}
                                 />
                               </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
+                            ),
+                          )}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="absolute inset-x-3.5 inset-y-0 flex items-center justify-between">
-                      {options.levels.map((level, index) => (
-                        <span
-                          key={level.value}
-                          data-composer-thought-stop
-                          data-filled={sliderFilled && index <= currentIndex}
-                          data-hovered={
-                            !sliderDisabled &&
-                            hoveredStop === `${normalizedValue}:${level.value}`
-                          }
-                          className="composer-thought-slider-stop size-1 shrink-0 rounded-full"
-                        />
-                      ))}
-                    </div>
-                    <div
-                      className="composer-thought-slider-thumb absolute top-0.5 size-7 rounded-full shadow-sm"
-                      style={{
-                        left: `calc((100% - 28px) * ${sliderProgress / 100})`,
-                      }}
-                    />
                   </div>
-                  <input
-                    ref={sliderRef}
-                    type="range"
-                    min={0}
-                    max={Math.max(0, options.levels.length - 1)}
-                    step={1}
-                    value={Math.max(0, currentIndex)}
-                    // 目录在调档后会短暂重读；原生 disabled 会移走焦点，后续方向键落到菜单。
-                    // 用 aria-disabled 保留焦点，等待期间通过事件与提交入口阻止交互。
-                    aria-disabled={sliderDisabled}
-                    aria-label={options.effortLabel}
-                    aria-valuetext={currentGroupSelected ? label : "—"}
-                    data-testid="composer-thought-slider"
-                    data-levels={JSON.stringify(
-                      options.levels.map((level) => level.value),
-                    )}
-                    className="composer-thought-range absolute inset-0 m-0 h-8 w-full cursor-pointer appearance-none bg-transparent outline-none aria-disabled:cursor-default"
-                    onPointerDown={(event) => {
-                      // 拦截冒泡会让 Radix 的内部点击标记残留，导致第一次外部点击无法关闭菜单。
-                      if (sliderDisabled) event.preventDefault();
+                  <div className="absolute inset-x-3.5 inset-y-0 flex items-center justify-between">
+                    {options.levels.map((level, index) => (
+                      <span
+                        key={level.value}
+                        data-composer-thought-stop
+                        data-filled={sliderFilled && index <= currentIndex}
+                        data-hovered={
+                          !sliderDisabled &&
+                          hoveredStop === `${normalizedValue}:${level.value}`
+                        }
+                        className="composer-thought-slider-stop size-1 shrink-0 rounded-full"
+                      />
+                    ))}
+                  </div>
+                  <div
+                    className="composer-thought-slider-thumb absolute top-0.5 size-7 rounded-full shadow-sm"
+                    style={{
+                      left: `calc((100% - 28px) * ${sliderProgress / 100})`,
                     }}
-                    onPointerLeave={() => setHoveredStop(null)}
-                    onPointerMove={(event) => {
-                      // 原生 range 覆盖圆点，用坐标反馈悬停，避免圆点截获拖拽事件。
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const trackWidth = rect.width - 28;
-                      const index = Math.round(
-                        ((event.clientX - rect.left - 14) / trackWidth) *
-                          (options.levels.length - 1),
-                      );
-                      const level = options.levels[index];
-                      const center =
-                        rect.left +
-                        14 +
-                        (trackWidth * index) / (options.levels.length - 1);
-                      setHoveredStop(
-                        !sliderDisabled &&
-                          event.pointerType !== "touch" &&
-                          level &&
-                          Math.abs(event.clientX - center) <= 10
-                          ? `${normalizedValue}:${level.value}`
-                          : null,
-                      );
-                    }}
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Escape") {
-                        event.stopPropagation();
-                        if (sliderDisabled && event.key !== "Tab")
-                          event.preventDefault();
-                      }
-                    }}
-                    // 原因：缺失档位时 range 的物理位置仍为 0；Home 或点击首格不触发 change，
-                    // 必须在明确完成手势时接纳首格选择，不能把展示位置提前当成用户意图。
-                    onKeyUp={(event) => {
-                      if (
-                        [
-                          "Home",
-                          "End",
-                          "ArrowLeft",
-                          "ArrowRight",
-                          "ArrowUp",
-                          "ArrowDown",
-                          "PageUp",
-                          "PageDown",
-                        ].includes(event.key)
-                      )
-                        selectSliderValue(Number(event.currentTarget.value));
-                    }}
-                    onPointerUp={(event) => {
-                      selectSliderValue(Number(event.currentTarget.value));
-                    }}
-                    onChange={(event) =>
-                      selectSliderValue(Number(event.currentTarget.value))
-                    }
                   />
                 </div>
-              </DropdownMenuItem>
-            )}
-          </>
-        ) : null}
-      </ComposerProviderMenu>
+                <input
+                  ref={sliderRef}
+                  type="range"
+                  min={0}
+                  max={Math.max(0, options.levels.length - 1)}
+                  step={1}
+                  value={Math.max(0, currentIndex)}
+                  // 目录在调档后会短暂重读；原生 disabled 会移走焦点，后续方向键落到菜单。
+                  // 用 aria-disabled 保留焦点，等待期间通过事件与提交入口阻止交互。
+                  aria-disabled={sliderDisabled}
+                  aria-label={options.effortLabel}
+                  aria-valuetext={currentGroupSelected ? label : "—"}
+                  data-testid="composer-thought-slider"
+                  data-levels={JSON.stringify(
+                    options.levels.map((level) => level.value),
+                  )}
+                  className="composer-thought-range absolute inset-0 m-0 h-8 w-full cursor-pointer appearance-none bg-transparent outline-none aria-disabled:cursor-default"
+                  onPointerDown={(event) => {
+                    // 拦截冒泡会让 Radix 的内部点击标记残留，导致第一次外部点击无法关闭菜单。
+                    if (sliderDisabled) event.preventDefault();
+                  }}
+                  onPointerLeave={() => setHoveredStop(null)}
+                  onPointerMove={(event) => {
+                    // 原生 range 覆盖圆点，用坐标反馈悬停，避免圆点截获拖拽事件。
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const trackWidth = rect.width - 28;
+                    const index = Math.round(
+                      ((event.clientX - rect.left - 14) / trackWidth) *
+                        (options.levels.length - 1),
+                    );
+                    const level = options.levels[index];
+                    const center =
+                      rect.left +
+                      14 +
+                      (trackWidth * index) / (options.levels.length - 1);
+                    setHoveredStop(
+                      !sliderDisabled &&
+                        event.pointerType !== "touch" &&
+                        level &&
+                        Math.abs(event.clientX - center) <= 10
+                        ? `${normalizedValue}:${level.value}`
+                        : null,
+                    );
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") {
+                      event.stopPropagation();
+                      if (sliderDisabled && event.key !== "Tab")
+                        event.preventDefault();
+                    }
+                  }}
+                  // 原因：缺失档位时 range 的物理位置仍为 0；Home 或点击首格不触发 change，
+                  // 必须在明确完成手势时接纳首格选择，不能把展示位置提前当成用户意图。
+                  onKeyUp={(event) => {
+                    if (
+                      [
+                        "Home",
+                        "End",
+                        "ArrowLeft",
+                        "ArrowRight",
+                        "ArrowUp",
+                        "ArrowDown",
+                        "PageUp",
+                        "PageDown",
+                      ].includes(event.key)
+                    )
+                      selectSliderValue(Number(event.currentTarget.value));
+                  }}
+                  onPointerUp={(event) => {
+                    selectSliderValue(Number(event.currentTarget.value));
+                  }}
+                  onChange={(event) =>
+                    selectSliderValue(Number(event.currentTarget.value))
+                  }
+                />
+              </div>
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator className="bg-border/50" />
+        </>
+      ) : null}
+      {options.speed ? (
+        <>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              aria-label="Codex 速度模式"
+              className="min-h-8 gap-2 px-2 text-ui-base"
+            >
+              <ZapIcon className={options.speed.value === "fast" ? "size-4 text-amber-500" : "size-4 text-foreground-subtle"} />
+              <span>速度模式</span>
+              <span className="ml-auto text-ui-sm text-foreground-subtle">
+                {options.speed.value === "fast" ? "Fast" : options.speed.value === "default" ? "标准" : "CLI 默认"}
+              </span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuLabel>Codex 速度模式 · 下一轮生效</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={options.speed.value || "cli"}
+                onValueChange={(value) => {
+                  if (value === "cli" || value === "default" || value === "fast")
+                    options.speed?.onValueChange(value === "cli" ? "" : value);
+                }}
+              >
+                <DropdownMenuRadioItem value="cli">CLI 默认</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="default">标准速度</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="fast">Fast · 更快，消耗更多额度</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSeparator className="bg-border/50" />
+        </>
+      ) : null}
+      <DropdownMenuLabel className="text-ui-sm text-foreground-subtle">
+        {options.modelsLabel}
+      </DropdownMenuLabel>
+      {options.loading ? (
+        <div
+          role="status"
+          className="flex items-center gap-2 px-2 py-1 text-ui-sm text-foreground-subtle"
+        >
+          <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" />
+          正在读取模型…
+        </div>
+      ) : null}
+      {options.error ? (
+        <div role="alert" className="px-2 py-1 text-ui-sm text-destructive">
+          <p className="truncate" title={options.error}>
+            {options.error}
+          </p>
+          <DropdownMenuItem
+            className="text-destructive"
+            onSelect={(event) => {
+              event.preventDefault();
+              options.onRetry?.();
+            }}
+          >
+            <RefreshCwIcon className="size-3.5" />
+            模型读取失败，重试
+          </DropdownMenuItem>
+        </div>
+      ) : null}
+      <ScrollFadeViewport
+        className="max-h-32 flex-initial overflow-x-hidden"
+        inert={options.loading || undefined}
+        data-composer-model-list
+      >
+        {group ? renderItems(group.items) : null}
+      </ScrollFadeViewport>
+      <DropdownMenuSeparator className="bg-border/50" />
+      <ComposerProviderMenu
+        groups={groups}
+        group={group}
+        label={options.providerLabel}
+        onSelect={options.onGroupChange}
+      />
     </>
   );
 }

@@ -33,7 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip.js";
-import { AlertCircle, CheckIcon, ChevronDownIcon, LoaderIcon, PackageIcon } from "lucide-react";
+import { AlertCircle, CheckIcon, ChevronDownIcon, LoaderIcon, PackageIcon, ZapIcon } from "lucide-react";
 import {
   TID_CHAT_MODEL_SELECT_GROUP,
   TID_CHAT_MODEL_SELECT_ITEM,
@@ -370,11 +370,9 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
           {...commonProps}
           value={item.value}
           className="min-h-8 gap-2 pl-2 pr-8 text-ui-base"
-          onSelect={(event) => {
-            // 合并菜单选模后继续调档，不能让 Radix 默认关闭整个弹窗。
-            if (composerOptions) event.preventDefault();
+          onSelect={() => {
             handleModelValueChange(item.value);
-            if (!composerOptions) handlePopoverOpenChange(false);
+            handlePopoverOpenChange(false);
           }}
         >
           {content}
@@ -382,7 +380,6 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
       );
     },
     [
-      composerOptions,
       handleModelValueChange,
       handlePopoverOpenChange,
       isItemLocked,
@@ -510,7 +507,7 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
         data-testid={triggerTestId}
         data-model-current-value={normalizedValue}
         data-composer-combined-model={composerOptions ? "true" : undefined}
-        aria-label={composerOptions ? `${triggerAriaLabel} ${composerOptions.levels.find((level) => level.value === composerOptions.value)?.label ?? ""}`.trim() : triggerAriaLabel}
+        aria-label={composerOptions ? `${triggerAriaLabel} ${composerOptions.levels.find((level) => level.value === composerOptions.value)?.label ?? ""}${composerOptions.speed?.value === "fast" ? " Fast 模式" : ""}`.trim() : triggerAriaLabel}
         onClick={guideTooltipOpen ? onGuideTooltipDismiss : undefined}
         className={cn(
           "w-fit justify-between gap-1 rounded-lg pl-2 pr-1.5 text-ui-base whitespace-nowrap",
@@ -534,6 +531,9 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
                 value={pending ? undefined : triggerLabelValue}
               />
             </span>
+            {composerOptions?.speed?.value === "fast" ? (
+              <ZapIcon className="pointer-events-none size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+            ) : null}
             {composerOptions && composerOptions.levels.length > 0 ? <ComposerThoughtIndicator options={composerOptions} /> : null}
             {triggerBadge}
             {pending ? (
@@ -572,7 +572,7 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
         <DropdownMenuContent
           className={cn(
             composerOptions
-              ? "w-72 max-w-[calc(100vw-1.5rem)] overflow-y-hidden [app-region:no-drag] [&>*:not([data-composer-model-list]):not([data-composer-provider-list])]:shrink-0"
+              ? "w-72 max-w-[calc(100vw-1.5rem)] overflow-y-hidden [app-region:no-drag] [&>*:not([data-composer-model-list])]:shrink-0"
               : "w-max min-w-48 max-w-[calc(100vw-2rem)]",
             !composerOptions && !shouldShowProviderLevel && "max-h-72 overflow-y-auto",
           )}
