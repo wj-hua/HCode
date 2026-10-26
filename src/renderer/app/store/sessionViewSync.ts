@@ -36,8 +36,23 @@ export class SessionViewSync {
 
   /** init 前后的状态共用执行 key；后续省略原生 ID 的通知仍保留已确认的关联。 */
   captureState(event: ChatStateEvent): ChatStateEvent {
-    const previous = this.states.get(event.sessionKey);
-    const state = { ...event, sessionId: event.sessionId ?? previous?.sessionId, model: event.model ?? previous?.model };
+    const previousKey = event.sessionId ? this.nativeKeys.get(identityKey({ ...event, id: event.sessionId })) : undefined;
+    const previous = this.states.get(event.sessionKey) ?? (previousKey ? this.states.get(previousKey) : undefined);
+    const usage = event.usage ?? previous?.usage;
+    const busy = event.state === "running" || event.state === "awaitingApproval";
+    const state = {
+      ...event,
+      sessionId: event.sessionId ?? previous?.sessionId,
+      model: event.model ?? previous?.model,
+      // 上下文实时更新；性能指标保留最近完成的一轮，避免下一轮开始后消失或混用两轮数值。
+      usage: usage && busy ? {
+        ...usage,
+        ttftMs: previous?.usage?.ttftMs,
+        outputTokensPerSecond: previous?.usage?.outputTokensPerSecond,
+        outputSpeedBasis: previous?.usage?.outputSpeedBasis,
+        outputSpeedDurationMs: previous?.usage?.outputSpeedDurationMs,
+      } : usage,
+    };
     this.states.set(event.sessionKey, state);
     if (state.sessionId) this.nativeKeys.set(identityKey({ ...state, id: state.sessionId }), state.sessionKey);
     if (state.state === "running" || state.state === "awaitingApproval" || state.backgroundTasks) {

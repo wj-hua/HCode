@@ -10,7 +10,6 @@ import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
 import type { ChatUsage } from "@hcode/shared/types";
 
 const LOCALE = "zh-CN";
-const tokens = new Intl.NumberFormat(LOCALE);
 const percentFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1, style: "percent" });
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -30,9 +29,8 @@ export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
   const hasContext = used !== undefined && window !== undefined && window > 0;
   const ratio = hasContext ? used / window : 0;
   const tone = ratio >= 0.9 ? "text-destructive" : ratio >= 0.75 ? "text-warning" : "text-foreground-subtle";
-  const hasTurnUsage = usage.inputTokens !== undefined || usage.outputTokens !== undefined;
-  const hasMetrics = usage.ttftMs !== undefined || usage.outputTokensPerSecond !== undefined;
-  if (!hasContext && !hasTurnUsage && !hasMetrics) return null;
+  const hasMetrics = usage.ttftMs !== undefined || usage.outputSpeedDurationMs !== undefined || usage.outputTokensPerSecond !== undefined;
+  if (!hasContext && !hasMetrics) return null;
 
   return (
     <Context usedTokens={hasContext ? used : 0} maxTokens={hasContext ? window : 1}>
@@ -54,10 +52,8 @@ export function UsageIndicator({ usage }: { usage?: ChatUsage }) {
               />
             </div>
           ) : null}
-          {hasTurnUsage || hasMetrics ? (
+          {hasMetrics ? (
             <div className={cn("grid gap-1.5", hasContext && "border-t border-border pt-3")}>
-              {usage.inputTokens !== undefined ? <Row label="本轮输入" value={`${tokens.format(usage.inputTokens)} tokens`} /> : null}
-              {usage.outputTokens !== undefined ? <Row label="本轮输出" value={`${tokens.format(usage.outputTokens)} tokens`} /> : null}
               {usage.ttftMs !== undefined ? <Row label="首输出延迟（TTFT）" value={`${(usage.ttftMs / 1000).toFixed(2)} s`} /> : null}
               {usage.outputSpeedDurationMs !== undefined ? <Row label="有效响应耗时" value={`${(usage.outputSpeedDurationMs / 1000).toFixed(2)} s`} /> : null}
               {usage.outputTokensPerSecond !== undefined ? <Row label={usage.outputSpeedBasis === "activeTurn" ? "平均响应吞吐（估算）" : "输出速度（估算）"} value={`${usage.outputTokensPerSecond.toFixed(1)} tokens/s`} /> : null}

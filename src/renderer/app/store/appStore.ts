@@ -342,11 +342,6 @@ export const useAppStore = create<AppState>((set, get) => {
       turnPrompt: text,
       runStartedAt: conv.runStartedAt ?? Date.now(),
       error: undefined,
-      usage: conv.usage ? {
-        contextUsedTokens: conv.usage.contextUsedTokens,
-        contextWindowTokens: conv.usage.contextWindowTokens,
-        contextUsedPercent: conv.usage.contextUsedPercent,
-      } : undefined,
       // 队列已清空时，上次停止 / 出错留下的暂停状态没有意义
       ...(conv.queue.length === 0 ? { queuePaused: undefined } : {}),
     });
@@ -426,7 +421,7 @@ export const useAppStore = create<AppState>((set, get) => {
         permissionMode: event.permissionMode,
         ...(event.sessionId ? { sessionId: event.sessionId } : {}),
         ...(event.model ? { activeModel: event.model } : {}),
-        ...(event.usage ? { usage: event.usage } : {}),
+        ...(liveState.usage ? { usage: liveState.usage } : {}),
         ...(event.state === "error" ? { queuePaused: "error" as const } : {}),
         ...(finished && !viewed ? { unread: event.state === "error" ? ("error" as const) : ("done" as const) } : {}),
         ...(event.state === "running" ? { unread: undefined } : {}),

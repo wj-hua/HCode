@@ -79,6 +79,39 @@ it.each<AgentKind>(["claude", "codex", "agy"])("%s 子会话在独立打开后�
   expect(invoke.mock.calls.some(([channel]) => channel === "chat:send")).toBe(false);
 });
 
+it.each<AgentKind>(["claude", "codex", "agy"])("%s 下一轮保留上一轮性能指标，结束后统一更新，上下文仍实时变化", async agent => {
+  summary.agent = agent;
+  const metrics = { ttftMs: 5050, outputSpeedDurationMs: 70400, outputTokensPerSecond: 26.9, outputSpeedBasis: "activeTurn" as const };
+  emitState("running", { usage: { ttftMs: 1000 } });
+  await useAppStore.getState().openSession(summary);
+  const usage = () => useAppStore.getState().conversations[summary.id]!.usage;
+  expect(usage()?.ttftMs).toBeUndefined();
+  emitState("idle", { usage: { contextUsedTokens: 47000, contextWindowTokens: 480000, ...metrics } });
+  invoke.mockResolvedValueOnce(undefined);
+  expect(await useAppStore.getState().send("下一轮")).toBe(true);
+  expect(usage()).toMatchObject(metrics);
+  emitState("running", { usage: { contextUsedTokens: 48000, contextWindowTokens: 480000 } });
+  expect(usage()).toMatchObject({ contextUsedTokens: 48000, ...metrics });
+  emitState("running", { usage: { contextUsedTokens: 49000, ttftMs: 2500 } });
+  expect(usage()).toMatchObject({ contextUsedTokens: 49000, ...metrics });
+  emitState("awaitingApproval", { usage: { ttftMs: 2500 } });
+  expect(usage()).toMatchObject(metrics);
+  // 同一原生会话换执行 key、切换页面时也不能丢掉上一轮指标。
+  useAppStore.getState().newChat("/other-project", "claude");
+  sessionKey = `${sessionKey}-continued`;
+  emitState("running", { usage: { ttftMs: 2500 } });
+  await useAppStore.getState().openSession(summary);
+  expect(usage()).toMatchObject(metrics);
+  const nextMetrics = { ttftMs: 2500, outputSpeedDurationMs: 10000, outputTokensPerSecond: 40, outputSpeedBasis: "response" as const };
+  emitState("idle", { usage: nextMetrics });
+  expect(usage()).toEqual(nextMetrics);
+  // 失败回合缺少吞吐时，不能拼入上一轮的吞吐和耗时。
+  emitState("running", { usage: {} });
+  expect(usage()).toMatchObject(nextMetrics);
+  emitState("error", { usage: { ttftMs: 700 } });
+  expect(usage()).toEqual({ ttftMs: 700 });
+});
+
 it("历史读取未结束时立即显示流式内容，迟到的历史不能回退正文或状态", async () => {
   let finishHistory!: (result: unknown) => void;
   invoke.mockImplementationOnce(() => new Promise(resolve => { finishHistory = resolve; }));
