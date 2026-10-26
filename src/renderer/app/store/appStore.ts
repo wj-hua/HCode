@@ -26,7 +26,7 @@ import type {
   Settings,
   SettingsPatch,
 } from "@hcode/shared/types";
-import { DEFAULT_SETTINGS } from "@hcode/shared/types";
+import { DEFAULT_SETTINGS, getDefaultModel } from "@hcode/shared/types";
 import { sessionPinKey } from "@hcode/shared/sessionPins";
 import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
@@ -281,7 +281,7 @@ export const useAppStore = create<AppState>((set, get) => {
       loading: false,
       runState: "idle",
       permissionMode: settings.defaultPermissionModes[agent],
-      model: settings.defaultModels[agent],
+      model: getDefaultModel(settings, agent),
       effort: settings.defaultEfforts[agent],
       codexSpeed: settings.codexSpeed,
       queue: [],
@@ -557,7 +557,7 @@ export const useAppStore = create<AppState>((set, get) => {
         loading: true,
         runState: "idle",
         permissionMode: settings.defaultPermissionModes[summary.agent],
-        model: settings.defaultModels[summary.agent],
+        model: getDefaultModel(settings, summary.agent),
         effort: settings.defaultEfforts[summary.agent],
         codexSpeed: settings.codexSpeed,
         queue,
@@ -626,7 +626,7 @@ export const useAppStore = create<AppState>((set, get) => {
       patchConversation(conv.viewId, {
         agent,
         permissionMode: settings.defaultPermissionModes[agent],
-        model: settings.defaultModels[agent],
+        model: getDefaultModel(settings, agent),
         effort: settings.defaultEfforts[agent],
         codexSpeed: settings.codexSpeed,
         activeModel: undefined,
@@ -736,6 +736,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const conv = activeConversation();
       if (!conv) return;
       patchConversation(conv.viewId, { model });
+      await get().updateSettings({ lastSelectedModels: { [conv.agent]: model } });
       if (conv.sessionKey) await hcode.invoke("chat:setModel", conv.sessionKey, model).catch(() => undefined);
     },
 

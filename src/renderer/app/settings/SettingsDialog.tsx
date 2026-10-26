@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { version as APP_VERSION } from "../../../../package.json";
 import type { AgentKind, NotificationEvent, SettingsPatch } from "@hcode/shared/types";
-import { isBackgroundVideo } from "@hcode/shared/types";
+import { getDefaultModel, isBackgroundVideo } from "@hcode/shared/types";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
 import { Button } from "@/components/ui/button.js";
@@ -47,6 +47,8 @@ import {
 } from "lucide-react";
 
 type SettingsTab = "general" | "agents" | "notifications" | "extensions";
+
+const LAST_SELECTED_MODEL_VALUE = "__hcode_last_selected_model__";
 
 interface NavItem {
   id: SettingsTab;
@@ -443,6 +445,9 @@ function AgentSection({ kind }: { kind: AgentKind }) {
   const [path, setPath] = useState(settings.agentPaths[kind]);
   const [saved, setSaved] = useState(false);
   const agent = AGENTS[kind];
+  const followLastModel = settings.defaultModelModes[kind] === "lastSelected";
+  const defaultModel = getDefaultModel(settings, kind);
+  const defaultModelLabel = models.find((item) => item.value === defaultModel)?.label ?? (defaultModel || "CLI 默认模型");
 
   useEffect(() => {
     if (open) {
@@ -515,16 +520,23 @@ function AgentSection({ kind }: { kind: AgentKind }) {
         <div className="flex flex-col gap-1.5">
           <label className="text-ui-sm font-medium text-foreground">默认模型</label>
           <StyledSelect
-            value={settings.defaultModels[kind]}
-            onChange={(val) => void updateSettings({ defaultModels: { [kind]: val } })}
+            value={followLastModel ? LAST_SELECTED_MODEL_VALUE : settings.defaultModels[kind]}
+            onChange={(val) => void updateSettings(val === LAST_SELECTED_MODEL_VALUE
+              ? { defaultModelModes: { [kind]: "lastSelected" } }
+              : { defaultModelModes: { [kind]: "fixed" }, defaultModels: { [kind]: val } })}
             className="w-full"
           >
+            <option value={LAST_SELECTED_MODEL_VALUE}>沿用上次手动选择</option>
+            {!models.some((item) => item.value === settings.defaultModels[kind]) && (
+              <option value={settings.defaultModels[kind]}>{settings.defaultModels[kind] || "CLI 默认模型"}</option>
+            )}
             {models.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
               </option>
             ))}
           </StyledSelect>
+          {followLastModel && <p className="text-ui-xs text-foreground-subtle">新会话沿用聊天框中上次手动选择的模型；当前：{defaultModelLabel}</p>}
           {modelError && <p className="text-ui-xs text-destructive">{modelError}</p>}
           <button type="button" onClick={() => void loadModels(kind, true)} disabled={modelsLoading} className="flex items-center gap-1 self-start text-ui-xs text-foreground-subtle hover:text-foreground disabled:opacity-50">
             <RefreshCw className={cn("size-3", modelsLoading && "animate-spin")} />

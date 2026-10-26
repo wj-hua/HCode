@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerSaveBlocker, protocol, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AGENTS } from "../shared/agents.js";
-import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS } from "../shared/types.js";
+import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS, getDefaultModel } from "../shared/types.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
@@ -305,7 +305,7 @@ async function bootstrap() {
     },
   });
   handle("chat:send", (params) => execution!.send(params));
-  const invocations = new AgentInvocationService(new InvocationRepository(join(app.getPath('userData'), 'agent-invocations')), execution, call => send('agentInvocation:updated', call), agent => store.settings.defaultModels[agent], agents);
+  const invocations = new AgentInvocationService(new InvocationRepository(join(app.getPath('userData'), 'agent-invocations')), execution, call => send('agentInvocation:updated', call), agent => getDefaultModel(store.settings, agent), agents);
   handle('agentInvocation:list', (key, nativeId) => invocations.list(key, nativeId));
   handle('agentInvocation:cancel', id => invocations.cancel(id));
   const collaborationRepository = new CollaborationRepository(join(app.getPath("userData"), "collaborations"));

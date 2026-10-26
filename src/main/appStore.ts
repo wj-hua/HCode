@@ -47,6 +47,8 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
     defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),
     defaultModels: pick(raw.defaultModels, DEFAULT_SETTINGS.defaultModels),
+    defaultModelModes: pick(raw.defaultModelModes, DEFAULT_SETTINGS.defaultModelModes),
+    lastSelectedModels: pick(raw.lastSelectedModels, DEFAULT_SETTINGS.lastSelectedModels),
     defaultEfforts: pick(raw.defaultEfforts, DEFAULT_SETTINGS.defaultEfforts),
     customSounds: pick(raw.customSounds, DEFAULT_SETTINGS.customSounds),
     background: pick(raw.background, DEFAULT_SETTINGS.background),
@@ -79,13 +81,15 @@ function mergeDefined<T extends object>(base: T, patch: Partial<T> | undefined):
 
 /** 按 CLI 分组的字段逐项合并，只改补丁里给出的 CLI。 */
 export function mergeSettings(current: Settings, patch: SettingsPatch): Settings {
-  const { agentPaths, defaultPermissionModes, defaultModels, defaultEfforts, ...rest } = patch;
+  const { agentPaths, defaultPermissionModes, defaultModels, defaultModelModes, lastSelectedModels, defaultEfforts, ...rest } = patch;
   return {
     ...mergeDefined(current, rest),
     interfaceMode: patch.interfaceMode === undefined ? current.interfaceMode : normalizeInterfaceMode(patch.interfaceMode),
     agentPaths: mergeDefined(current.agentPaths, agentPaths),
     defaultPermissionModes: mergeDefined(current.defaultPermissionModes, defaultPermissionModes),
     defaultModels: mergeDefined(current.defaultModels, defaultModels),
+    defaultModelModes: mergeDefined(current.defaultModelModes, defaultModelModes),
+    lastSelectedModels: mergeDefined(current.lastSelectedModels, lastSelectedModels),
     defaultEfforts: mergeDefined(current.defaultEfforts, defaultEfforts),
   };
 }

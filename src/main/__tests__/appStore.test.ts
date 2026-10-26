@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "../../shared/types.js";
+import { DEFAULT_SETTINGS, getDefaultModel } from "../../shared/types.js";
 import { AppStore, mergeSettings } from "../appStore.js";
 
 describe("mergeSettings", () => {
@@ -77,7 +77,27 @@ describe("AppStore.updateSettings", () => {
     expect(settings.agentPaths).toEqual({ ...DEFAULT_SETTINGS.agentPaths, claude: "/old/claude" });
     expect(settings.defaultPermissionModes.claude).toBe("plan");
     expect(settings.defaultModels.claude).toBe("sonnet");
+    expect(settings.defaultModelModes).toEqual(DEFAULT_SETTINGS.defaultModelModes);
+    expect(settings.lastSelectedModels).toEqual({});
     expect(settings).not.toHaveProperty("claudePath");
+  });
+
+  it("各 CLI 分别持久化模型策略与手动选择，空串与尚未选择可区分", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    const store = new AppStore(dir);
+    store.updateSettings({ defaultModels: { codex: "fixed-codex", claude: "sonnet" } });
+    store.updateSettings({ defaultModelModes: { codex: "lastSelected" } });
+    expect(getDefaultModel(store.settings, "codex")).toBe("fixed-codex");
+    store.updateSettings({ lastSelectedModels: { codex: "selected-codex" } });
+    store.updateSettings({ defaultModelModes: { claude: "lastSelected" }, lastSelectedModels: { claude: "opus" } });
+    const restarted = new AppStore(dir);
+    expect(getDefaultModel(restarted.settings, "codex")).toBe("selected-codex");
+    expect(getDefaultModel(restarted.settings, "claude")).toBe("opus");
+    restarted.updateSettings({ lastSelectedModels: { codex: "" } });
+    expect(getDefaultModel(new AppStore(dir).settings, "codex")).toBe("");
+    restarted.updateSettings({ defaultModelModes: { codex: "fixed" } });
+    expect(getDefaultModel(new AppStore(dir).settings, "codex")).toBe("fixed-codex");
+    expect(getDefaultModel(new AppStore(dir).settings, "claude")).toBe("opus");
   });
 
   it("旧内置语音迁移到潇，并补上开始执行的自定义音效配置", () => {

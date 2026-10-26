@@ -14,6 +14,7 @@ import { EXPERT_LIMITS } from "@hcode/shared/experts";
 import { NetworkIcon } from "lucide-react";
 import type { CollaborationWorkerAgent } from "@hcode/shared/collaboration";
 import { AGENTS } from "@hcode/shared/agents";
+import { getDefaultModel } from "@hcode/shared/types";
 import { Button } from "@/components/ui/button.js";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { useCollaborationSession } from "./useCollaborationSession";
@@ -56,7 +57,11 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
 
   const acceptRun = (run: CollaborationSnapshot, input: string) => { useCollaborationStore.getState().accept(run); selectRun(run.id); setObjective(""); onStarted(input); setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "records" }); };
   const unavailable = attachmentBlocked ?? (checkingCapabilities ? "正在核对当前会话及 AI 能力…" : sourceBusy ? "请先完成当前回合或消息队列" : undefined);
-  const nativePreferences = (["claude", "codex"] as const).map(agent => ({ agent, ...(useAppStore.getState().settings.defaultModels[agent] ? { model: useAppStore.getState().settings.defaultModels[agent] } : {}) }));
+  const settings = useAppStore(state => state.settings);
+  const nativePreferences = (["claude", "codex"] as const).map(agent => {
+    const model = getDefaultModel(settings, agent);
+    return { agent, ...(model ? { model } : {}) };
+  });
 
   return <>
     <div className="mb-2 flex items-center gap-2 text-ui-sm">
@@ -82,7 +87,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
               <label className="flex flex-col gap-1">独立审查者<select value={reviewer} onChange={(event) => { setReviewer(event.target.value as typeof reviewer); setReviewerModel(""); }} className="min-w-0 w-full rounded-md border border-border bg-background p-1"><option value="default">沿用当前会话（独立 {AGENTS[conversation.agent].name} 会话）</option>{(["claude", "codex", "agy"] as const).map((agent) => <option key={agent} value={agent} disabled={!capabilities?.find((entry) => entry.agent === agent)?.canReview}>{agent === "agy" ? "Antigravity / Gemini" : AGENTS[agent].name}</option>)}</select></label>
               {reviewer === "agy" ? <label className="flex flex-col gap-1">审查模型<select required value={reviewerModel} onChange={(event) => setReviewerModel(event.target.value)} className="min-w-0 w-full rounded-md border border-border bg-background p-1"><option value="">选择当前账号可用的 Gemini 模型</option>{capabilities?.find((entry) => entry.agent === "agy")?.models?.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}</select></label> : null}
               <p className="text-ui-sm text-foreground-subtle">{capabilities ? capabilities.find((entry) => entry.agent === executor)?.reason : "正在检查 CLI 能力…"}</p>
-              <ResearchDraftPanel onPrepared={input => { submittedInput.current = input; }} conversation={conversation} input={{ objective, executor: { agent: executor, ...(executor === "agy" ? { model: executorModel } : executorModel || useAppStore.getState().settings.defaultModels[executor] ? { model: executorModel || useAppStore.getState().settings.defaultModels[executor] } : {}) }, ...(reviewer !== "default" ? { reviewer: { agent: reviewer, ...(reviewer === "agy" ? { model: reviewerModel } : reviewerModel || useAppStore.getState().settings.defaultModels[reviewer] ? { model: reviewerModel || useAppStore.getState().settings.defaultModels[reviewer] } : {}) } } : {}) }} onRestored={draft => { setExecutor(draft.params.executor.agent); setExecutorModel(draft.params.executor.model ?? ""); setReviewer(draft.params.reviewer?.agent ?? "default"); setReviewerModel(draft.params.reviewer?.model ?? ""); }} unavailable={attachmentBlocked ?? (checkingCapabilities ? "正在重新核对当前线程及 AI 能力…" : sourceBusy ? "请先完成当前会话回合或消息队列" : executor === "agy" && !executorModel || reviewer === "agy" && !reviewerModel ? "请选择账号可用的 Gemini 模型" : !capabilities?.find(entry => entry.agent === executor)?.canExecute || reviewer !== "default" && !capabilities?.find(entry => entry.agent === reviewer)?.canReview ? "执行或审查 AI 尚未通过能力检查" : undefined)} onStarted={run => acceptRun(run, submittedInput.current)} />
+              <ResearchDraftPanel onPrepared={input => { submittedInput.current = input; }} conversation={conversation} input={{ objective, executor: { agent: executor, ...(executor === "agy" ? { model: executorModel } : executorModel || getDefaultModel(settings, executor) ? { model: executorModel || getDefaultModel(settings, executor) } : {}) }, ...(reviewer !== "default" ? { reviewer: { agent: reviewer, ...(reviewer === "agy" ? { model: reviewerModel } : reviewerModel || getDefaultModel(settings, reviewer) ? { model: reviewerModel || getDefaultModel(settings, reviewer) } : {}) } } : {}) }} onRestored={draft => { setExecutor(draft.params.executor.agent); setExecutorModel(draft.params.executor.model ?? ""); setReviewer(draft.params.reviewer?.agent ?? "default"); setReviewerModel(draft.params.reviewer?.model ?? ""); }} unavailable={attachmentBlocked ?? (checkingCapabilities ? "正在重新核对当前线程及 AI 能力…" : sourceBusy ? "请先完成当前会话回合或消息队列" : executor === "agy" && !executorModel || reviewer === "agy" && !reviewerModel ? "请选择账号可用的 Gemini 模型" : !capabilities?.find(entry => entry.agent === executor)?.canExecute || reviewer !== "default" && !capabilities?.find(entry => entry.agent === reviewer)?.canReview ? "执行或审查 AI 尚未通过能力检查" : undefined)} onStarted={run => acceptRun(run, submittedInput.current)} />
               </>}
             </>}
           </form></details>}

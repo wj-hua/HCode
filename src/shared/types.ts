@@ -370,6 +370,10 @@ export interface Settings {
   agentPaths: Record<AgentKind, string>;
   defaultPermissionModes: Record<AgentKind, PermissionMode>;
   defaultModels: Record<AgentKind, string>;
+  /** 新会话使用固定模型，或沿用输入框中上次手动选择的模型。 */
+  defaultModelModes: Record<AgentKind, "fixed" | "lastSelected">;
+  /** 未选择过时缺省；空串表示用户手动选择了 CLI 默认模型。 */
+  lastSelectedModels: Partial<Record<AgentKind, string>>;
   /** 输入框里最近选择的思考强度（空串 = CLI 默认），新建会话沿用。 */
   defaultEfforts: Record<AgentKind, string>;
   /** Codex 输入框最近选择的速度，新会话沿用。 */
@@ -387,7 +391,7 @@ export interface Settings {
 }
 
 /** 按 CLI 分组的设置项。 */
-type PerAgentSettingKey = "agentPaths" | "defaultPermissionModes" | "defaultModels" | "defaultEfforts";
+type PerAgentSettingKey = "agentPaths" | "defaultPermissionModes" | "defaultModels" | "defaultModelModes" | "lastSelectedModels" | "defaultEfforts";
 
 /** settings:set 的补丁：按 CLI 分组的字段只需传要改的 CLI，主进程逐项合并。 */
 export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey>> & {
@@ -402,6 +406,8 @@ export const DEFAULT_SETTINGS: Settings = {
   agentPaths: { claude: "", codex: "", agy: "" },
   defaultPermissionModes: { claude: "default", codex: "on-request", agy: "default" },
   defaultModels: { claude: "", codex: "", agy: "" },
+  defaultModelModes: { claude: "fixed", codex: "fixed", agy: "fixed" },
+  lastSelectedModels: {},
   defaultEfforts: { claude: "", codex: "", agy: "" },
   codexSpeed: "",
   pinnedSessions: [],
@@ -411,3 +417,10 @@ export const DEFAULT_SETTINGS: Settings = {
   customSounds: { start: "", done: "", error: "", approval: "" },
   background: { path: "", blur: 20, mask: 60 },
 };
+
+/** 尚无手动选择记录时沿用原来的固定模型。 */
+export function getDefaultModel(settings: Settings, agent: AgentKind): string {
+  return settings.defaultModelModes[agent] === "lastSelected"
+    ? settings.lastSelectedModels[agent] ?? settings.defaultModels[agent]
+    : settings.defaultModels[agent];
+}
