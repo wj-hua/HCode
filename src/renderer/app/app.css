@@ -64,3 +64,12 @@
 .collaboration-resize-handle:hover::before,
 .collaboration-resize-handle:focus-visible::before,
 .collaboration-resize-handle:active::before { background: var(--color-brand); opacity: 0.65; }
+
+/* 远程操控页面在手机上：输入框不小于 16px，避免 iOS 聚焦时自动放大页面。 */
+@media (max-width: 767px) {
+  .remote-control input,
+  .remote-control textarea,
+  .remote-control select {
+    font-size: 16px;
+  }
+}

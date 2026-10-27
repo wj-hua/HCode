@@ -6,7 +6,7 @@ import { cn } from "@/components/lib/utils.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { CompareView } from "../conversation/CompareView";
 import { ConversationView } from "../conversation/ConversationView";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { FilePreviewProvider } from "../conversation/FilePreviewContext";
 import { FilePreviewPanel } from "../conversation/FilePreviewPanel";
 import { FilePreviewLayout } from "../conversation/FilePreviewLayout";
@@ -20,6 +20,7 @@ import { TerminalResizeHandle } from "../terminal/TerminalResizeHandle";
 import { SideTerminalPanel } from "../terminal/SideTerminalPanel";
 import { AppBackground } from "./AppBackground";
 import { Sidebar } from "./Sidebar";
+import { useNarrowRemote } from "../remote/useNarrowRemote";
 import { SessionSearchDialog } from "./SessionSearchDialog";
 import { QuickSwitchDialog } from "./QuickSwitchDialog";
 import type { SessionSearchResult } from "@hcode/shared/types";
@@ -32,6 +33,11 @@ export function AppShell() {
   const hasBackground = useAppStore((state) => !!state.settings.background.path);
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
+  const narrow = useNarrowRemote();
+  // 窄屏侧边栏覆盖在内容上：进入页面和切换会话后收起。
+  useEffect(() => {
+    if (narrow) useAppStore.getState().setSidebarCollapsed(true);
+  }, [narrow, conversation?.viewId]);
   const compareMembers = useAppStore(
     useShallow((state) => {
       const id = conversation?.compareId;
@@ -64,7 +70,7 @@ export function AppShell() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
   const toggleTerminal = useCallback(() => {
-    if (!useAppStore.getState().activeViewId) return;
+    if (isRemote || !useAppStore.getState().activeViewId) return;
     setTerminalVisible(value => !value);
   }, []);
   const terminalEmpty = useCallback((path: string) => {
@@ -98,12 +104,14 @@ export function AppShell() {
   }, [activeViewId, activeUnread]);
 
   return (
-    <DesktopWindowFrame title="HCode" isDesktop isMacDesktop>
+    <DesktopWindowFrame title="HCode" isDesktop={!isRemote} isMacDesktop={!isRemote}>
       <div className="relative isolate flex h-full min-h-0 w-full overflow-hidden">
         <AppBackground />
+        {narrow && !collapsed ? <div className="absolute inset-0 z-30 bg-black/40" aria-hidden onClick={() => useAppStore.getState().setSidebarCollapsed(true)} /> : null}
         <div
           className={cn(
-            "flex-none overflow-hidden transition-[width,opacity] duration-200 ease-out",
+            "overflow-hidden transition-[width,opacity] duration-200 ease-out",
+            narrow ? "absolute inset-y-0 left-0 z-40 bg-background-win-alt shadow-xl" : "flex-none",
             collapsed ? "pointer-events-none opacity-0" : "opacity-100",
           )}
           style={{ width: collapsed ? 0 : SIDEBAR_WIDTH }}
@@ -112,7 +120,7 @@ export function AppShell() {
             <Sidebar onOpenSearch={openSearch} />
           </aside>
         </div>
-        <div className={cn("flex min-h-0 min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
+        <div className={cn("flex min-h-0 flex-1 flex-col p-1 pt-0", narrow ? "min-w-0" : "min-w-[320px]", !collapsed && !narrow && "pl-0")}>
           <div className="app-drag h-1 w-full" />
           <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
             <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
@@ -159,6 +167,7 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void,
       const state = useAppStore.getState();
       switch (command) {
         case "settings":
+          if (isRemote) return false;
           state.setSettingsOpen(true);
           return true;
         case "newChat": {
@@ -169,6 +178,7 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void,
           return true;
         }
         case "openProject":
+          if (isRemote) return false;
           void state.addProject();
           return true;
         case "closeView":

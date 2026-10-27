@@ -2,6 +2,7 @@ import { FolderIcon, FolderPlusIcon, MessageCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { formatRelativeTime, shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
+import { isRemote } from "../bridge";
 
 export function EmptyState() {
   const projects = useAppStore((state) => state.projects);
@@ -27,9 +28,9 @@ export function EmptyState() {
         {noAgent ? (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base">
             <span className="text-foreground">没有找到 claude、codex 或 agy 命令。请先安装，或在设置里指定路径。</span>
-            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true, "agents")}>
+            {!isRemote ? <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true, "agents")}>
               打开设置并配置
-            </Button>
+            </Button> : null}
           </div>
         ) : null}
         <div className="flex flex-col gap-1 rounded-xl border border-border bg-card p-1">
@@ -55,14 +56,14 @@ export function EmptyState() {
               ) : null}
             </button>
           ))}
-          <button
+          {!isRemote ? <button
             type="button"
             onClick={() => void addProject()}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground-subtle hover:bg-surface-hover hover:text-foreground"
           >
             <FolderPlusIcon className="size-4 shrink-0" />
             <span className="text-ui-base">添加项目文件夹…</span>
-          </button>
+          </button> : null}
           <button type="button" disabled={pending} onClick={() => void workOutsideProject(true)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground-subtle hover:bg-surface-hover hover:text-foreground disabled:opacity-50">
             <MessageCircleIcon className="size-4 shrink-0" />
             <span className="text-ui-base">{pending ? "打开对话中…" : "不在项目中工作"}</span>

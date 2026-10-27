@@ -26,7 +26,7 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
 import { groupCollaborationSessions, presentationTitle, collaborationGroupMatchesQuery } from "@hcode/shared/collaborationPresentation";
@@ -218,22 +218,26 @@ export function ProjectItem({
                         </DropdownMenuItem>
                       ))}
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => void hcode.invoke("app:showInFinder", project.path)}>
-                        在 Finder 中显示
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void hcode.invoke("app:openInTerminal", project.path)}>
-                        在终端中打开
-                      </DropdownMenuItem>
+                      {!isRemote ? <>
+                        <DropdownMenuItem onSelect={() => void hcode.invoke("app:showInFinder", project.path)}>
+                          在 Finder 中显示
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void hcode.invoke("app:openInTerminal", project.path)}>
+                          在终端中打开
+                        </DropdownMenuItem>
+                      </> : null}
                       <DropdownMenuItem onSelect={() => void hcode.invoke("app:copyText", project.path)}>
                         复制路径
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => void setProjectPinned(project.path, !project.pinned)}>
-                        {project.pinned ? "取消置顶" : "置顶"}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void removeProject(project.path)}>
-                        从列表中移除
-                      </DropdownMenuItem>
+                      {!isRemote ? <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => void setProjectPinned(project.path, !project.pinned)}>
+                          {project.pinned ? "取消置顶" : "置顶"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void removeProject(project.path)}>
+                          从列表中移除
+                        </DropdownMenuItem>
+                      </> : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <ControlHintTooltip title="新建会话">

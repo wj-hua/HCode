@@ -455,6 +455,10 @@ export class AgyAgent implements AgentProvider {
     return this.sessions.has(sessionKey);
   }
 
+  liveRows(sessionKey: string) {
+    return this.sessions.get(sessionKey)?.liveRows();
+  }
+
   async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
     if (params.research && (!params.model?.startsWith(GEMINI_MODEL_PREFIX) || !(await this.listModels()).some((model) => model.value === params.model))) throw new Error("请选择 agy 返回的可用 Gemini 模型，不自动替换模型");
     let session = this.sessions.get(params.sessionKey);

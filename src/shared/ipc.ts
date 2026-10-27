@@ -157,6 +157,11 @@ export interface InvokeMap {
   "app:focusWindow": [[], void];
   "settings:get": [[], Settings];
   "settings:set": [[patch: SettingsPatch], Settings];
+  "remote:status": [[], import("./remoteControl.js").RemoteControlStatus];
+  /** 远程访问口令；首次调用时生成。 */
+  "remote:token": [[], string];
+  /** 重新生成口令，所有已登录的远程客户端立即失效。 */
+  "remote:regenerateToken": [[], string];
 }
 
 /** 主进程 → 渲染进程事件 */
@@ -177,6 +182,7 @@ export interface EventMap {
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
   "quota:updated": AgentQuota;
+  "remote:status": import("./remoteControl.js").RemoteControlStatus;
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -187,6 +193,8 @@ export interface HCodeBridge {
   on<C extends EventChannel>(channel: C, listener: (payload: EventMap[C]) => void): () => void;
   platform: NodeJS.Platform;
   getPathForFile(file: File): string | null;
+  /** 浏览器远程操控页面；本机窗口为 undefined。 */
+  remote?: boolean;
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
@@ -255,6 +263,9 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "app:focusWindow",
   "settings:get",
   "settings:set",
+  "remote:status",
+  "remote:token",
+  "remote:regenerateToken",
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
@@ -273,4 +284,5 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "permission:resolved",
   "window:fullscreen",
   "quota:updated",
+  "remote:status",
 ];

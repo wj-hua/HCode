@@ -26,7 +26,7 @@ import { ToolCallBlock } from "@/ToolCallBlocks.js";
 import { ConversationUserInputBody } from "@/v4/ConversationUserInputBody.js";
 import { ConversationUserInputContent } from "@/v4/ConversationUserInputContent.js";
 import { toolCallRowToLegacyNode } from "@/v4/toolCallRowAdapter.js";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { formatDuration } from "../format";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
@@ -270,7 +270,7 @@ function MessageActions({ row, canFork, canResend, isLastUser }: {
       {canResend && isLastUser ? (
         <ActionButton label="重试" hint="原样再发送一次这条消息" icon={RotateCcwIcon} onClick={() => void retryMessage(row.rowId)} />
       ) : null}
-      {canFork
+      {canFork && !isRemote
         ? FORK_ACTIONS.map(({ mode, label, hint, icon }) => (
             <ActionButton
               key={mode}

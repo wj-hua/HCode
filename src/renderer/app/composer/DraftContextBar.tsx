@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { toast } from "@/components/ui/toast.js";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { shortenHome } from "../format";
 import { errorMessage, useAppStore, type Conversation } from "../store/appStore";
 
@@ -78,10 +78,10 @@ function FolderPicker({ conversation }: { conversation: Conversation }) {
           {visible.length === 0 ? <div className="px-2 py-2 text-ui-base text-foreground-subtlest">没有匹配的项目</div> : null}
         </div>
         <div className="border-t border-border p-1">
-          <DropdownMenuItem onSelect={() => void addProject()}>
+          {!isRemote ? <DropdownMenuItem onSelect={() => void addProject()}>
             <FolderPlusIcon className="size-4 text-foreground-subtle" />
             打开文件夹…
-          </DropdownMenuItem>
+          </DropdownMenuItem> : null}
           <DropdownMenuCheckboxItem checked={outsideProject} disabled={pending} onSelect={() => void workOutsideProject()}>
             <MessageCircleIcon className="size-4 text-foreground-subtle" />
             不在项目中工作

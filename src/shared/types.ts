@@ -374,15 +374,27 @@ export interface Settings {
   customSounds: Record<NotificationEvent, string>;
   background: BackgroundSettings;
   shortcuts: ShortcutOverrides;
+  remoteControl: RemoteControlSettings;
+}
+
+/** 远程操控：服务器地址、私钥都在用户自己的 ~/.ssh/config 中，这里只记别名。 */
+export interface RemoteControlSettings {
+  enabled: boolean;
+  /** ~/.ssh/config 中的 Host 别名。 */
+  sshHost: string;
+  /** 服务器侧反向转发的监听地址，形如 host:port。 */
+  remoteBind: string;
+  /** 本地服务端口；0 = 启动时随机分配。 */
+  localPort: number;
 }
 
 /** 按 CLI 分组的设置项。 */
 type PerAgentSettingKey = "agentPaths" | "defaultPermissionModes" | "defaultModels" | "defaultModelModes" | "lastSelectedModels" | "defaultEfforts";
 
 /** settings:set 的补丁：按 CLI 分组的字段只需传要改的 CLI，主进程逐项合并。 */
-export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey>> & {
+export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey | "remoteControl">> & {
   [K in PerAgentSettingKey]?: Partial<Settings[K]>;
-};
+} & { remoteControl?: Partial<RemoteControlSettings> };
 
 export const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
@@ -404,6 +416,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationSound: "system",
   customSounds: { start: "", done: "", error: "", approval: "" },
   background: { path: "", blur: 20, mask: 60 },
+  remoteControl: { enabled: false, sshHost: "", remoteBind: "", localPort: 0 },
 };
 
 /** 尚无手动选择记录时沿用原来的固定模型。 */

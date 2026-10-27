@@ -18,6 +18,7 @@ import {
   playNotificationSound,
 } from "../notificationSound";
 import { ExtensionsSection } from "./ExtensionsSection";
+import { useRemoteStatus } from "../remote/useRemoteStatus";
 import {
   Palette,
   Bot,
@@ -46,9 +47,13 @@ import {
   Zap,
   RefreshCw,
   Keyboard,
+  Smartphone,
+  Copy,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
-type SettingsTab = "general" | "agents" | "notifications" | "extensions" | "shortcuts";
+type SettingsTab = "general" | "agents" | "notifications" | "extensions" | "shortcuts" | "remote";
 
 const LAST_SELECTED_MODEL_VALUE = "__hcode_last_selected_model__";
 
@@ -65,6 +70,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "notifications", label: "通知与系统", desc: "休眠策略与提示音", icon: Bell },
   { id: "shortcuts", label: "快捷键", desc: "查看与修改键盘快捷键", icon: Keyboard },
   { id: "extensions", label: "MCP 与技能", desc: "上下文扩展与技能工具", icon: Boxes },
+  { id: "remote", label: "远程操控", desc: "用手机浏览器访问这台电脑", icon: Smartphone },
 ];
 
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
@@ -73,6 +79,7 @@ const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
   notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify", "sleep"],
   shortcuts: ["快捷键", "键盘", "按键", "shortcut", "keyboard", ...APP_SHORTCUTS.map((entry) => entry.label.toLowerCase())],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
+  remote: ["远程", "手机", "操控", "口令", "隧道", "remote", "ssh", "mobile"],
 };
 
 function CardGroup({
@@ -900,6 +907,112 @@ function ShortcutsTab() {
   );
 }
 
+const REMOTE_STATE_LABEL = { off: "已关闭", starting: "启动中", listening: "运行中", error: "出错" } as const;
+const TUNNEL_STATE_LABEL = { off: "未启用", connecting: "连接中", connected: "已连接", error: "出错" } as const;
+const REMOTE_INPUT_CLASS = "h-8 rounded-lg border border-input-border bg-input px-2.5 font-mono text-ui-xs text-foreground outline-none transition-colors hover:border-input-border-hover focus:border-input-border-focused";
+
+/** 失焦或回车时提交，避免每输入一个字符就重启隧道。 */
+function CommitInput({ value, onCommit, placeholder, className }: { value: string; onCommit: (value: string) => void; placeholder?: string; className?: string }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => { if (draft.trim() !== value) onCommit(draft.trim()); };
+  return (
+    <input
+      value={draft}
+      spellCheck={false}
+      autoCapitalize="off"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => { if (event.key === "Enter") commit(); }}
+      placeholder={placeholder}
+      className={cn(REMOTE_INPUT_CLASS, className)}
+    />
+  );
+}
+
+function RemoteTab() {
+  const settings = useAppStore((state) => state.settings.remoteControl);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const status = useRemoteStatus();
+  const [token, setToken] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
+  const [port, setPort] = useState(String(settings.localPort || ""));
+
+  const loadToken = async (): Promise<string> => {
+    if (token) return token;
+    const value = await hcode.invoke("remote:token");
+    setToken(value);
+    return value;
+  };
+  const savePort = () => {
+    const value = port.trim() ? Number(port) : 0;
+    if (!Number.isInteger(value) || value < 0 || value > 65535) {
+      setPort(String(settings.localPort || ""));
+      return;
+    }
+    if (value !== settings.localPort) void updateSettings({ remoteControl: { localPort: value } });
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <CardGroup title="远程操控" subtitle="手机经 HTTPS 访问这台电脑上的 HCode；Agent 仍在本机运行。默认关闭">
+        <ToggleRow
+          label="启用远程操控"
+          hint="开启后在本机回环地址启动服务；关闭时立即断开所有远程连接"
+          checked={settings.enabled}
+          onChange={(enabled) => void updateSettings({ remoteControl: { enabled } })}
+        />
+        <SettingRow
+          label="状态"
+          hint={status?.error ?? (status?.state === "listening" ? `本机地址 http://127.0.0.1:${status.port}/ · 在线 ${status.clients} 个连接` : undefined)}
+        >
+          <span className="text-ui-sm text-foreground-subtle">{status ? REMOTE_STATE_LABEL[status.state] : "…"}</span>
+        </SettingRow>
+        <SettingRow label="本地端口" hint="留空或 0 表示每次启动随机分配；修改后服务会重启">
+          <input
+            value={port}
+            inputMode="numeric"
+            onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))}
+            onBlur={savePort}
+            onKeyDown={(event) => { if (event.key === "Enter") savePort(); }}
+            placeholder="随机"
+            className={cn(REMOTE_INPUT_CLASS, "w-24")}
+          />
+        </SettingRow>
+      </CardGroup>
+
+      <CardGroup title="SSH 反向隧道" subtitle="本机主动连到服务器，把服务器上的监听地址转发到本地服务。服务器地址、用户和私钥写在 ~/.ssh/config 中">
+        <SettingRow label="SSH 主机别名" hint="~/.ssh/config 中的 Host 名称；两项都留空则只在本机监听">
+          <CommitInput value={settings.sshHost} placeholder="Host 别名" className="w-48" onCommit={(sshHost) => void updateSettings({ remoteControl: { sshHost } })} />
+        </SettingRow>
+        <SettingRow label="服务器监听地址" hint="服务器上反向转发的 地址:端口，需与服务器 nginx 配置一致">
+          <CommitInput value={settings.remoteBind} placeholder="地址:端口" className="w-48" onCommit={(remoteBind) => void updateSettings({ remoteControl: { remoteBind } })} />
+        </SettingRow>
+        <SettingRow label="隧道状态" hint={status?.tunnel.error ?? (status?.tunnel.state === "connected" ? "合盖或休眠会断开，接电源并保持唤醒可持续使用" : undefined)}>
+          <span className="text-ui-sm text-foreground-subtle">{status ? TUNNEL_STATE_LABEL[status.tunnel.state] : "…"}</span>
+        </SettingRow>
+      </CardGroup>
+
+      <CardGroup title="访问口令" subtitle="手机登录时输入；不要分享。重新生成后已登录的设备需要重新登录">
+        <SettingRow label="口令" hint={showToken && token ? undefined : "已加密保存在本机钥匙串中"}>
+          {showToken && token ? <span className="max-w-56 truncate font-mono text-ui-xs text-foreground">{token}</span> : null}
+          <Button variant="ghost" size="sm" aria-label={showToken ? "隐藏口令" : "显示口令"} onClick={async () => { if (!showToken) await loadToken(); setShowToken(!showToken); }}>
+            {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          </Button>
+          <Button variant="outline" size="sm" onClick={async () => void hcode.invoke("app:copyText", await loadToken())}>
+            <Copy className="size-3.5 mr-1" />
+            复制
+          </Button>
+          <Button variant="outline" size="sm" onClick={async () => setToken(await hcode.invoke("remote:regenerateToken"))}>
+            <RefreshCw className="size-3.5 mr-1" />
+            重新生成
+          </Button>
+        </SettingRow>
+      </CardGroup>
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const open = useAppStore((state) => state.settingsOpen);
   const setOpen = useAppStore((state) => state.setSettingsOpen);
@@ -1005,6 +1118,7 @@ export function SettingsDialog() {
             {tab === "notifications" && <NotificationsTab />}
             {tab === "shortcuts" && <ShortcutsTab />}
             {tab === "extensions" && <ExtensionsSection open={open} />}
+            {tab === "remote" && <RemoteTab />}
           </main>
         </div>
       </DialogContent>

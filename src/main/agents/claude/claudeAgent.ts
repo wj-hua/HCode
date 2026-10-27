@@ -226,6 +226,10 @@ export class ClaudeAgent implements AgentProvider {
     return this.sessions.has(sessionKey);
   }
 
+  liveRows(sessionKey: string) {
+    return this.sessions.get(sessionKey)?.liveRows();
+  }
+
   async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
     let session = this.sessions.get(params.sessionKey);
     if (!session) {

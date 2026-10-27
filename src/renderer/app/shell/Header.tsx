@@ -7,7 +7,7 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
 import { AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -33,7 +33,7 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
     <header
       className={cn(
         "app-drag flex h-11 shrink-0 items-center gap-2 border-b border-border/60 pr-2",
-        collapsed && !fullscreen ? "pl-[84px]" : "pl-3",
+        collapsed && !fullscreen && !isRemote ? "pl-[84px]" : "pl-3",
       )}
     >
       {collapsed ? (
@@ -70,7 +70,7 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
       ) : (
         <div className="flex-1" />
       )}
-      {conversation ? (
+      {conversation && !isRemote ? (
         <div className="app-no-drag flex shrink-0 items-center gap-0.5">
           {!isOfficeMode ? <ControlHintTooltip title={terminalVisible ? "收起内置终端" : "打开内置终端"} side="bottom"><Button variant="ghost" size="icon-md" className="text-foreground-subtle" aria-label={terminalVisible ? "收起内置终端" : "打开内置终端"} aria-pressed={terminalVisible} onClick={onToggleTerminal}><SquareTerminalIcon /></Button></ControlHintTooltip> : null}
           {!isOfficeMode ? <ControlHintTooltip title={sideTerminalVisible ? "收起侧边终端" : "打开侧边终端"} side="bottom"><Button variant="ghost" size="icon-md" className="text-foreground-subtle" aria-label={sideTerminalVisible ? "收起侧边终端面板" : "打开侧边终端"} aria-pressed={sideTerminalVisible} onClick={onToggleSideTerminal}><PanelRightIcon /></Button></ControlHintTooltip> : null}

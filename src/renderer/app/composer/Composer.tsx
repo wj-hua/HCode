@@ -28,7 +28,7 @@ import { drafts, fileDrafts, imageDrafts } from "./drafts";
 import { draftKey, loadDraft, saveDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -461,7 +461,7 @@ export function Composer({
 
   return (
     <>
-    {!conversation.compareId ? <CollaborationPanel conversation={conversation} currentInput={text} workMode={workMode} attachmentBlocked={attachmentBlocked} onStarted={input => { setText(current => current === input ? "" : current); onSubmitted(); }} /> : null}
+    {!conversation.compareId && !isRemote ? <CollaborationPanel conversation={conversation} currentInput={text} workMode={workMode} attachmentBlocked={attachmentBlocked} onStarted={input => { setText(current => current === input ? "" : current); onSubmitted(); }} /> : null}
     {submission.reason ? <p role="status" className="mb-2 text-ui-sm text-foreground-subtle">{submission.reason}</p> : workMode !== "chat" ? <p className="mb-2 text-ui-sm text-foreground-subtle">{WORK_MODES[workMode].description}</p> : null}
     {activeInTerminal ? (
       <div className="mb-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-ui-sm text-foreground-subtle">
@@ -663,7 +663,7 @@ export function Composer({
                 <PlusIcon className="size-4" />
               </Button>
             </ControlHintTooltip>
-            {!conversation.compareId ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} onClose={restoreInputFocus} /> : null}
+            {!conversation.compareId && !isRemote ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} onClose={restoreInputFocus} /> : null}
             {agentDelegation && !conversation.compareId && (conversation.agent === "claude" || conversation.agent === "codex") ? <span className="text-ui-sm text-foreground-subtle" title="普通对话可调用其他 AI（设置 → AI 委派）">委派已开启</span> : null}
             <DropdownMenu>
               <ControlHintTooltip title="权限模式">
@@ -689,7 +689,7 @@ export function Composer({
                   onValueChange={(mode) => void setPermissionMode(mode)}
                 >
                   {agent.permissionModes.map((item) => (
-                    <DropdownMenuRadioItem key={item.mode} value={item.mode} className="min-h-13 items-start gap-3 py-2">
+                    <DropdownMenuRadioItem key={item.mode} value={item.mode} disabled={isRemote && item.dangerous} className="min-h-13 items-start gap-3 py-2">
                       <span className="mt-0.5">{modeIcon(item, "size-4.5 shrink-0")}</span>
                       <span className="flex min-w-0 flex-col gap-0.5">
                         <span>{item.label}</span>

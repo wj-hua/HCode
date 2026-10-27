@@ -53,6 +53,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     customSounds: pick(raw.customSounds, DEFAULT_SETTINGS.customSounds),
     background: pick(raw.background, DEFAULT_SETTINGS.background),
     shortcuts: pick(raw.shortcuts, DEFAULT_SETTINGS.shortcuts),
+    remoteControl: pick(raw.remoteControl, DEFAULT_SETTINGS.remoteControl),
   };
   // 旧版内置语音已移除，沿用用户选择内置语音的意图。
   if (raw.notificationSound === "xiaoyi" || raw.notificationSound === "xiaoxiao") {
@@ -82,7 +83,7 @@ function mergeDefined<T extends object>(base: T, patch: Partial<T> | undefined):
 
 /** 按 CLI 分组的字段逐项合并，只改补丁里给出的 CLI。 */
 export function mergeSettings(current: Settings, patch: SettingsPatch): Settings {
-  const { agentPaths, defaultPermissionModes, defaultModels, defaultModelModes, lastSelectedModels, defaultEfforts, ...rest } = patch;
+  const { agentPaths, defaultPermissionModes, defaultModels, defaultModelModes, lastSelectedModels, defaultEfforts, remoteControl, ...rest } = patch;
   return {
     ...mergeDefined(current, rest),
     interfaceMode: patch.interfaceMode === undefined ? current.interfaceMode : normalizeInterfaceMode(patch.interfaceMode),
@@ -92,6 +93,7 @@ export function mergeSettings(current: Settings, patch: SettingsPatch): Settings
     defaultModelModes: mergeDefined(current.defaultModelModes, defaultModelModes),
     lastSelectedModels: mergeDefined(current.lastSelectedModels, lastSelectedModels),
     defaultEfforts: mergeDefined(current.defaultEfforts, defaultEfforts),
+    remoteControl: mergeDefined(current.remoteControl, remoteControl),
   };
 }
 

@@ -40,6 +40,8 @@ import { ExpertDraftService } from "./collaboration/drafts/expertDraftService.js
 import { ResearchDraftService } from "./collaboration/drafts/researchDraftService.js";
 import { CollaborationRepository } from "./collaboration/collaborationRepository.js";
 import { TerminalService } from "./terminalService.js";
+import { RemoteControlService } from "./remoteControl/remoteControlService.js";
+import { RemoteTokenStore } from "./remoteControl/tokenStore.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -56,15 +58,20 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 let shellEnv: Record<string, string> = {};
+let remote: RemoteControlService | null = null;
+/** handle() 注册的全部 handler，远程操控按白名单复用。 */
+const invokeHandlers = new Map<InvokeChannel, (...args: unknown[]) => unknown>();
 
 function send<C extends EventChannel>(channel: C, payload: EventMap[C]) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  remote?.publish(channel, payload);
 }
 
 function handle<C extends InvokeChannel>(
   channel: C,
   handler: (...args: InvokeMap[C][0]) => InvokeMap[C][1] | Promise<InvokeMap[C][1]>,
 ) {
+  invokeHandlers.set(channel, handler as (...args: unknown[]) => unknown);
   ipcMain.handle(channel, (_event, ...args) => handler(...(args as InvokeMap[C][0])));
 }
 
@@ -478,15 +485,41 @@ async function bootstrap() {
     return path;
   });
 
+  const remoteTokens = new RemoteTokenStore(app.getPath("userData"));
+  remote = new RemoteControlService({
+    config: () => store.settings.remoteControl,
+    tokens: remoteTokens,
+    policy: {
+      projectPaths: () => [...store.projects.manual, conversationWorkspace.path],
+      attachmentsDir: join(app.getPath("userData"), "attachments"),
+      sessionState: (sessionKey) => remote?.sessionState(sessionKey),
+    },
+    invoke: async (channel, args) => {
+      const handler = invokeHandlers.get(channel);
+      if (!handler) throw new Error(`Unknown IPC channel: ${channel}`);
+      return handler(...args);
+    },
+    liveRows: (sessionKey) => agents.liveRows(sessionKey),
+    hasSession: (sessionKey) => agents.bySessionKey(sessionKey) !== undefined,
+    staticDir: join(app.getAppPath(), "out", "renderer"),
+    env: buildAgentEnv,
+    onStatus: (status) => send("remote:status", status),
+  });
+  handle("remote:status", () => remote!.getStatus());
+  handle("remote:token", () => remoteTokens.get());
+  handle("remote:regenerateToken", () => remote!.regenerateToken());
+
   handle("settings:get", () => store.settings);
   handle("settings:set", (patch) => {
     const settings = store.updateSettings(patch);
     syncSleepBlocker();
+    if (patch.remoteControl) void remote?.apply();
     if (process.platform === "darwin" && patch.shortcuts) installApplicationMenu(() => mainWindow, settings.shortcuts);
     return settings;
   });
 
   agents.startWatching();
+  void remote.apply();
   if (process.platform === "darwin") installApplicationMenu(() => mainWindow, store.settings.shortcuts);
   const openMainWindow = () => {
     const window = createMainWindow(store);
@@ -510,6 +543,7 @@ async function bootstrap() {
     drafts.dispose(); expertDrafts.dispose(); codeDrafts.dispose();
     collaboration.dispose();
     quota?.dispose();
+    remote?.dispose();
     agents.dispose();
   });
 }

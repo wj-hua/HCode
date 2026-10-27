@@ -25,7 +25,7 @@ import { cn } from "@/components/lib/utils.js";
 import { TaskTitleOverflowText } from "@/components/TaskTitleOverflowText.js";
 import { AgentBadge } from "../AgentBadge";
 import { toast } from "@/components/ui/toast.js";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { conversationToMarkdown, markdownFileName } from "../exportMarkdown";
 import { formatCompactRelativeTime } from "../format";
 import { errorMessage, useAppStore } from "../store/appStore";
@@ -143,6 +143,12 @@ export function SessionItem({ session }: { session: SessionSummary }) {
           </li>
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-44">
+          {isRemote ? <>
+            <ContextMenuItem onSelect={() => void hcode.invoke("app:copyText", session.id)}>
+              复制会话 ID
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => void exportMarkdown("copy")}>复制为 Markdown</ContextMenuItem>
+          </> : <>
           <ContextMenuItem onSelect={() => void setSessionPinned(session, !pinned)}>
             {pinned ? <PinOffIcon /> : <PinIcon />}
             {pinned ? "取消置顶" : "置顶"}
@@ -167,6 +173,7 @@ export function SessionItem({ session }: { session: SessionSummary }) {
           >
             {deleteDisabled ? `${deleteLabel}会话（运行中不可${deleteLabel}）` : `${deleteLabel}会话`}
           </ContextMenuItem>
+          </>}
         </ContextMenuContent>
       </ContextMenu>
       <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>

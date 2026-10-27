@@ -726,6 +726,12 @@ export class CodexSession {
     });
   }
 
+  /** 先发出已缓冲的增量，再返回当前全部行；远程端中途接入时作为快照。 */
+  liveRows() {
+    this.flushNow();
+    return this.projector.snapshot();
+  }
+
   private scheduleFlush() {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => this.flushNow(), FLUSH_INTERVAL_MS);

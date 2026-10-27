@@ -35,6 +35,8 @@ import { workspaceVerticalListSortingStrategy } from "@/lib/workspaceSidebarDrag
 import { useAppStore } from "../store/appStore";
 import { SortableProjectItem } from "./ProjectItem";
 import { QuotaIndicator } from "./QuotaIndicator";
+import { RemoteIndicator } from "../remote/RemoteIndicator";
+import { isRemote } from "../bridge";
 import { RunningTasks } from "./RunningTasks";
 import { ConversationSection } from "./ConversationSection";
 
@@ -98,7 +100,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
   return (
     <div className="flex h-full flex-col">
       {/* 顶部：给红绿灯留位置，整条可拖动窗口；高度 54 使按钮与红绿灯、主区域 Header 按钮垂直居中对齐 */}
-      <div className={cn("app-drag flex h-[54px] shrink-0 items-center gap-1 pr-2", fullscreen ? "pl-3" : "pl-[84px]")}>
+      <div className={cn("app-drag flex h-[54px] shrink-0 items-center gap-1 pr-2", fullscreen || isRemote ? "pl-3" : "pl-[84px]")}>
         <ControlHintTooltip title="收起侧边栏" shortcut="⌘B" side="bottom">
           <Button
             variant="ghost"
@@ -170,7 +172,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
                     )}
                   </button>
                 </CollapsibleTrigger>
-                <div className="flex shrink-0 items-center pr-1.5 opacity-0 transition-opacity group-hover/purpose-section:opacity-100 group-focus-within/purpose-section:opacity-100">
+                {!isRemote ? <div className="flex shrink-0 items-center pr-1.5 opacity-0 transition-opacity group-hover/purpose-section:opacity-100 group-focus-within/purpose-section:opacity-100">
                   <ControlHintTooltip title="添加项目">
                     <Button
                       type="button"
@@ -183,7 +185,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
                       <PlusIcon className="size-3.5" />
                     </Button>
                   </ControlHintTooltip>
-                </div>
+                </div> : null}
               </div>
               <CollapsibleContent>
                 {visibleProjects.length === 0 ? (
@@ -203,7 +205,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
                     onDragEnd={(event: DragEndEvent) => {
                       resetDrag();
                       const { active, over } = event;
-                      if (over && active.id !== over.id) void reorderProjects(String(active.id), String(over.id));
+                      if (!isRemote && over && active.id !== over.id) void reorderProjects(String(active.id), String(over.id));
                     }}
                   >
                     <SortableContext
@@ -239,7 +241,8 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-t border-border/60 pr-3 pl-2">
         <QuotaIndicator />
         <div className="flex-1" />
-        <ControlHintTooltip title="设置" shortcut="⌘," side="top">
+        {!isRemote ? <RemoteIndicator /> : null}
+        {!isRemote ? <ControlHintTooltip title="设置" shortcut="⌘," side="top">
           <Button
             variant="ghost"
             size="icon-md"
@@ -249,7 +252,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
           >
             <SettingsIcon />
           </Button>
-        </ControlHintTooltip>
+        </ControlHintTooltip> : null}
       </div>
     </div>
   );

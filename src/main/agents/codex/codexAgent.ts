@@ -401,6 +401,10 @@ export class CodexAgent implements AgentProvider {
     return this.sessions.has(sessionKey);
   }
 
+  liveRows(sessionKey: string) {
+    return this.sessions.get(sessionKey)?.liveRows();
+  }
+
   async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
     const compact = /^\/compact\s*$/i.test(params.text);
     const review = /^\/review(?:\s|$)/i.test(params.text.trim());

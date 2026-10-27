@@ -4,6 +4,7 @@ import type {
   AgentQuota,
   AgentStatus,
   ChatSendParams,
+  ConversationRow,
   ChatStateEvent,
   ChatPromptSuggestionEvent,
   ForkParams,
@@ -65,6 +66,8 @@ export interface AgentProvider {
   resumeCommand(sessionId: string): Promise<string[]>;
   send(params: AgentSendParams): Promise<{ sessionKey: string }>;
   hasSession(sessionKey: string): boolean;
+  /** 活动会话的当前全部行（先发出缓冲中的增量）；会话不存在时返回 undefined。 */
+  liveRows(sessionKey: string): ConversationRow[] | undefined;
   /** 在可信终态后移除临时研究工具并恢复会话原权限；不创建新身份。 */
   endResearch?(sessionKey: string, mode: PermissionMode): Promise<void>;
   /** 当前原生线程能否发起协作；返回明确限制，不偷偷创建替代线程。 */

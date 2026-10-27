@@ -24,6 +24,10 @@ export class AgentRegistry {
     return this.all().find((provider) => provider.hasSession(sessionKey));
   }
 
+  liveRows(sessionKey: string) {
+    return this.bySessionKey(sessionKey)?.liveRows(sessionKey);
+  }
+
   statuses(refresh = false): Promise<AgentStatus[]> {
     return Promise.all(this.all().map((provider) => provider.getStatus(refresh)));
   }
