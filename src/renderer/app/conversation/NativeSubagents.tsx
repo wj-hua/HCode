@@ -59,7 +59,8 @@ export function NativeSubagents({ agent, sessionId, projectPath }: { agent: "cla
     return () => { stopped = true; clearTimeout(timer); };
   }, [agent, sessionId, projectPath, selected, expanded]);
 
-  if (!agents.length && !error) return null;
+  // 新会话在 CLI 写入记录前读取会失败；没读到子代理时不显示卡片，失败只在已有列表时提示。
+  if (!agents.length) return null;
   return (
     <details onToggle={event => setExpanded(event.currentTarget.open)} className="mb-2 rounded-lg border border-border p-3">
       <summary className="cursor-pointer text-ui-sm font-medium">{agent === "claude" ? "Claude" : agent === "codex" ? "Codex" : "Antigravity"} 子代理记录（{agents.length}）</summary>
