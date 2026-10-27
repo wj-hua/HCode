@@ -126,7 +126,7 @@ describe("远程网页连接恢复", () => {
   });
 
   it("页面订阅晚于连接恢复时仍收到已完成的会话状态", async () => {
-    const state = { sessionKey: "session", state: "idle", completedAt: 1234 };
+    const state = { sessionKey: "session", state: "idle" };
     await bridge.connect();
     fetchMock.mockResolvedValueOnce(response([state]));
     fetchMock.mockResolvedValueOnce(response({ seq: 10, rows: [], state, permissions: [] }));

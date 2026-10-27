@@ -10,7 +10,6 @@ import type {
   AgentStatus,
   ModelOption,
   ChatRunState,
-  ChatStateEvent,
   ChatUsage,
   ConversationRow,
   FileInput,
@@ -98,7 +97,6 @@ export interface AppState {
   expanded: Record<string, boolean>;
   search: string;
   conversations: Record<string, Conversation>;
-  recentTasks: Record<string, ChatStateEvent>;
   activeViewId: string | null;
   permissions: Record<string, PermissionRequestEvent>;
   sidebarCollapsed: boolean;
@@ -388,15 +386,6 @@ export const useAppStore = create<AppState>((set, get) => {
     });
     hcode.on("chat:state", (event) => {
       const liveState = sessionViews.captureState(event);
-      set((state) => {
-        const recentTasks = { ...state.recentTasks };
-        // 同一会话续聊后用新的执行 key 替换旧记录。
-        for (const [key, item] of Object.entries(recentTasks)) {
-          if (key === event.sessionKey || (liveState.sessionId && item.sessionId === liveState.sessionId && item.agent === liveState.agent && item.projectPath === liveState.projectPath)) delete recentTasks[key];
-        }
-        if (liveState.completedAt && liveState.sessionId && !liveState.backgroundTasks && (liveState.state === "idle" || liveState.state === "error")) recentTasks[event.sessionKey] = liveState;
-        return { recentTasks: Object.fromEntries(Object.entries(recentTasks).sort((a, b) => (b[1].completedAt ?? 0) - (a[1].completedAt ?? 0)).slice(0, 10)) };
-      });
       const conv = sessionViews.match(liveState, get().conversations);
       if (!conv) return;
       const attached = conv.sessionKey !== event.sessionKey && liveState.sessionId
@@ -476,7 +465,6 @@ export const useAppStore = create<AppState>((set, get) => {
     expanded: {},
     search: "",
     conversations: {},
-    recentTasks: {},
     activeViewId: null,
     permissions: {},
     sidebarCollapsed: false,

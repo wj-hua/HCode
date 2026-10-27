@@ -163,10 +163,7 @@ async function bootstrap() {
       else activeGitSessions.delete(event.sessionKey);
       syncSleepBlocker();
       const previous = recentTurnStates.get(event.sessionKey);
-      const busy = event.state === "running" || event.state === "awaitingApproval" || !!event.backgroundTasks;
-      const wasBusy = previous && (previous.state === "running" || previous.state === "awaitingApproval" || !!previous.backgroundTasks);
-      const completedAt = busy ? undefined : wasBusy ? Date.now() : previous?.completedAt;
-      const enriched = { ...event, sessionId: event.sessionId ?? previous?.sessionId, completedAt };
+      const enriched = { ...event, sessionId: event.sessionId ?? previous?.sessionId };
       recentTurnStates.set(event.sessionKey, enriched);
       send("chat:state", enriched);
     },

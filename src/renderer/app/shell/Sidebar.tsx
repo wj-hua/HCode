@@ -38,7 +38,6 @@ import { QuotaIndicator } from "./QuotaIndicator";
 import { RemoteIndicator } from "../remote/RemoteIndicator";
 import { isRemote } from "../bridge";
 import { RunningTasks } from "./RunningTasks";
-import { RecentTasks } from "./RecentTasks";
 import { ConversationSection } from "./ConversationSection";
 
 const SECTION_CHEVRON_CLASS =
@@ -157,7 +156,6 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
       <ScrollFadeViewport style={{ overflowAnchor: "none" }}>
         <div className="flex min-h-0 flex-col gap-3 px-2">
           <RunningTasks />
-          <RecentTasks />
           <section aria-label="项目" className="group/purpose-section relative">
             <Collapsible open={sectionOpen} onOpenChange={setSectionOpen}>
               <div className="flex h-7 min-w-0 items-center">
