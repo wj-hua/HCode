@@ -356,3 +356,18 @@ export function projectAgyHistory(steps: readonly AgyStep[]): AgyRowProjector {
   projector.drain();
   return projector;
 }
+
+/** 子代理 transcript 不含可靠的任务终态，不把最后一轮推断为成功。 */
+export function projectAgySubagentHistory(steps: readonly AgyStep[]): AgyRowProjector {
+  const projector = new AgyRowProjector();
+  for (const step of steps) {
+    // 子会话中的委派和后续消息以系统步骤保存，并非真实用户消息。
+    const message = step.type === "SYSTEM_MESSAGE" && typeof step.content === "string"
+      ? /\[Message\][^\n]*?\bcontent=([\s\S]*?)\n<\/SYSTEM_MESSAGE>/.exec(step.content)?.[1]
+      : undefined;
+    if (message) projector.notice(`来自其他代理的消息：\n${message}`, parseTime(step.created_at, Date.now()));
+    else projector.consumeStep(step);
+  }
+  projector.drain();
+  return projector;
+}

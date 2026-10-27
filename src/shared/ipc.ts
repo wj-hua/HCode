@@ -104,6 +104,12 @@ export interface InvokeMap {
   "projects:remove": [[path: string], void];
   "sessions:list": [[projectPath: string], SessionSummary[]];
   "sessions:load": [[ref: SessionRef], SessionLoadResult];
+  "claude:subagents": [[sessionId: string, projectPath: string], string[]];
+  "claude:subagentMessages": [[sessionId: string, projectPath: string, agentId: string], import("@zcode/shared/zcode-protocol-v4").ConversationRow[]];
+  "codex:subagents": [[sessionId: string, projectPath: string], import("./types.js").NativeSubagent[]];
+  "codex:subagentMessages": [[sessionId: string, projectPath: string, agentId: string], import("@zcode/shared/zcode-protocol-v4").ConversationRow[]];
+  "agy:subagents": [[sessionId: string, projectPath: string], import("./types.js").NativeSubagent[]];
+  "agy:subagentMessages": [[sessionId: string, projectPath: string, agentId: string], import("@zcode/shared/zcode-protocol-v4").ConversationRow[]];
   "sessions:search": [[query: string], SessionSearchResult[]];
   "sessions:rename": [[ref: SessionRef, title: string], void];
   /** 删除 / 归档成功后清理置顶记录，返回最新设置。 */
@@ -202,6 +208,12 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "projects:remove",
   "sessions:list",
   "sessions:load",
+  "claude:subagents",
+  "claude:subagentMessages",
+  "codex:subagents",
+  "codex:subagentMessages",
+  "agy:subagents",
+  "agy:subagentMessages",
   "sessions:search",
   "sessions:rename",
   "sessions:delete",

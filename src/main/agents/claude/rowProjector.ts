@@ -432,3 +432,11 @@ export function projectHistory(records: readonly ClaudeRecord[]): ClaudeRowProje
   projector.drain();
   return projector;
 }
+
+/** 独立 transcript 不包含可靠终态，保留未结束状态，避免把进行中任务显示为成功。 */
+export function projectSubagentHistory(records: readonly ClaudeRecord[]): ClaudeRowProjector {
+  const projector = new ClaudeRowProjector();
+  for (const record of records) projector.consume({ ...record, parent_tool_use_id: null });
+  projector.drain();
+  return projector;
+}

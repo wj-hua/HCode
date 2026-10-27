@@ -12,6 +12,8 @@ import { AGENTS } from "../shared/agents.js";
 import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS, getDefaultModel } from "../shared/types.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
+import { listSubagents, getSubagentMessages } from "@anthropic-ai/claude-agent-sdk";
+import { projectSubagentHistory, type ClaudeRecord } from "./agents/claude/rowProjector.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
@@ -149,10 +151,11 @@ async function bootstrap() {
   const claude = new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude,
     () => [...store.projects.manual, conversationWorkspace.path]);
   const codex = new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion());
+  const agy = new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration"));
   const agents = new AgentRegistry({
     claude,
     codex,
-    agy: new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration")),
+    agy,
   });
   quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const extensions = new ExtensionsService(claude, codex, buildAgentEnv);
@@ -216,6 +219,21 @@ async function bootstrap() {
     (await agents.allSessions()).filter((session) => session.projectPath === projectPath),
   );
   handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
+  handle("claude:subagents", (sessionId, projectPath) => {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error("无效的 Claude 会话 ID");
+    return listSubagents(sessionId, { dir: projectPath });
+  });
+  handle("claude:subagentMessages", async (sessionId, projectPath, agentId) => {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error("无效的 Claude 会话 ID");
+    const ids = await listSubagents(sessionId, { dir: projectPath });
+    if (!ids.includes(agentId)) throw new Error("子代理不属于当前会话");
+    const messages = await getSubagentMessages(sessionId, agentId, { dir: projectPath });
+    return projectSubagentHistory(messages as ClaudeRecord[]).snapshot();
+  });
+  handle("codex:subagents", (sessionId, projectPath) => codex.listSubagents(sessionId, projectPath));
+  handle("codex:subagentMessages", (sessionId, projectPath, agentId) => codex.loadSubagent(sessionId, projectPath, agentId));
+  handle("agy:subagents", (sessionId, projectPath) => agy.listSubagents(sessionId, projectPath));
+  handle("agy:subagentMessages", (sessionId, projectPath, agentId) => agy.loadSubagent(sessionId, projectPath, agentId));
   let searchGeneration = 0;
   handle("sessions:search", (query) => {
     const generation = ++searchGeneration;

@@ -156,6 +156,14 @@ export interface SessionLoadResult {
   rows: ConversationRow[];
 }
 
+export interface NativeSubagent {
+  id: string;
+  parentId: string;
+  nickname?: string;
+  role?: string;
+  status?: string;
+}
+
 /**
  * 增量行操作，按 ZCode v4 的语义：结构变化整行替换（upsert），文本增长用追加（append）。
  */

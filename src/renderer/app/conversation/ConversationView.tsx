@@ -15,6 +15,7 @@ import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
 import { BackgroundTaskPanel } from './BackgroundTaskPanel';
 import { GitTools } from "./GitTools";
+import { NativeSubagents } from "./NativeSubagents";
 
 
 export function ConversationView({
@@ -94,6 +95,7 @@ export function ConversationView({
           ) : null}
         </div>
         <div className={cn("shrink-0", column ? "px-3" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
+          {!conversation.loading && conversation.sessionId ? <NativeSubagents key={`${conversation.agent}:${conversation.projectPath}:${conversation.sessionId}`} agent={conversation.agent} sessionId={conversation.sessionId} projectPath={conversation.projectPath} /> : null}
           <TaskListPanel conversation={conversation} />
           <BackgroundTaskPanel conversation={conversation} />
           {column ? null : (

@@ -27,6 +27,8 @@ import { withFileReferences } from "../fileAttachments.js";
 import { withProjectFilePaths } from "../../projectFiles.js";
 import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
 import { AgyResponseMetrics } from "./agyResponseMetrics.js";
+import { agyLiveSubagents } from "./agySubagents.js";
+import type { NativeSubagent } from "../../../shared/types.js";
 
 /** agy CLI 的数据目录（会话、transcript、上传的图片都在这里）。 */
 export const AGY_DATA_DIR = join(homedir(), ".gemini/antigravity-cli");
@@ -55,6 +57,7 @@ export interface AgySessionHost {
   emitState(event: ChatStateEvent): void;
   /** 一轮跑完：transcript 此时已写入，用于刷新会话列表。 */
   onSettled(session: AgySession): void;
+  onSubagentsChanged?(session: AgySession): void;
   emitTurnOutcome?(event: TurnOutcome): void;
 }
 
@@ -69,6 +72,7 @@ export class AgySession {
 
   private usage: ChatUsage | undefined;
   private readonly responseMetrics = new AgyResponseMetrics();
+  readonly nativeSubagents = new Map<string, NativeSubagent>();
   /** 上一次 result 里的累计用量（整个 conversation 累计，跨进程重启也连续），用来相减得到本轮用量。 */
   private lastTotals: { input: number; output: number } | undefined;
   private readonly projector = new AgyRowProjector();
@@ -238,6 +242,11 @@ export class AgySession {
     const now = Date.now();
     if (event.event === "step_update" && isRecord(event.step_update)) {
       const update = event.step_update;
+      if (this.sessionId) for (const child of agyLiveSubagents(this.sessionId, update)) {
+        const isNew = !this.nativeSubagents.has(child.id);
+        this.nativeSubagents.set(child.id, child);
+        if (isNew) this.host.onSubagentsChanged?.(this);
+      }
       if (this.responseMetrics.consumeStep(update)) this.emitState();
       this.projector.streamStep(update, now);
       this.scheduleFlush();

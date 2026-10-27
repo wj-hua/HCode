@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClaudeRowProjector, projectHistory, type ClaudeRecord } from "../claude/rowProjector.js";
+import { ClaudeRowProjector, projectHistory, projectSubagentHistory, type ClaudeRecord } from "../claude/rowProjector.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { kinds, ofKind, RowsMirror } from "./helpers.js";
 
@@ -15,6 +15,18 @@ function assistant(content: unknown[], seconds: number, id = "msg_1"): ClaudeRec
 }
 
 describe("Claude 历史投影", () => {
+  it("独立子代理记录保留消息与工具结果，不推断未提供的终态", () => {
+    const rows = projectSubagentHistory([
+      user("检查文件", 0, { parent_tool_use_id: "parent" }),
+      { ...assistant([{ type: "tool_use", id: "t1", name: "Read", input: { file_path: "a" } }], 1), parent_tool_use_id: "parent" },
+      user([{ type: "tool_result", tool_use_id: "t1", content: "内容" }], 2, { parent_tool_use_id: "parent" }),
+      { ...assistant([{ type: "text", text: "检查中" }], 3), parent_tool_use_id: "parent" },
+    ]).snapshot();
+    expect(ofKind(rows, "userInput")[0]?.text).toBe("检查文件");
+    expect(ofKind(rows, "toolCall")[0]).toMatchObject({ status: "success", output: { text: "内容" } });
+    expect(ofKind(rows, "assistantText")[0]?.text).toBe("检查中");
+    expect(ofKind(rows, "turnHeader")[0]?.state).toBe("running");
+  });
   it("一轮对话：用户输入 → 正文 + 工具调用 → 工具结果", () => {
     const rows = projectHistory([
       user("列出文件", 0, { uuid: "u1" }),

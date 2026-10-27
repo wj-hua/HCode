@@ -26,6 +26,7 @@ import { projectCodexTurns, type CodexTurn } from "./codexProjector.js";
 import { CodexSession } from "./codexSession.js";
 import { isCodexResearchVersion } from "../../sessions/researchRuntime.js";
 import { readToolCatalog, sourceCatalogReason } from "./toolCatalog.js";
+import { listCodexSubagents } from "./subagents.js";
 
 const CODEX_HOME = process.env.CODEX_HOME ?? join(homedir(), ".codex");
 /** 列表里只显示人发起的会话（不含子 agent / 自动审查等内部线程）。 */
@@ -309,6 +310,16 @@ export class CodexAgent implements AgentProvider {
     const turns = await this.loadTurns(id);
     const summary = (await this.listSessions()).find((item) => item.id === id) ?? null;
     return { summary, rows: projectCodexTurns(turns).snapshot() };
+  }
+
+  listSubagents(id: string, projectPath: string) {
+    return listCodexSubagents(this.client, id, projectPath);
+  }
+
+  async loadSubagent(id: string, projectPath: string, childId: string) {
+    const children = await this.listSubagents(id, projectPath);
+    if (!children.some(child => child.id === childId)) throw new Error("子代理不属于当前 Codex 会话");
+    return projectCodexTurns(await this.loadTurns(childId)).snapshot();
   }
 
   async renameSession(id: string, projectPath: string, title: string): Promise<void> {

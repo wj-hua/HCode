@@ -280,7 +280,8 @@ export class CodexRowProjector extends RowProjectorBase {
       }
       this.itemCompleted(item, completedAt || startedAt);
     }
-    this.finishTurn(turn, completedAt || Date.now());
+    // 进行中的轮次还没有可信终态；不能默认关闭为成功。
+    if (turn.status !== "inProgress") this.finishTurn(turn, completedAt || Date.now());
   }
 
   /** 结束当前轮：用 codex 给出的状态和耗时。 */

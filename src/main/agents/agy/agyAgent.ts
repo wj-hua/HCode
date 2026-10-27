@@ -6,7 +6,7 @@
 // - 实时会话：每个 HCode 会话一个 `agy -p --input-format stream-json` 进程，见 agySession.ts。
 import { execFile } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
-import { open, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,9 @@ import { agyQuota, quotaError } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider, AgentSendParams } from "../types.js";
 import { skillName } from "../../util/skillFrontmatter.js";
-import { projectAgyHistory, userRequestText, type AgyStep } from "./agyProjector.js";
+import { projectAgyHistory, projectAgySubagentHistory, userRequestText, type AgyStep } from "./agyProjector.js";
+import { agyHistorySubagents, filterAgySubagentSessions, isAgyConversationId } from "./agySubagents.js";
+import type { NativeSubagent } from "../../../shared/types.js";
 import { GEMINI_MODEL_PREFIX } from "./agyResearchSession.js";
 import { AGY_DATA_DIR, AgySession, type AgyLaunch } from "./agySession.js";
 
@@ -173,6 +175,7 @@ export class AgyAgent implements AgentProvider {
   private models: ModelOption[] | null = null;
   /** 会话 id → 工作区（不会变，找到后一直缓存；没找到的按 transcript 的 mtime 重试）。 */
   private readonly workspaces = new Map<string, { workspace?: string; mtimeMs: number }>();
+  private readonly childIndex = new Map<string, { mtimeMs: number; size: number; children: NativeSubagent[] }>();
   private cache: SessionSummary[] | null = null;
   private loading: Promise<SessionSummary[]> | null = null;
   private generation = 0;
@@ -280,7 +283,34 @@ export class AgyAgent implements AgentProvider {
     const ids = await readdir(BRAIN_DIR).catch(() => [] as string[]);
     const summaries = readSummaryDb();
     const list = await Promise.all(ids.map((id) => this.summaryOf(id, summaries.get(id))));
-    return list.filter((item): item is SessionSummary => item !== null).sort((a, b) => b.updatedAt - a.updatedAt);
+    const childIds = new Set<string>();
+    // 限制同时读取的 transcript 数量，已扫描且未改变的文件直接复用结果。
+    for (let offset = 0; offset < ids.length; offset += 20) {
+      const groups = await Promise.all(ids.slice(offset, offset + 20).filter(isAgyConversationId).map(id => this.historySubagents(id)));
+      for (const group of groups) for (const child of group) childIds.add(child.id);
+    }
+    for (const session of this.sessions.values()) {
+      for (const child of session.nativeSubagents.values()) childIds.add(child.id);
+    }
+    const existing = new Set(ids);
+    for (const id of this.childIndex.keys()) if (!existing.has(id)) this.childIndex.delete(id);
+    const valid = list.filter((item): item is SessionSummary => item !== null);
+    return filterAgySubagentSessions(valid, childIds).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  private async historySubagents(id: string): Promise<NativeSubagent[]> {
+    const info = await stat(transcriptPath(id)).catch(() => null);
+    if (!info) return [];
+    const cached = this.childIndex.get(id);
+    if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.children;
+    try {
+      const children = agyHistorySubagents(id, await readSteps(id));
+      this.childIndex.set(id, { mtimeMs: info.mtimeMs, size: info.size, children });
+      return children;
+    } catch {
+      // 读取失败时保留上次已确认的关联，下次扫描重试。
+      return cached?.children ?? [];
+    }
   }
 
   private async summaryOf(id: string, row: SummaryRow | undefined): Promise<SessionSummary | null> {
@@ -308,6 +338,42 @@ export class AgyAgent implements AgentProvider {
     const steps = await readSteps(id);
     const summary = (await this.listSessions()).find((item) => item.id === id) ?? null;
     return { summary, rows: projectAgyHistory(steps).snapshot() };
+  }
+
+  async listSubagents(id: string, projectPath: string): Promise<NativeSubagent[]> {
+    if (!isAgyConversationId(id)) throw new Error("无效的 Antigravity 会话 ID");
+    const active = [...this.sessions.values()].find(session => session.sessionId === id);
+    const workspace = active?.projectPath ?? (await this.listSessions()).find(session => session.id === id)?.projectPath;
+    const matches = workspace === projectPath || Boolean(workspace && await Promise.all([realpath(workspace), realpath(projectPath)])
+      .then(([actual, requested]) => actual === requested).catch(() => false));
+    if (!matches) throw new Error("Antigravity 会话与当前工作目录不匹配");
+    const found = new Map<string, NativeSubagent>();
+    const queue = [id];
+    const visited = new Set<string>();
+    while (queue.length) {
+      const parent = queue.shift()!;
+      if (visited.has(parent)) continue;
+      if (visited.size >= 500) throw new Error("Antigravity 子代理数量过多，无法完整读取");
+      visited.add(parent);
+      const live = parent === id && active ? [...active.nativeSubagents.values()] : [];
+      for (const child of [...await this.historySubagents(parent), ...live]) {
+        if (child.id === id || visited.has(child.id)) continue;
+        found.set(child.id, child);
+        queue.push(child.id);
+      }
+    }
+    return [...found.values()];
+  }
+
+  async loadSubagent(id: string, projectPath: string, childId: string) {
+    if (!isAgyConversationId(childId)) throw new Error("无效的 Antigravity 子代理 ID");
+    const children = await this.listSubagents(id, projectPath);
+    if (!children.some(child => child.id === childId)) throw new Error("子代理不属于当前 Antigravity 会话");
+    try { return projectAgySubagentHistory(await readSteps(childId)).snapshot(); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
   }
 
   /** agy 的标题存在 annotations/<id>.pbtxt（/resume 里改名写这里）；摘要库里的标题一并更新。 */
@@ -399,6 +465,7 @@ export class AgyAgent implements AgentProvider {
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
           emitTurnOutcome: (event) => this.events.turnOutcome?.(event),
+          onSubagentsChanged: (session) => this.invalidate([session.projectPath]),
           onSettled: (done) => {
             this.invalidate([done.projectPath]);
             this.events.quotaStale("agy");

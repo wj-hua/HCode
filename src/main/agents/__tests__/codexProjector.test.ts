@@ -62,6 +62,14 @@ describe("parseUnifiedDiff", () => {
 });
 
 describe("Codex 历史投影", () => {
+  it("正在执行的子线程不显示为成功结束", () => {
+    const rows = projectCodexTurns([turn([
+      userMessage("检查文件"),
+      { type: "agentMessage", id: "m1", text: "正在检查" },
+    ], { status: "inProgress", completedAt: null, durationMs: null })]).snapshot();
+    expect(ofKind(rows, "turnHeader")[0]?.state).toBe("running");
+    expect(ofKind(rows, "assistantText")[0]?.text).toBe("正在检查");
+  });
   it("技能输入只回显一次，审查结果显示为正文", () => {
     const rows = projectCodexTurns([
       turn([
