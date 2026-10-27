@@ -7,13 +7,9 @@ import { LoaderIcon, RefreshCwIcon, ZapIcon } from "lucide-react";
 import { ComposerProviderMenu } from "@/chat-input-toolbar/ComposerProviderMenu.js";
 import {
   DropdownMenuItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import "@/chat-input-toolbar/composer-thought-slider.css";
 
@@ -376,32 +372,22 @@ export function ComposerModelMenu({
       ) : null}
       {options.speed ? (
         <>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger
-              aria-label="Codex 速度模式"
-              className="min-h-8 gap-2 px-2 text-ui-base"
-            >
-              <ZapIcon className={options.speed.value === "fast" ? "size-4 text-amber-500" : "size-4 text-foreground-subtle"} />
-              <span>速度模式</span>
-              <span className="ml-auto text-ui-sm text-foreground-subtle">
-                {options.speed.value === "fast" ? "Fast" : options.speed.value === "default" ? "标准" : "CLI 默认"}
-              </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuLabel>Codex 速度模式 · 下一轮生效</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={options.speed.value || "cli"}
-                onValueChange={(value) => {
-                  if (value === "cli" || value === "default" || value === "fast")
-                    options.speed?.onValueChange(value === "cli" ? "" : value);
-                }}
-              >
-                <DropdownMenuRadioItem value="cli">CLI 默认</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="default">标准速度</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="fast">Fast · 更快，消耗更多额度</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <DropdownMenuCheckboxItem
+            checked={options.speed.value === "fast"}
+            onCheckedChange={(checked) => options.speed?.onValueChange(checked === true ? "fast" : "default")}
+            onSelect={(event) => event.preventDefault()}
+            className="min-h-8 gap-2 px-2 text-ui-base [&_[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden"
+          >
+            <ZapIcon className={options.speed.value === "fast" ? "size-4 text-amber-500" : "size-4 text-foreground-subtle"} />
+            <span>Fast 模式</span>
+            <span className="ml-auto text-ui-sm text-foreground-subtle">
+              {options.speed.value === "" ? "遵循 CLI 配置" : "下一轮生效"}
+            </span>
+            <span aria-hidden="true" className={`inline-flex h-[18px] w-8 shrink-0 items-center rounded-full p-px ${options.speed.value === "fast" ? "bg-primary" : "bg-primary/30"}`}>
+              <span className={`size-4 rounded-full bg-primary-foreground transition-transform motion-reduce:transition-none ${options.speed.value === "fast" ? "translate-x-[14px]" : "translate-x-0"}`} />
+            </span>
+          </DropdownMenuCheckboxItem>
+          <div className="px-2 pb-1 text-ui-xs text-foreground-subtle">Fast 更快，消耗更多额度</div>
           <DropdownMenuSeparator className="bg-border/50" />
         </>
       ) : null}
