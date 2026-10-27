@@ -34,11 +34,15 @@ import type { ResearchDraft, ResearchDraftInput, ResearchDraftEdit } from "./res
 import type { CodeDraft, CodeDraftInput, CodeDraftEdit } from "./codeDraft.js";
 import type { ExpertDraft, ExpertDraftInput, ExpertDraftEdit } from "./expertDraft.js";
 import type { ExpertStartParams, ExpertResumeParams } from './experts.js';
+import type { MemoryEntry, MemorySaveInput } from './memory.js';
 
 import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "memory:list": [[], MemoryEntry[]];
+  "memory:save": [[entry: MemorySaveInput], MemoryEntry];
+  "memory:delete": [[id: string], void];
   "terminal:create": [[id: string, cwd: string, cols: number, rows: number], string];
   "terminal:write": [[id: string, data: string], void];
   "terminal:resize": [[id: string, cols: number, rows: number], void];
@@ -166,6 +170,7 @@ export interface InvokeMap {
 
 /** 主进程 → 渲染进程事件 */
 export interface EventMap {
+  "memory:updated": void;
   "terminal:event": { id: string; data?: string; exitCode?: number };
   "agentInvocation:updated": import('./agentInvocation.js').AgentInvocation;
   "collaboration:codeDraftUpdated": CodeDraft;
@@ -198,6 +203,7 @@ export interface HCodeBridge {
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
+  "memory:list", "memory:save", "memory:delete",
   "terminal:create", "terminal:write", "terminal:resize", "terminal:close",
   "agentInvocation:list", "agentInvocation:cancel",
   "collaboration:codeDraftCreate", "collaboration:codeDraftList", "collaboration:codeDraftUpdate", "collaboration:codeDraftPrepare", "collaboration:codeDraftConfirm", "collaboration:codeDraftCancel", "collaboration:codeDraftAbandon",
@@ -269,6 +275,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
+  "memory:updated",
   "terminal:event",
   "agentInvocation:updated",
   "collaboration:codeDraftUpdated",

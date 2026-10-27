@@ -30,6 +30,7 @@ export interface AgentSendParams extends ChatSendParams {
   hosted?: HostedRuntime;
   /** 普通续聊的宿主交接；不属于用户消息，不赋予额外工具或权限。 */
   ordinaryContinuation?: string;
+  memorySnapshot?: string;
 }
 
 export interface AgentEvents {

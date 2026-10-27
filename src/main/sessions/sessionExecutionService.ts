@@ -12,6 +12,7 @@ export interface SessionExecutionHost {
   failedToSend(sessionKey: string): void;
   finishedSending(sessionKey: string): void;
   ordinaryContinuation?(params: ChatSendParams): Promise<string | undefined>;
+  ordinaryMemory?(params: ChatSendParams): Promise<string | undefined>;
   ordinaryTools?(params: ChatSendParams, turnId: string, signal: AbortSignal): HostedRuntime | undefined;
 }
 
@@ -47,7 +48,7 @@ export class SessionExecutionService {
     const abort = new AbortController();
     const tracked = params.agent === "claude" || params.agent === "codex" || params.agent === "agy";
     if (tracked) { this.busy.add(params.sessionKey); this.ordinaryTurns.set(id, params.sessionKey); this.ordinaryControllers.set(id, { abort, source: params }); this.trackNative(id, identity); }
-    try { return await this.dispatch(params, id, undefined, await this.host.ordinaryContinuation?.(params), this.host.ordinaryTools?.(params, id, abort.signal)); }
+    try { return await this.dispatch(params, id, undefined, await this.host.ordinaryContinuation?.(params), this.host.ordinaryTools?.(params, id, abort.signal), undefined, await this.host.ordinaryMemory?.(params)); }
     catch (error) { abort.abort(); this.ordinaryControllers.delete(id); if (tracked) { this.ordinaryTurns.delete(id); this.busy.delete(params.sessionKey); this.releaseNative(id); } throw error; }
   }
 
@@ -152,10 +153,10 @@ export class SessionExecutionService {
     if (pending?.sessionKey === event.sessionKey) { this.pending.delete(event.executionTurnId); pending.resolve(event); }
   }
 
-  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime, ordinaryContinuation?: string, hosted?: HostedRuntime, onNativeSession?: AgentSendParams['onNativeSession']) {
+  private async dispatch(params: ChatSendParams, executionTurnId: string, research?: ResearchRuntime, ordinaryContinuation?: string, hosted?: HostedRuntime, onNativeSession?: AgentSendParams['onNativeSession'], memorySnapshot?: string) {
     try {
       const prepared = await this.host.prepare(params);
-      return await this.host.send({ ...prepared, executionTurnId, research, ...(ordinaryContinuation ? { ordinaryContinuation } : {}), ...(hosted ? { hosted } : {}), ...(onNativeSession ? { onNativeSession } : {}) });
+      return await this.host.send({ ...prepared, executionTurnId, research, ...(ordinaryContinuation ? { ordinaryContinuation } : {}), ...(memorySnapshot ? { memorySnapshot } : {}), ...(hosted ? { hosted } : {}), ...(onNativeSession ? { onNativeSession } : {}) });
     } catch (error) {
       this.host.failedToSend(params.sessionKey);
       throw error;

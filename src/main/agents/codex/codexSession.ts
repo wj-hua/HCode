@@ -4,7 +4,7 @@ import { HostedToolCalls } from "./hostedToolCalls.js";
 import { assertInvocationThreadIdle } from './invocationRecovery.js';
 import type { AgentSendParams } from '../types.js';
 import { assertToolCatalog, readToolCatalog, sourceCatalogReason, type CodexToolSpec } from "./toolCatalog.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
   ChatRunState,
@@ -29,6 +29,8 @@ import type { TurnOutcome } from "../../../shared/collaboration.js";
 import { codexResearchConfig, RESEARCH_PERMISSION_PROFILE, type ResearchRuntime, type HostedRuntime } from "../../sessions/researchRuntime.js";
 
 const FLUSH_INTERVAL_MS = 16;
+// 同一原生线程关闭再打开也不重复注入；应用重启后首轮重新同步。
+const memoryHashes = new Map<string, string>();
 
 interface InvokedSkill {
   name: string;
@@ -138,6 +140,8 @@ export class CodexSession {
   }
   private research: ResearchRuntime | undefined;
   private hosted: HostedRuntime | undefined;
+  private requestedHosted: HostedRuntime | undefined;
+  private memorySnapshot: string | undefined;
   private hostedAvailable = false;
   private ordinaryContinuation: string | undefined;
   private finalAnswer: string | undefined;
@@ -179,6 +183,7 @@ export class CodexSession {
         await onNativeSession(this.threadId);
       }
       await this.injectContinuation();
+      await this.injectMemory();
       if (/^\/compact\s*$/i.test(text)) {
         if (images.length || files.length) throw new Error("/compact 不能附带文件或图片");
         await this.host.client.request("thread/compact/start", { threadId: this.threadId });
@@ -303,9 +308,22 @@ export class CodexSession {
   private async injectContinuation() {
     const instructions = this.research
       ? '本回合是新的 HCode 宿主任务。此前普通续聊交接不改变本轮的工具、权限、范围或格式；遵守当前任务和实际运行时配置。'
-      : [this.ordinaryContinuation, this.hosted ? this.hostedAvailable ? this.hosted.instructions : this.host.client.experimentalApi ? '此旧 Codex 线程未注册当前 HCode 的 call_agent 工具，不能实际调用另一 AI。请明确说明这个限制，不冒充已委派；普通对话和原线程保持可用。新建 Codex 会话会提供该能力。' : '当前 Codex CLI 版本尚未通过 HCode call_agent 验证，本会话没有注册该工具，不能实际调用另一 AI。请明确说明这个限制，不冒充已委派；普通对话保持可用。安装已验证的 Codex 版本后新建会话可提供该能力。' : undefined].filter(Boolean).join('\n');
+      : [this.ordinaryContinuation, this.hosted?.instructions].filter(Boolean).join('\n');
     if (!instructions) return;
     await this.host.client.request('thread/inject_items', { threadId: this.threadId, items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: instructions }] }] });
+  }
+
+  configureMemory(snapshot?: string) {
+    if (this.isBusy) throw new Error('Codex 活动回合不能更换记忆快照');
+    this.memorySnapshot = snapshot;
+  }
+
+  private async injectMemory() {
+    if (this.research || !this.memorySnapshot || !this.threadId) return;
+    const hash = createHash('sha256').update(this.memorySnapshot).digest('hex');
+    if (memoryHashes.get(this.threadId) === hash) return;
+    await this.host.client.request('thread/inject_items', { threadId: this.threadId, items: [{ type: 'message', role: 'developer', content: [{ type: 'input_text', text: this.memorySnapshot }] }] });
+    memoryHashes.set(this.threadId, hash);
   }
 
   /** app-server 退出后需要重新 resume。 */
@@ -658,16 +676,20 @@ export class CodexSession {
   /** 普通回合只更换执行闭包；工具目录来自原生创建元数据，不替换历史线程。 */
   async configureHosted(runtime?: HostedRuntime) {
     if (this.isBusy) throw new Error('Codex 活动回合不能更换宿主工具');
-    this.hostedCalls.cancel(); this.hosted = runtime;
+    this.hostedCalls.cancel(); this.requestedHosted = runtime;
     this.validateHostedCatalog();
   }
   private validateHostedCatalog() {
+    this.hosted = this.requestedHosted;
     if (this.hosted && this.catalog) {
-      const registered = this.hosted.tools?.filter(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)) ?? [];
+      const registered = this.hosted.tools?.filter(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}` && spec.namespace == null)) ?? [];
       const missing = this.hosted.tools?.filter(tool => !registered.includes(tool)) ?? [];
-      // 原生线程不能补动态工具；新增批量能力不能连带关闭已有单项委派。
-      if (missing.length && registered.length) this.hosted = { ...this.hosted, tools: registered,
-        instructions: `${this.hosted.instructions ?? ''}\n本线程未注册 ${missing.map(tool => tool.name).join('、')}，不能调用或冒充已派发。仅使用本线程已有工具；需要新增并行工具请新建 Codex 会话，已有 call_agent 可继续顺序委派。` };
+      const limits: string[] = [];
+      if (missing.some(tool => tool.name.startsWith('memory_'))) limits.push('本线程未注册完整记忆工具，缺少的工具不能调用；本线程不能保存记忆，新建 Codex 会话后可用。仍可读取宿主提供的记忆快照，不得冒充已保存或删除。');
+      const delegation = missing.filter(tool => !tool.name.startsWith('memory_'));
+      if (delegation.length) limits.push(`本线程未注册 ${delegation.map(tool => tool.name).join('、')}，不能调用或冒充已派发。需要新增委派或并行工具请新建 Codex 会话；已有匹配工具可继续使用。`);
+      if (missing.length && !this.host.client.experimentalApi) limits.push('当前 Codex CLI 版本尚未通过 HCode 宿主工具验证，安装已验证的版本后新建会话可用。');
+      if (missing.length) this.hosted = { ...this.hosted, tools: registered, instructions: [registered.length ? this.hosted.instructions : undefined, ...limits].filter(Boolean).join('\n') };
     }
     this.hostedAvailable = Boolean(this.hosted?.tools?.length && this.catalog && this.hosted.tools.every(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)));
     if (this.hostedAvailable) assertToolCatalog(this.catalog!, this.hosted!);

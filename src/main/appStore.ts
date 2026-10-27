@@ -43,6 +43,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     ...DEFAULT_SETTINGS,
     ...(raw as Partial<Settings>),
     interfaceMode: normalizeInterfaceMode(raw.interfaceMode),
+    memoryEnabled: raw.memoryEnabled === true,
     codexSpeed: raw.codexSpeed === "fast" || raw.codexSpeed === "default" ? raw.codexSpeed : "",
     agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
     defaultPermissionModes: pick(raw.defaultPermissionModes, DEFAULT_SETTINGS.defaultPermissionModes),

@@ -282,6 +282,7 @@ export class ClaudeAgent implements AgentProvider {
     await session.configureResearch(params.research);
     await session.configureHosted(params.research ? undefined : params.hosted);
     await session.configureContinuation(params.research ? undefined : params.ordinaryContinuation);
+    await session.configureMemory(params.research ? undefined : params.memorySnapshot);
     session.send(params.text, params.images, params.files, params.executionTurnId);
     return { sessionKey: session.key };
   }

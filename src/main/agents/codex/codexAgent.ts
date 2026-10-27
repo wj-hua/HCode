@@ -453,6 +453,7 @@ export class CodexAgent implements AgentProvider {
     }
     await session.configureHosted(params.research ? undefined : params.hosted);
     await session.configureContinuation(params.research ? undefined : params.ordinaryContinuation);
+    session.configureMemory(params.research ? undefined : params.memorySnapshot);
     session.effort = params.effort || undefined;
     session.speed = params.codexSpeed;
     const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(params.text.trim());

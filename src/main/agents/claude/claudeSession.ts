@@ -112,6 +112,7 @@ export class ClaudeSession {
   private readonly lifecycle: TurnLifecycle;
   private research: ResearchRuntime | undefined;
   private hosted: HostedRuntime | undefined;
+  private memorySnapshot: string | undefined;
   private ordinaryContinuation: string | undefined;
   private pumpPromise: Promise<void> | null = null;
   private readonly promptSuggestions: ClaudePromptSuggestions;
@@ -173,6 +174,13 @@ export class ClaudeSession {
     if (this.isBusy) throw new Error('会话运行中，不能更换普通续聊交接');
     await this.releaseQuery();
     this.ordinaryContinuation = instructions;
+  }
+
+  async configureMemory(snapshot?: string) {
+    if (snapshot === this.memorySnapshot) return;
+    if (this.isBusy) throw new Error('活动回合不能更换记忆快照');
+    await this.releaseQuery();
+    this.memorySnapshot = snapshot;
   }
 
   /** 在原生身份不变的空闲边界追加普通会话工具，不套用研究模式或替换用户输入。 */
@@ -239,7 +247,7 @@ export class ClaudeSession {
     // 后台任务快照按进程计；新进程启动时不会补发，必须先清零
     this.backgroundTasks.reset();
     const permissionMode = this.permissionMode;
-    const instructions = [this.ordinaryContinuation, this.hosted?.instructions].filter(Boolean).join('\n');
+    const instructions = [this.ordinaryContinuation, this.hosted?.instructions, this.memorySnapshot].filter(Boolean).join('\n');
     this.activeQuery = query({
       prompt: input,
       options: {

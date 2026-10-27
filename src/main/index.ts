@@ -5,6 +5,9 @@ import { basename, isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AgentInvocationService } from './invocations/agentInvocationService.js';
 import { InvocationRepository } from './invocations/invocationRepository.js';
+import { MemoryRepository } from './memory/memoryRepository.js';
+import { MemoryService } from './memory/memoryService.js';
+import { mergeHosted } from './sessions/researchRuntime.js';
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerSaveBlocker, protocol, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
@@ -102,6 +105,10 @@ async function bootstrap() {
   shellEnv = (await captureLoginShellEnvSnapshot()) ?? {};
   const store = new AppStore(app.getPath("userData"));
   const conversationWorkspace = new ConversationWorkspace(app.getPath("userData"));
+  const memory = new MemoryService(new MemoryRepository(join(app.getPath('userData'), 'memories')), conversationWorkspace.path, () => send('memory:updated', undefined), () => store.settings.memoryEnabled);
+  handle('memory:list', () => memory.list());
+  handle('memory:save', entry => memory.save(entry));
+  handle('memory:delete', id => memory.delete(id));
   const terminals = new TerminalService(event => send("terminal:event", event));
   handle("terminal:create", (id, cwd, cols, rows) => terminals.create(id, cwd, buildAgentEnv(), cols, rows));
   handle("terminal:write", (id, data) => terminals.write(id, data));
@@ -264,7 +271,14 @@ async function bootstrap() {
   });
 
   execution = new SessionExecutionService({
-    ordinaryTools: (params, turnId, signal) => store.settings.agentDelegation && (params.agent === 'claude' || params.agent === 'codex') ? invocations.tools(params, turnId, signal) : undefined,
+    ordinaryTools: (params, turnId, signal) => {
+      if (params.agent !== 'claude' && params.agent !== 'codex') return undefined;
+      return mergeHosted([
+        store.settings.agentDelegation ? invocations.tools(params, turnId, signal) : undefined,
+        store.settings.memoryEnabled ? memory.tools(params, signal) : undefined,
+      ]);
+    },
+    ordinaryMemory: async params => store.settings.memoryEnabled && (params.agent === 'claude' || params.agent === 'codex') ? memory.snapshot(params) : undefined,
     ordinaryContinuation: (params): Promise<string | undefined> => continuation.forMessage(params),
     send: (params) => agents.send(params),
     interrupt: async (key) => { await requireSession(key).interrupt(key); },

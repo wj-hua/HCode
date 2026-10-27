@@ -9,7 +9,7 @@ import type { AppServerClient } from './appServerClient.js';
 import { codexResearchTools } from './researchTools.js';
 import { researchPath, type ResearchRuntime } from '../../sessions/researchRuntime.js';
 const MAX_METADATA_BYTES = 512 * 1024;
-export type CodexToolSpec = ReturnType<typeof codexResearchTools>[number];
+export type CodexToolSpec = ReturnType<typeof codexResearchTools>[number] & { namespace?: string | null };
 const toolSchema = z.object({ name: z.string(), type: z.literal('function').optional(), description: z.string(), inputSchema: z.record(z.string(), z.unknown()), namespace: z.string().nullable().optional() });
 export const MISSING_SOURCE_TOOLS = '该 Codex 线程没有 HCode 委派工具，本机版本不能给已有线程补工具。请在新建 Codex 会话发送普通消息之前启动协作；原线程与历史保持原样。';
 /** 只读服务端返回的线程元数据文件，校验存储范围、原生身份及目录完整性。 */

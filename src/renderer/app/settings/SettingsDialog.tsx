@@ -18,6 +18,8 @@ import {
   playNotificationSound,
 } from "../notificationSound";
 import { ExtensionsSection } from "./ExtensionsSection";
+import { MemorySection } from './MemorySection';
+import { useZCodeIntl } from '@/i18n/IntlProvider.js';
 import { useRemoteStatus } from "../remote/useRemoteStatus";
 import {
   Palette,
@@ -76,7 +78,7 @@ const NAV_ITEMS: NavItem[] = [
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
   general: ["常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "theme", "wallpaper", "blur"],
   agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "effort", "model", "path"],
-  notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify", "sleep"],
+  notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "记忆", "memory", "sound", "notify", "sleep"],
   shortcuts: ["快捷键", "键盘", "按键", "shortcut", "keyboard", ...APP_SHORTCUTS.map((entry) => entry.label.toLowerCase())],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
   remote: ["远程", "手机", "操控", "口令", "隧道", "remote", "ssh", "mobile"],
@@ -707,6 +709,7 @@ function AgentsTab() {
 }
 
 function NotificationsTab() {
+  const { intl } = useZCodeIntl();
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const sound = settings.notificationSound;
@@ -754,6 +757,10 @@ function NotificationsTab() {
           checked={settings.agentDelegation}
           onChange={(agentDelegation) => update({ agentDelegation })}
         />
+      </CardGroup>
+
+      <CardGroup title={intl.formatMessage({ id: 'memory.title' })} subtitle={intl.formatMessage({ id: 'memory.subtitle' })}>
+        <MemorySection />
       </CardGroup>
 
       {/* 通知音效卡片 */}

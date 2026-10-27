@@ -25,6 +25,17 @@ export interface HostedRuntime {
   tools?: HostedTool[];
   instructions?: string;
 }
+
+/** 普通回合可组合多项宿主能力；所有能力必须绑定同一个项目。 */
+export function mergeHosted(parts: (HostedRuntime | undefined)[]): HostedRuntime | undefined {
+  const runtimes = parts.filter((part): part is HostedRuntime => Boolean(part));
+  if (!runtimes.length) return undefined;
+  const root = runtimes[0]!.root;
+  if (runtimes.some(runtime => runtime.root !== root)) throw new Error('宿主工具绑定的项目不一致');
+  const tools = runtimes.flatMap(runtime => runtime.tools ?? []);
+  if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error('宿主工具名称重复');
+  return { root, tools, instructions: runtimes.map(runtime => runtime.instructions).filter(Boolean).join('\n') };
+}
 export interface ResearchRuntime extends HostedRuntime {
   outputSchema?: Record<string, unknown>;
   /** 宿主记录实际工具读取的证据版本；回调失败作为工具错误返回。 */
