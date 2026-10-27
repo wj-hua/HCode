@@ -24,8 +24,8 @@ import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
 import { PromptSuggestionHint } from './PromptSuggestionHint';
 import { usePromptSuggestion } from './usePromptSuggestion';
-import { drafts, fileDrafts, imageDrafts, consumeSubmittedDraft } from "./drafts";
-import { draftKey, loadDraft, saveDraft, consumePersistedDraft } from "./persist";
+import { drafts, fileDrafts, imageDrafts } from "./drafts";
+import { draftKey, loadDraft, saveDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { hcode } from "../bridge";
@@ -117,7 +117,6 @@ export function Composer({
 }) {
   const send = useAppStore((state) => state.send);
   const sendGroup = useAppStore((state) => state.sendGroup);
-  const startCompare = useAppStore((state) => state.startCompare);
   const interrupt = useAppStore((state) => state.interrupt);
   const enqueue = useAppStore((state) => state.enqueue);
   const removeQueued = useAppStore((state) => state.removeQueued);
@@ -131,11 +130,11 @@ export function Composer({
   const modelsLoading = useAppStore((state) => state.modelsLoading[conversation.agent]);
   const agentStatuses = useAppStore((state) => state.agentStatuses);
   const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
+  const agentDelegation = useAppStore((state) => state.settings.agentDelegation);
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
-  // 草稿会话勾选的其他 CLI：发送时与当前 CLI 组成对比组
-  const selection = useWorkMode(state => state.views[conversation.viewId]);
-  const workMode = conversation.compareId ? "compare" : selection?.mode ?? "chat";
-  const extraAgents = (selection?.agents ?? []).filter(kind => kind !== conversation.agent);
+  // 已有对比组的会话固定按普通对话发送（由 sendGroup 分发到组内每个 CLI）
+  const selectedMode = useWorkMode(state => state.views[conversation.viewId]?.mode);
+  const workMode = conversation.compareId ? "chat" : selectedMode ?? "chat";
   const activeCollaboration = useActiveCollaboration(conversation);
   const setSidePanel = useUiStore(state => state.setSidePanel);
   const persistedKey = draftKey(conversation);
@@ -359,8 +358,8 @@ export function Composer({
 
   const canSend = Boolean(text.trim() || images.length > 0 || files.length > 0);
 
-  const submission = submissionForMode(workMode, { text, imageCount: images.length, fileCount: files.length, busy: running || conversation.queue.length > 0, activeCollaboration: Boolean(activeCollaboration), canCompare: isDraft || Boolean(conversation.compareId), compareCount: conversation.compareId ? 1 : extraAgents.length });
-  const attachmentBlocked = submissionForMode("collaboration", { text: "goal", imageCount: images.length, fileCount: files.length, busy: false, activeCollaboration: false, canCompare: false, compareCount: 0 }).reason;
+  const submission = submissionForMode(workMode, { text, imageCount: images.length, fileCount: files.length, busy: running || conversation.queue.length > 0, activeCollaboration: Boolean(activeCollaboration) });
+  const attachmentBlocked = submissionForMode("collaboration", { text: "goal", imageCount: images.length, fileCount: files.length, busy: false, activeCollaboration: false }).reason;
 
   const rememberPrompt = (value: string) => {
     const projectPath = conversation.projectPath;
@@ -386,19 +385,9 @@ export function Composer({
       return;
     }
     setSubmitting(true);
-    const enteringCompare = submission.action === "compare" && isDraft && !conversation.compareId;
-    const sending = conversation.compareId
-      ? sendGroup(text, images, files)
-      : submission.action === "compare" && isDraft
-        ? startCompare(extraAgents, text, images, files)
-        : send(text, images, files);
+    const sending = conversation.compareId ? sendGroup(text, images, files) : send(text, images, files);
     void sending.then((sent) => {
       if (!sent) return;
-      if (enteringCompare && useAppStore.getState().conversations[conversation.viewId]?.compareId) {
-        consumePersistedDraft(persistedKey, text, files);
-        const remaining = consumeSubmittedDraft(conversation.viewId, text, images, files);
-        useAppStore.setState({ composerPrefill: { viewId: conversation.viewId, ...remaining } });
-      }
       rememberPrompt(text);
       setText((current) => current === text ? "" : current);
       setImages((current) => current === images ? [] : current);
@@ -674,7 +663,8 @@ export function Composer({
                 <PlusIcon className="size-4" />
               </Button>
             </ControlHintTooltip>
-            {!conversation.compareId ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} agent={conversation.agent} agents={extraAgents} statuses={agentStatuses ?? undefined} onCompare={(kind, checked) => useWorkMode.getState().toggleCompare(conversation.viewId, kind, checked)} onClose={restoreInputFocus} /> : null}
+            {!conversation.compareId ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} onClose={restoreInputFocus} /> : null}
+            {agentDelegation && !conversation.compareId && (conversation.agent === "claude" || conversation.agent === "codex") ? <span className="text-ui-sm text-foreground-subtle" title="普通对话可调用其他 AI（设置 → AI 委派）">委派已开启</span> : null}
             <DropdownMenu>
               <ControlHintTooltip title="权限模式">
                 <DropdownMenuTrigger asChild>

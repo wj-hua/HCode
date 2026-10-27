@@ -435,7 +435,7 @@ export function ComposerModelMenu({
         </div>
       ) : null}
       <ScrollFadeViewport
-        className="max-h-32 flex-initial overflow-x-hidden"
+        className="max-h-42 flex-initial overflow-x-hidden"
         inert={options.loading || undefined}
         data-composer-model-list
       >

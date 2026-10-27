@@ -129,8 +129,6 @@ export interface AppState {
   setDraftProject(projectPath: string): void;
   loadModels(agent: AgentKind, refresh?: boolean): Promise<void>;
   send(text: string, images?: ImageInput[], files?: FileInput[]): Promise<boolean>;
-  /** 草稿会话与 agents 中的其他 CLI 组成对比组，同一消息同时发给每个 CLI。 */
-  startCompare(agents: AgentKind[], text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
   /** 把消息发给当前会话所在对比组的每个 CLI；正在运行的加入其队列。 */
   sendGroup(text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
   /** 运行中把消息加入当前会话的队列。 */
@@ -659,27 +657,6 @@ export const useAppStore = create<AppState>((set, get) => {
     async send(text, images = [], files = []) {
       const { activeViewId } = get();
       return activeViewId ? sendConversation(activeViewId, text, images, files) : false;
-    },
-
-    async startCompare(agents, text, images, files) {
-      const base = activeConversation();
-      if (!base || base.sessionKey || base.sessionId) return false;
-      const compareId = crypto.randomUUID();
-      const siblings = agents
-        .filter((agent, index) => agent !== base.agent && agents.indexOf(agent) === index)
-        .map((agent) => ({ ...draftConversation(`draft-${Date.now()}-${++draftSeq}`, base.projectPath, agent), compareId }));
-      set((state) => ({
-        conversations: {
-          ...state.conversations,
-          [base.viewId]: { ...state.conversations[base.viewId]!, compareId },
-          ...Object.fromEntries(siblings.map((conv) => [conv.viewId, conv])),
-        },
-      }));
-      for (const conv of siblings) void get().loadModels(conv.agent);
-      const results = await Promise.all(
-        [base.viewId, ...siblings.map((conv) => conv.viewId)].map((viewId) => sendConversation(viewId, text, images, files)),
-      );
-      return results.some(Boolean);
     },
 
     async sendGroup(text, images, files) {

@@ -272,7 +272,7 @@ async function bootstrap() {
   });
 
   execution = new SessionExecutionService({
-    ordinaryTools: (params, turnId, signal) => params.agent === 'claude' || params.agent === 'codex' ? invocations.tools(params, turnId, signal) : undefined,
+    ordinaryTools: (params, turnId, signal) => store.settings.agentDelegation && (params.agent === 'claude' || params.agent === 'codex') ? invocations.tools(params, turnId, signal) : undefined,
     ordinaryContinuation: (params): Promise<string | undefined> => continuation.forMessage(params),
     send: (params) => agents.send(params),
     interrupt: async (key) => { await requireSession(key).interrupt(key); },

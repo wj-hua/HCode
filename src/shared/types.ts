@@ -382,6 +382,8 @@ export interface Settings {
   pinnedSessions: string[];
   /** 有会话正在运行时阻止电脑休眠（显示器仍可关闭）。 */
   preventSleepWhileRunning: boolean;
+  /** 开启后普通对话可通过 call_agent 系列工具委派其他 AI；关闭时普通对话保持纯聊天，已在运行的调用不受影响。 */
+  agentDelegation: boolean;
   /** 任务开始、完成、出错或等待审批时通知；后台发送系统通知。 */
   notifyOnFinish: boolean;
   notificationSound: NotificationSound;
@@ -412,6 +414,7 @@ export const DEFAULT_SETTINGS: Settings = {
   codexSpeed: "",
   pinnedSessions: [],
   preventSleepWhileRunning: true,
+  agentDelegation: false,
   notifyOnFinish: true,
   notificationSound: "system",
   customSounds: { start: "", done: "", error: "", approval: "" },

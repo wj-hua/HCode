@@ -735,6 +735,16 @@ function NotificationsTab() {
         />
       </CardGroup>
 
+      {/* AI 委派卡片 */}
+      <CardGroup title="AI 委派" subtitle="普通对话调用其他 AI 的能力，默认关闭">
+        <ToggleRow
+          label="允许普通对话跨 AI 委派"
+          hint="开启后新建的 Claude/Codex 会话可通过 call_agent 调用其他 AI；已有 Codex 会话需新建才生效，已有 Claude 会话从下一条消息起生效。关闭后，已有 Codex 会话仍可能保留委派工具，需新建会话才完全停用。会增加 token 消耗"
+          checked={settings.agentDelegation}
+          onChange={(agentDelegation) => update({ agentDelegation })}
+        />
+      </CardGroup>
+
       {/* 通知音效卡片 */}
       {settings.notifyOnFinish && (
         <CardGroup title="声音与提示" subtitle="配置事件通知的音频方案与各事件专属提示音">

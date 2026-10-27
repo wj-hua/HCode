@@ -38,14 +38,6 @@ export function saveDraft(key: string, text: string, files: readonly FileInput[]
   writePersisted(DRAFT_PREFIX + key, text || files.length ? { text, files } : null);
 }
 
-/** 对比入口重挂载后清除已确认发送的持久化原值；异步期间的新编辑不能被清除。 */
-export function consumePersistedDraft(key: string | null, text: string, files: readonly FileInput[]) {
-  if (!key) return;
-  const saved = loadDraft(key);
-  if (saved.text !== text || JSON.stringify(saved.files) !== JSON.stringify(files)) return;
-  saveDraft(key, '', []);
-}
-
 export function loadQueue(sessionId: string): QueuedMessage[] {
   const saved = readPersisted<QueuedMessage[]>(QUEUE_PREFIX + sessionId);
   return Array.isArray(saved) ? saved.map((item) => ({ ...item, images: [], files: item.files ?? [] })) : [];
