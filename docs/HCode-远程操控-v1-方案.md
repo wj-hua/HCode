@@ -63,16 +63,16 @@ remoteControl: {
 ```
 
 - 不在设置里保存 IP、私钥路径：私钥、用户名、服务器地址都写在用户自己的 `~/.ssh/config` 中，HCode 只记别名。
-- `enabled` 为 true 但 `sshHost` / `remoteBind` 为空时不启动，状态显示「未配置」。
+- `enabled` 为 true 时启动本地服务；`sshHost` 和 `remoteBind` 均为空时不启动隧道，配置不完整或无效时显示隧道错误。
 - **访问口令不放进 `Settings`**（`settings:get` 的结果会发给渲染进程，也可能被远程读取）。首次开启时用 `crypto.randomBytes` 生成，经 `safeStorage` 加密后存到 userData 下单独文件（权限 600）。设置页提供「复制口令」「重新生成」；重新生成后所有已登录的远程会话立即失效。
 - 应用启动时仅当 `enabled` 为 true 才启动服务；关闭开关立即：断开所有 SSE、清空登录会话、结束 ssh 进程、关闭 HTTP 监听。
 
 ### 3.2 RemoteControlService（新增 `src/main/remoteControl/`）
 
-- `server.ts`：`http.createServer`，监听 `127.0.0.1:<本地端口>`。
+- `remoteControlService.ts`：`http.createServer`，监听 `127.0.0.1:<本地端口>`。
   - 静态文件：从 `out/renderer` 读取，限制在该目录内，开发模式可代理到 Vite。
-  - `POST /api/login`：常量时间比较口令（`crypto.timingSafeEqual`）；成功下发 `HttpOnly; Secure; SameSite=Strict; Path=/hcode/` 的随机会话 Cookie，会话仅存内存、7 天过期、应用重启失效。失败计数限流（如 5 次/分钟）。
-  - `POST /api/invoke`：校验 Cookie 和自定义头 `X-HCode-Remote: 1`（防 CSRF），请求体 `{ channel, args }`，返回 `{ ok, result }` 或 `{ ok: false, error }`。请求体上限按附件需要设定（如 20 MiB）。
+  - `POST /api/login`：常量时间比较口令（`crypto.timingSafeEqual`）；成功下发 `HttpOnly; SameSite=Strict` 的随机会话 Cookie，代理声明 HTTPS 时附加 `Secure`，路径由代理前缀决定。会话仅存内存、7 天过期、应用重启失效。登录失败共用限流：每分钟最多 5 次。
+  - `POST /api/invoke`：校验 Cookie 和自定义头 `X-HCode-Remote: 1`（防 CSRF），请求体 `{ channel, args }`，返回 `{ ok, result }` 或 `{ ok: false, error }`。请求体上限为 30 MiB。
   - `GET /api/events`：SSE，`event: <channel>` + `data: <json>`；每 15 秒发注释心跳。
 - `tunnel.ts`：`child_process.spawn("ssh", ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-R", `${remoteBind}:127.0.0.1:${localPort}`, sshHost])`。使用登录 shell 环境中的 `ssh`；退出后按 2s / 5s / 15s / 30s 退避重连；`BatchMode=yes` 避免弹出交互密码。stderr 只记录错误类型，不记录服务器地址和用户名。
 - `index.ts`：组合 server + tunnel，维护状态 `{ state, clients, error }`，变化时向本机窗口发 `remote:status` 事件。
@@ -89,7 +89,7 @@ v1 远程可调用通道：
 |---|---|
 | 基础信息 | `agent:status` `agent:models` `agent:commands` `quota:list` `projects:list` `workspace:conversation` |
 | 会话 | `sessions:list` `sessions:load` `sessions:search` `claude/codex/agy:subagents` `…:subagentMessages` |
-| 对话 | `chat:send` `chat:interrupt` `chat:setModel` `permission:respond` `chat:snapshot`（新增） |
+| 对话 | `chat:send` `chat:interrupt` `chat:setModel` `chat:setPermissionMode` `permission:respond` `chat:live` `chat:snapshot` |
 | 输入辅助 | `fs:listProjectFiles` `fs:stageAttachment` |
 | 设置 | `settings:get`（远程专用的只读精简结果，见下） |
 
@@ -133,7 +133,7 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
   - `getPathForFile` → 返回 `null`（附件自动走已有的 `fs:stageAttachment` 上传分支，`Composer.tsx` 已支持）。
   - 新增 `remote: boolean` 标记，供界面隐藏本机功能。
 - 未登录时（invoke 返回 401）显示一个只有口令输入框的登录页。
-- `remote` 为 true 时隐藏：添加项目、终端、在 Finder 显示/打开文件、外部终端、Git 操作、协作「工作方式」菜单（固定普通对话）、设置对话框（只保留主题切换）、背景设置。危险权限选项在下拉中禁用。
+- `remote` 为 true 时隐藏：添加项目、终端、在 Finder 显示/打开文件、外部终端、Git 操作、协作「工作方式」菜单（固定普通对话）、设置对话框（只保留主题切换）、背景设置。权限菜单允许选择当前 CLI 支持的模式，包括完全放行。
 - 本机界面：设置中新增「远程操控」分组——开关、SSH 别名、服务器监听地址、状态、在线客户端数、复制/重新生成口令；有远程客户端在线时侧边栏底部显示提示，可一键关闭。
 
 构建：沿用同一份 `vite build` 产物，远程页面就是 `out/renderer/index.html`。`base: "./"` 已支持子路径 `/hcode/`；CSP `connect-src 'self'` 允许同源 fetch 与 SSE，无需修改。
@@ -182,7 +182,10 @@ v1 复用桌面界面，只保证能用：
 
 ## 8. 风险与限制
 
-- **安全**：远程能力等于在本机让 Agent 执行命令。v1 依靠 HTTPS + 高强度随机口令 + 通道白名单 + 禁用危险权限模式 + 本地仅监听回环地址；默认关闭。口令泄露时在设置中重新生成即可让所有远程会话失效。
+- **数据传输**：浏览器到服务器依赖正确配置的 HTTPS，服务器到本机使用 SSH 加密。HTTPS 在服务器反向代理处终止，因此服务器及其管理员可能接触明文口令、会话和其他传输数据；这不是浏览器到本机的端到端加密。服务器上的代理到隧道监听端口使用 HTTP，必须限制该端口的访问，不应直接暴露公网。
+- **远程权限**：已登录用户可以发消息、处理审批并选择当前 CLI 支持的权限模式，包括完全放行。Agent 可按其权限在本机执行命令和访问数据；项目路径校验与接口白名单不能作为 Agent 的完整安全沙箱。应将远程入口视作高敏感入口。
+- **口令与设备**：远程操控默认关闭，本地服务仅监听回环地址；访问口令随机生成并由系统加密存储，登录失败有共用限流。登录会话最长 7 天，设备或口令泄露时应在设置中重新生成口令，使已有登录失效并断开远程客户端；不用时关闭远程操控。共用限流也可能被恶意请求触发，暂时阻止正常登录。
+- **部署配置**：确保 HTTPS 证书有效、代理正确设置 `X-Forwarded-Proto`，并限制隧道用户和监听地址。上述保护取决于实际服务器配置，应用本身不会验证服务器是否安全部署。
 - **本机需保持唤醒**：合盖或睡眠会断开隧道。现有「运行时阻止休眠」只覆盖有会话运行时；远程使用时需接电源并保持唤醒。v1 在设置页提示；是否在开启远程时自动阻止应用挂起，留作后续选项。
 - **延迟**：服务器在国内，手机与本机在海外时链路需跨境往返两次，流式输出会有可感知延迟和偶发断线；SSE 自动重连 + 快照刷新可恢复。
 - **隧道残留**：网络切换后服务器上旧的转发可能尚未释放，新隧道启动失败。依靠服务器 `ClientAlive*` 清理与本机退避重连解决。
@@ -193,7 +196,7 @@ v1 复用桌面界面，只保证能用：
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | R1 主进程服务 | 设置项、口令存储、HTTP 服务、白名单 invoke/SSE、`chat:snapshot` | 开关关闭时端口未监听；本机浏览器访问 `127.0.0.1:<本地端口>` 能登录、看到会话、收到实时输出；非白名单通道返回拒绝 |
-| R2 渲染进程 | 远程 bridge、登录页、隐藏本机功能、设置分组、状态提示 | 浏览器中能新建/续聊会话、停止、审批、上传图片；危险权限不可选 |
+| R2 渲染进程 | 远程 bridge、登录页、隐藏本机功能、设置分组、状态提示 | 浏览器中能新建/续聊会话、停止、审批、上传图片，并选择当前 CLI 支持的权限模式 |
 | R3 隧道与服务器 | ssh 反向隧道与重连、服务器受限用户、sshd 与 nginx 配置 | 手机流量下打开 `https://<域名>/hcode/` 完成一轮带审批的对话；本机断网恢复后自动重连；关闭开关后手机立即断开、页面返回 502 |
 | R4 最小手机适配 | 视口、侧边栏收起、输入框字号 | iPhone Safari 竖屏可正常阅读和输入 |
 
