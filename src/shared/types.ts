@@ -1,3 +1,4 @@
+import type { ShortcutOverrides } from "./shortcuts.js";
 // 主进程与渲染进程共用的数据类型（只放纯类型，不放实现）。
 import type { ConversationRow } from "@zcode/shared/zcode-protocol-v4";
 import type { BackgroundTask } from './backgroundTasks.js';
@@ -364,6 +365,7 @@ export interface Settings {
   /** notificationSound 为 custom 时各事件的音频文件路径；空串 = 用系统提示音。 */
   customSounds: Record<NotificationEvent, string>;
   background: BackgroundSettings;
+  shortcuts: ShortcutOverrides;
 }
 
 /** 按 CLI 分组的设置项。 */
@@ -375,6 +377,7 @@ export type SettingsPatch = Partial<Omit<Settings, PerAgentSettingKey>> & {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
+  shortcuts: {},
   theme: "system",
   locale: "zh-CN",
   interfaceMode: "coding",

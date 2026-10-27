@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { version as APP_VERSION } from "../../../../package.json";
 import type { AgentKind, NotificationEvent, SettingsPatch } from "@hcode/shared/types";
 import { getDefaultModel, isBackgroundVideo } from "@hcode/shared/types";
+import { APP_SHORTCUTS, formatShortcut, shortcutFromEvent, shortcutId, type ShortcutDefinition } from "@hcode/shared/shortcuts";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
 import { Button } from "@/components/ui/button.js";
@@ -44,9 +45,10 @@ import {
   RotateCcw,
   Zap,
   RefreshCw,
+  Keyboard,
 } from "lucide-react";
 
-type SettingsTab = "general" | "agents" | "notifications" | "extensions";
+type SettingsTab = "general" | "agents" | "notifications" | "extensions" | "shortcuts";
 
 const LAST_SELECTED_MODEL_VALUE = "__hcode_last_selected_model__";
 
@@ -61,6 +63,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "general", label: "常规与外观", desc: "主题、语言与个性化背景", icon: Palette },
   { id: "agents", label: "模型与 CLI", desc: "默认 CLI、模型与权限", icon: Bot },
   { id: "notifications", label: "通知与系统", desc: "休眠策略与提示音", icon: Bell },
+  { id: "shortcuts", label: "快捷键", desc: "查看与修改键盘快捷键", icon: Keyboard },
   { id: "extensions", label: "MCP 与技能", desc: "上下文扩展与技能工具", icon: Boxes },
 ];
 
@@ -68,6 +71,7 @@ const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
   general: ["常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "theme", "wallpaper", "blur"],
   agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "effort", "model", "path"],
   notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify", "sleep"],
+  shortcuts: ["快捷键", "键盘", "按键", "shortcut", "keyboard", ...APP_SHORTCUTS.map((entry) => entry.label.toLowerCase())],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
 };
 
@@ -830,6 +834,72 @@ function NotificationsTab() {
   );
 }
 
+function ShortcutsTab() {
+  const overrides = useAppStore((state) => state.settings.shortcuts);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const [recording, setRecording] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const isMac = hcode.platform === "darwin";
+  const binding = (entry: ShortcutDefinition) => overrides[shortcutId(entry)] ?? (isMac ? entry.accelerator : entry.accelerator.replace("Command+", "Control+"));
+  const save = (entry: ShortcutDefinition, value: string | null) => {
+    const next = { ...overrides };
+    if (value === null) delete next[shortcutId(entry)];
+    else next[shortcutId(entry)] = value;
+    void updateSettings({ shortcuts: next });
+    setRecording(null);
+    setError("");
+  };
+  const record = (event: React.KeyboardEvent, entry: ShortcutDefinition) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") { setRecording(null); setError(""); return; }
+    if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) return;
+    const value = shortcutFromEvent(event);
+    if (!value) { setError("请按下包含 Command、Control 或 Option 的字母、数字或逗号组合键"); return; }
+    const reserved = isMac
+      ? ["Command+Q", "Command+H", "Command+M", "Command+C", "Command+V", "Command+X", "Command+Z", "Command+Shift+Z", "Command+A", "Control+T"]
+      : ["Control+C", "Control+V", "Control+X", "Control+Z", "Control+A", "Control+T"];
+    if (reserved.includes(value)) { setError("该组合键用于系统或文本编辑，请选择其他按键"); return; }
+    const conflict = APP_SHORTCUTS.find((other) => shortcutId(other) !== shortcutId(entry) && binding(other) === value);
+    if (conflict) { setError(`该组合键已用于「${conflict.label}」`); return; }
+    save(entry, value);
+  };
+  return (
+    <div className="flex flex-col gap-6">
+      {!recording && error && <p role="alert" className="text-ui-sm text-destructive">{error}</p>}
+      <CardGroup title="键盘快捷键" subtitle="点击快捷键后按下新组合，按 Esc 取消。修改立即生效。" extra={
+        <Button variant="outline" size="sm" onClick={() => { void updateSettings({ shortcuts: {} }); setRecording(null); setError(""); }}>
+          <RotateCcw className="size-3.5 mr-1" />全部恢复默认
+        </Button>
+      }>
+        {APP_SHORTCUTS.map((entry) => {
+          const id = shortcutId(entry);
+          const editing = recording === id;
+          return (
+            <div key={id} className="px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-ui-base font-medium">{entry.label}</span>
+                <div className="flex items-center gap-2">
+                  {overrides[id] && <Button variant="ghost" size="sm" aria-label={`恢复${entry.label}的默认快捷键`} onClick={() => {
+                    const defaultValue = isMac ? entry.accelerator : entry.accelerator.replace("Command+", "Control+");
+                    const conflict = APP_SHORTCUTS.find((other) => shortcutId(other) !== id && binding(other) === defaultValue);
+                    if (conflict) { setRecording(null); setError(`默认组合键已用于「${conflict.label}」，请先修改该快捷键`); }
+                    else save(entry, null);
+                  }}><RotateCcw className="size-3.5" /></Button>}
+                  <button type="button" aria-label={`修改${entry.label}的快捷键`} onClick={() => { setRecording(id); setError(""); }} onKeyDown={(event) => { if (editing) record(event, entry); }} onBlur={() => { if (editing) { setRecording(null); setError(""); } }} className={cn("min-w-28 rounded-md border px-3 py-1.5 text-ui-sm", editing ? "border-primary text-primary" : "border-border bg-surface hover:bg-surface-hover")}>
+                    {editing ? "按下组合键…" : formatShortcut(binding(entry))}
+                  </button>
+                </div>
+              </div>
+              {editing && error && <p role="alert" className="mt-2 text-ui-xs text-destructive">{error}</p>}
+            </div>
+          );
+        })}
+      </CardGroup>
+    </div>
+  );
+}
+
 export function SettingsDialog() {
   const open = useAppStore((state) => state.settingsOpen);
   const setOpen = useAppStore((state) => state.setSettingsOpen);
@@ -933,6 +1003,7 @@ export function SettingsDialog() {
             {tab === "general" && <GeneralTab />}
             {tab === "agents" && <AgentsTab />}
             {tab === "notifications" && <NotificationsTab />}
+            {tab === "shortcuts" && <ShortcutsTab />}
             {tab === "extensions" && <ExtensionsSection open={open} />}
           </main>
         </div>

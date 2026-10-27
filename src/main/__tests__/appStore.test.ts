@@ -44,6 +44,16 @@ describe("AppStore.updateSettings", () => {
     dir = undefined;
   });
 
+  it("快捷键覆盖值在重启后保留，并可恢复默认", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    const store = new AppStore(dir);
+    store.updateSettings({ shortcuts: { newChat: "Command+Shift+N" } });
+    const restarted = new AppStore(dir);
+    expect(restarted.settings.shortcuts).toEqual({ newChat: "Command+Shift+N" });
+    restarted.updateSettings({ shortcuts: {} });
+    expect(new AppStore(dir).settings.shortcuts).toEqual({});
+  });
+
   it("连续的局部更新互不覆盖，并持久化到 settings.json", () => {
     dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
     const store = new AppStore(dir);

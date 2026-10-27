@@ -458,11 +458,12 @@ async function bootstrap() {
   handle("settings:set", (patch) => {
     const settings = store.updateSettings(patch);
     syncSleepBlocker();
+    if (process.platform === "darwin" && patch.shortcuts) installApplicationMenu(() => mainWindow, settings.shortcuts);
     return settings;
   });
 
   agents.startWatching();
-  if (process.platform === "darwin") installApplicationMenu(() => mainWindow);
+  if (process.platform === "darwin") installApplicationMenu(() => mainWindow, store.settings.shortcuts);
   mainWindow = createMainWindow(store);
 
   app.on("activate", () => {

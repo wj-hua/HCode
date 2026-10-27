@@ -1,7 +1,7 @@
 import { app, Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
-import { APP_SHORTCUTS, type AppCommand, type ShortcutDefinition } from "../shared/shortcuts.js";
+import { APP_SHORTCUTS, getShortcutAccelerator, type AppCommand, type ShortcutDefinition, type ShortcutOverrides } from "../shared/shortcuts.js";
 
-export function installApplicationMenu(getWindow: () => BrowserWindow | null): void {
+export function installApplicationMenu(getWindow: () => BrowserWindow | null, overrides: ShortcutOverrides): void {
   const send = (command: AppCommand, index?: number, fromAccelerator?: boolean) => {
     const win = getWindow();
     if (!win || win.isDestroyed()) return;
@@ -11,7 +11,7 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null): v
   };
   const item = (shortcut: ShortcutDefinition): MenuItemConstructorOptions => ({
     label: shortcut.label,
-    accelerator: shortcut.accelerator,
+    accelerator: getShortcutAccelerator(shortcut, overrides),
     click: (_item, _window, event) => send(shortcut.command, shortcut.index, event.triggeredByAccelerator),
   });
   const shortcut = (command: AppCommand) => item(APP_SHORTCUTS.find((entry) => entry.command === command)!);

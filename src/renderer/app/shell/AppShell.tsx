@@ -20,7 +20,7 @@ import { Sidebar } from "./Sidebar";
 import { SessionSearchDialog } from "./SessionSearchDialog";
 import { QuickSwitchDialog } from "./QuickSwitchDialog";
 import type { SessionSearchResult } from "@hcode/shared/types";
-import { APP_SHORTCUTS, type AppCommand } from "@hcode/shared/shortcuts";
+import { APP_SHORTCUTS, shortcutFromEvent, type AppCommand } from "@hcode/shared/shortcuts";
 
 const SIDEBAR_WIDTH = 272;
 
@@ -176,9 +176,10 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void)
     const onKeyDown = (event: KeyboardEvent) => {
       // macOS 快捷键由原生菜单分发，避免菜单和页面各执行一次。
       if (hcode.platform === "darwin") return;
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      if (event.isComposing) return;
       if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
-      const shortcut = APP_SHORTCUTS.find((entry) => entry.key === event.key.toLowerCase() && !!entry.shift === event.shiftKey);
+      const pressed = shortcutFromEvent(event);
+      const shortcut = pressed && APP_SHORTCUTS.find((entry) => (useAppStore.getState().settings.shortcuts[entry.index === undefined ? entry.command : `${entry.command}:${entry.index}`] ?? entry.accelerator.replace("Command+", "Control+")) === pressed);
       if (shortcut && runCommand(shortcut.command, shortcut.index)) event.preventDefault();
     };
     const offMenuCommand = hcode.on("app:menuCommand", ({ command, index, fromAccelerator }) => {

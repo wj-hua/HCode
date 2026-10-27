@@ -30,3 +30,24 @@ export const APP_SHORTCUTS: readonly ShortcutDefinition[] = [
     index: offset,
   })),
 ];
+
+/** 用户覆盖值以命令及可选会话序号为键，未设置时使用默认值。 */
+export type ShortcutOverrides = Record<string, string>;
+export const shortcutId = (entry: ShortcutDefinition) => entry.index === undefined ? entry.command : `${entry.command}:${entry.index}`;
+
+export function getShortcutAccelerator(entry: ShortcutDefinition, overrides: ShortcutOverrides): string {
+  return overrides[shortcutId(entry)] || entry.accelerator;
+}
+
+export function shortcutFromEvent(event: { key: string; code: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }): string | null {
+  if (!event.metaKey && !event.ctrlKey && !event.altKey) return null;
+  const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3)
+    : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5)
+    : event.code === "Comma" ? "," : null;
+  if (!key) return null;
+  return [event.metaKey && "Command", event.ctrlKey && "Control", event.altKey && "Alt", event.shiftKey && "Shift", key].filter(Boolean).join("+");
+}
+
+export function formatShortcut(accelerator: string): string {
+  return accelerator.split("+").map((part) => ({ Command: "⌘", Control: "⌃", Alt: "⌥", Shift: "⇧" }[part] ?? part)).join(" ");
+}
