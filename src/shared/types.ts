@@ -92,6 +92,11 @@ export interface Project {
   exists: boolean;
 }
 
+export interface ComputerBattery {
+  percentage: number;
+  status: "charging" | "discharging" | "charged" | "not-charging" | "unknown";
+}
+
 export interface SessionSummary {
   id: string;
   agent: AgentKind;
@@ -185,6 +190,8 @@ export interface ChatStateEvent {
   sessionId?: string;
   projectPath: string;
   state: ChatRunState;
+  /** 本进程最近一轮结束的时间；新一轮开始时清除。 */
+  completedAt?: number;
   /** 回合外仍在运行的原生后台任务数（如后台命令、后台子代理）；没有时省略。 */
   backgroundTasks?: number;
   /** 本进程收到的后台任务详情及最近结束结果。 */

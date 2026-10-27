@@ -114,6 +114,18 @@ describe("远程网页连接恢复", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("页面订阅晚于连接恢复时仍收到已完成的会话状态", async () => {
+    const state = { sessionKey: "session", state: "idle", completedAt: 1234 };
+    await bridge.connect();
+    fetchMock.mockResolvedValueOnce(response([state]));
+    fetchMock.mockResolvedValueOnce(response({ seq: 10, rows: [], state, permissions: [] }));
+    Events.instances[0]!.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    const listener = vi.fn();
+    bridge.on("chat:state", listener);
+    expect(listener).toHaveBeenCalledWith(state);
+  });
+
   it("同一事件流再次恢复后，迟到的旧快照不会覆盖新快照", async () => {
     const state = { sessionKey: "session" };
     const listener = vi.fn();

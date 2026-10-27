@@ -2,7 +2,7 @@
 // 断线重连后先取活动会话快照覆盖本地内容，快照 seq 之前的事件丢弃，避免流式文字重复。
 import { EVENT_CHANNELS, type EventChannel, type HCodeBridge, type InvokeChannel } from "@hcode/shared/ipc";
 import type { RemoteOnlyInvokeMap, RemoteSessionSnapshot } from "@hcode/shared/remoteControl";
-import type { PermissionRequestEvent, Settings, SettingsPatch } from "@hcode/shared/types";
+import type { ChatStateEvent, PermissionRequestEvent, Settings, SettingsPatch } from "@hcode/shared/types";
 
 const HEADERS = { "Content-Type": "application/json", "X-HCode-Remote": "1" };
 const REMOTE_THEME_KEY = "hcode-remote-theme";
@@ -68,7 +68,12 @@ export function createRemoteBridge(): HCodeBridge & {
   onConnectionChange(listener: (state: RemoteConnectionState) => void): () => void;
 } {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const latestStates = new Map<string, ChatStateEvent>();
   const emit = (channel: EventChannel, payload: unknown) => {
+    if (channel === "chat:state") {
+      const state = payload as ChatStateEvent;
+      latestStates.set(state.sessionKey, state);
+    }
     for (const listener of listeners.get(channel) ?? []) listener(payload);
   };
   // 设置改动只在本页面生效：主题、模型选择不影响电脑上的 HCode。
@@ -116,6 +121,7 @@ export function createRemoteBridge(): HCodeBridge & {
       const snapshots = await Promise.all(live.map((state) =>
         (call("chat:snapshot", [state.sessionKey]) as Promise<RemoteSessionSnapshot | null>).then((snapshot) => ({ state, snapshot }))));
       if (source !== events || generation !== syncGeneration) return;
+      latestStates.clear();
       floors.clear();
       const stale = new Map(pendingPermissions);
       for (const { state, snapshot } of snapshots) {
@@ -223,6 +229,7 @@ export function createRemoteBridge(): HCodeBridge & {
       const set = listeners.get(channel) ?? new Set();
       listeners.set(channel, set);
       set.add(listener as (payload: unknown) => void);
+      if (channel === "chat:state") for (const state of latestStates.values()) (listener as (payload: unknown) => void)(state);
       return () => set.delete(listener as (payload: unknown) => void);
     },
     async invoke(channel, ...args) {

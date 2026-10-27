@@ -22,6 +22,7 @@ function requireProject(context: RemotePolicyContext, path: string) {
 const allow = () => {};
 
 const GUARDS: { [C in InvokeChannel]?: Guard<C> } = {
+  "system:battery": allow,
   "agent:status": allow,
   "agent:models": allow,
   "agent:commands": (context, _agent, projectPath) => requireProject(context, projectPath),

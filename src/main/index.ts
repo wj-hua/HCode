@@ -13,6 +13,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerMonitor, powe
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AGENTS } from "../shared/agents.js";
 import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS, getDefaultModel } from "../shared/types.js";
+import type { ChatStateEvent } from "../shared/types.js";
+import { getComputerBattery } from "./battery.js";
 import { AppStore } from "./appStore.js";
 import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { listSubagents, getSubagentMessages } from "@anthropic-ai/claude-agent-sdk";
@@ -99,6 +101,7 @@ function buildAgentEnv(): Record<string, string> {
 }
 
 async function bootstrap() {
+  handle("system:battery", getComputerBattery);
   if (!app.isPackaged && process.platform === "darwin") {
     app.dock?.setIcon(join(app.getAppPath(), "resources", "icon.png"));
   }
@@ -146,6 +149,7 @@ async function bootstrap() {
     }
   };
 
+  const recentTurnStates = new Map<string, ChatStateEvent>();
   const events: AgentEvents = {
     turnOutcome: (event) => execution?.acceptOutcome(event),
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
@@ -157,7 +161,13 @@ async function bootstrap() {
       if (event.state === "running" || event.state === "awaitingApproval") activeGitSessions.add(event.sessionKey);
       else activeGitSessions.delete(event.sessionKey);
       syncSleepBlocker();
-      send("chat:state", event);
+      const previous = recentTurnStates.get(event.sessionKey);
+      const busy = event.state === "running" || event.state === "awaitingApproval" || !!event.backgroundTasks;
+      const wasBusy = previous && (previous.state === "running" || previous.state === "awaitingApproval" || !!previous.backgroundTasks);
+      const completedAt = busy ? undefined : wasBusy ? Date.now() : previous?.completedAt;
+      const enriched = { ...event, sessionId: event.sessionId ?? previous?.sessionId, completedAt };
+      recentTurnStates.set(event.sessionKey, enriched);
+      send("chat:state", enriched);
     },
     commands: (sessionKey, commands) => send("chat:commands", { sessionKey, commands }),
     promptSuggestion: event => send('chat:promptSuggestion', event),
@@ -389,6 +399,7 @@ async function bootstrap() {
   handle("chat:setModel", (sessionKey, model) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改模型"); return requireSession(sessionKey).setModel(sessionKey, model); });
   handle("chat:close", (sessionKey) => {
     if (execution!.isReserved(sessionKey)) return;
+    recentTurnStates.delete(sessionKey);
     sessionGitRoots.delete(sessionKey);
     activeGitSessions.delete(sessionKey);
     return agents.bySessionKey(sessionKey)?.closeSession(sessionKey);

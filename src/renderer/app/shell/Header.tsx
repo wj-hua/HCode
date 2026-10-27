@@ -12,6 +12,7 @@ import { hcode, isRemote } from "../bridge";
 import { shortenHome } from "../format";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
+import { ComputerBatteryIndicator } from "../remote/ComputerBatteryIndicator";
 
 export function Header({ conversation, onToggleTerminal, terminalVisible, onToggleSideTerminal, sideTerminalVisible }: { conversation: Conversation | undefined; onToggleTerminal: () => void; terminalVisible: boolean; onToggleSideTerminal: () => void; sideTerminalVisible: boolean }) {
   const project = useAppStore((state) => state.projects.find((item) => item.path === conversation?.projectPath));
@@ -112,6 +113,7 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
           ) : null}
         </div>
       ) : null}
+      {isRemote ? <ComputerBatteryIndicator /> : null}
       {isRemote ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

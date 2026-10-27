@@ -3,6 +3,7 @@ import type {ExpertProfilePreview} from "./expertProfiles.js";
 // IPC 契约：preload 暴露的 window.hcode 与主进程 handler 共用同一份定义。
 import type {
   AgentKind,
+  ComputerBattery,
   AgentQuota,
   AgentStatus,
   ModelOption,
@@ -40,6 +41,7 @@ import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "system:battery": [[], ComputerBattery | null];
   "memory:list": [[], MemoryEntry[]];
   "memory:save": [[entry: MemorySaveInput], MemoryEntry];
   "memory:delete": [[id: string], void];
@@ -203,6 +205,7 @@ export interface HCodeBridge {
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
+  "system:battery",
   "memory:list", "memory:save", "memory:delete",
   "terminal:create", "terminal:write", "terminal:resize", "terminal:close",
   "agentInvocation:list", "agentInvocation:cancel",

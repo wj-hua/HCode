@@ -24,7 +24,7 @@ import { getPathLeaf } from "@/lib/path.js";
 import { getPlainTextPatchPreviewLines } from "@/lib/patchDiffPreview.js";
 import { ImagePreviewContent, SvgPreviewContent } from "@/previewPaneImageContent.js";
 import { resolveTheme } from "@/useTheme.js";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { errorMessage } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
 import { useFilePreview } from "./FilePreviewContext";
@@ -216,7 +216,7 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
           <Button variant={htmlViewMode === "code" ? "secondary" : "ghost"} size="sm" aria-pressed={htmlViewMode === "code"} onClick={() => setHtmlViewMode("code")}>源码</Button>
         </div>
       ) : null}
-      {!readsFile && path ? (
+      {!isRemote && !readsFile && path ? (
         <Button variant="ghost" size="sm" className="gap-1 text-foreground-subtle hover:text-foreground" onClick={() => preview?.onOpenFileLink({ path, label: getPathLeaf(path) })}>
           <FileCode2Icon className="size-3.5" />查看文件
         </Button>
@@ -261,13 +261,13 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
                 {hasViewOptions ? <DropdownMenuSeparator /> : null}
                 <DropdownMenuItem onSelect={() => copyText(path)}><CopyIcon className="size-4" />复制绝对路径</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => copyText(breadcrumb.relativePath)}><CopyIcon className="size-4" />复制相对路径</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void perform("app:showInFinder")}><FolderOpenIcon className="size-4" />在 Finder 中显示</DropdownMenuItem>
+                {!isRemote ? <DropdownMenuItem onSelect={() => void perform("app:showInFinder")}><FolderOpenIcon className="size-4" />在 Finder 中显示</DropdownMenuItem> : null}
               </>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {path ? (
+      {!isRemote && path ? (
         <Button variant="ghost" size="icon-sm" title="用默认应用打开" aria-label="用默认应用打开" onClick={() => void perform("app:openPath")}><ExternalLinkIcon /></Button>
       ) : null}
     </>

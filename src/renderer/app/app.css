@@ -19,6 +19,14 @@
 @container collaboration-workspace (min-width: 42.5rem) {
   .file-preview-side-panel { width: var(--file-preview-panel-width); }
 }
+.file-preview-layout[data-mobile-overlay] > .file-preview-side-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  width: 100%;
+  border-left: 0;
+}
+.file-preview-layout[data-mobile-overlay] > .file-preview-side-panel > .collaboration-resize-handle { display: none; }
 .collaboration-side-panel { width: min(var(--collaboration-preferred-width, 30rem), 85%); }
 @container collaboration-workspace (min-width: 52rem) {
   .collaboration-content { margin-right: var(--collaboration-panel-width); }

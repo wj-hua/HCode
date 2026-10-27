@@ -126,7 +126,7 @@ export function AppShell() {
             <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
             {conversation ? (
               <>
-                <FilePreviewLayout preview={<>
+                <FilePreviewLayout mobileOverlay={narrow} preview={<>
                   {filePreview ? <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
                     <FilePreviewPanel key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`} source={filePreview.source} onClose={() => setSidePanel(null)} />
                   </FilePreviewProvider> : null}
