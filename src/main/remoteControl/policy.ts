@@ -19,10 +19,6 @@ function requireProject(context: RemotePolicyContext, path: string) {
   if (!context.projectPaths().includes(path)) throw new Error("远程只能访问已添加的项目");
 }
 
-function isDangerous(agent: AgentKind, mode: PermissionMode | undefined) {
-  return AGENTS[agent]?.permissionModes.some((option) => option.mode === mode && option.dangerous) ?? false;
-}
-
 const allow = () => {};
 
 const GUARDS: { [C in InvokeChannel]?: Guard<C> } = {
@@ -43,10 +39,6 @@ const GUARDS: { [C in InvokeChannel]?: Guard<C> } = {
   "agy:subagentMessages": (context, _id, projectPath) => requireProject(context, projectPath),
   "chat:send": (context, params) => {
     requireProject(context, params.projectPath);
-    const current = context.sessionState(params.sessionKey);
-    if (isDangerous(params.agent, params.permissionMode) || (current && isDangerous(current.agent, current.permissionMode))) {
-      throw new Error("远程不能使用完全放行模式");
-    }
     const root = resolve(context.attachmentsDir) + sep;
     if (params.files?.some((file) => !resolve(file.path).startsWith(root))) throw new Error("远程附件需要先上传");
   },
@@ -54,7 +46,7 @@ const GUARDS: { [C in InvokeChannel]?: Guard<C> } = {
   "chat:setPermissionMode": (context, sessionKey, mode) => {
     const current = context.sessionState(sessionKey);
     if (!current) throw new Error("会话不存在或已关闭");
-    if (isDangerous(current.agent, mode) || isDangerous(current.agent, current.permissionMode)) throw new Error("远程不能使用完全放行模式");
+    if (!AGENTS[current.agent].permissionModes.some((option) => option.mode === mode)) throw new Error("无效的权限模式");
   },
   "chat:setModel": allow,
   "permission:respond": allow,

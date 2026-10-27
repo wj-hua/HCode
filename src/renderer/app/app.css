@@ -67,6 +67,21 @@
 
 /* 远程操控页面在手机上：输入框不小于 16px，避免 iOS 聚焦时自动放大页面。 */
 @media (max-width: 767px) {
+  html.remote-control {
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
+  }
+  .remote-control [data-desktop-window-frame] {
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .remote-control .composer-input { gap: 0.5rem; }
+  /* 工具条在手机上保持单行：左侧附件与权限，右侧上下文、模型与发送，模型名过长时截断。 */
+  .remote-control .composer-toolbar { align-items: center; gap: 0.25rem; }
+  .remote-control .composer-toolbar,
+  .remote-control .composer-toolbar :is(div, span) { flex-wrap: nowrap; }
+  .remote-control .composer-toolbar-primary { flex: none; }
+  .remote-control .composer-toolbar-secondary { flex: 1 1 0; }
+  .remote-control button, .remote-control [role="button"] { touch-action: manipulation; }
   .remote-control input,
   .remote-control textarea,
   .remote-control select {

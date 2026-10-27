@@ -2,6 +2,7 @@
 import { ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, LoaderIcon, MessageCircleIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { GitBranches } from "@hcode/shared/types";
+import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog.js";
 import { Input } from "@/components/ui/input.js";
@@ -215,10 +216,10 @@ export function BranchPicker({ projectPath, onChanged }: { projectPath: string; 
   );
 }
 
-export function DraftContextBar({ conversation }: { conversation: Conversation }) {
+export function DraftContextBar({ conversation, className = "mt-1.5" }: { conversation: Conversation; className?: string }) {
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
   return (
-    <div className="mt-1.5 flex min-w-0 items-center gap-1">
+    <div className={cn("flex min-w-0 items-center gap-1", className)}>
       <FolderPicker conversation={conversation} />
       {!outsideProject ? <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} /> : null}
     </div>

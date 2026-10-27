@@ -105,7 +105,7 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
 
 额外规则（在主进程远程入口内校验，不依赖界面隐藏）：
 
-- **远程不能选择危险权限模式**。`chat:send` 的 `permissionMode` 若在 `src/shared/agents.ts` 中标记 `dangerous: true`，拒绝并提示「远程不能使用完全放行模式」；`chat:setPermissionMode` 不开放。已在本机以危险模式运行的会话，远程续聊同样拒绝（v1 简单处理）。
+- **远程可选择会话支持的权限模式**，包括完全放行；`chat:setPermissionMode` 校验模式属于当前会话的 CLI。远程续聊沿用会话选定的权限模式。
 - `chat:send` / `fs:listProjectFiles` 的项目路径必须属于 `projects:list` 或非项目对话工作目录。
 - 远程 `settings:get` 只返回界面渲染必需字段（主题、语言、界面模式、默认 CLI/模型/权限），不含 `remoteControl`、`agentPaths`、自定义声音与背景路径。
 

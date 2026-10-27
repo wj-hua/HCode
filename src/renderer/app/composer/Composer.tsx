@@ -29,6 +29,7 @@ import { draftKey, loadDraft, saveDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
 import { hcode, isRemote } from "../bridge";
+import { useNarrowRemote } from "../remote/useNarrowRemote";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -99,6 +100,7 @@ const isModelLocked = () => false;
 
 function restoreInputFocus(event: Event) {
   event.preventDefault();
+  if (isRemote && window.matchMedia("(max-width: 767px)").matches) return;
   document.querySelector<HTMLElement>(COMPOSER_INPUT_SELECTOR)?.focus();
 }
 
@@ -115,6 +117,7 @@ export function Composer({
   conversation: Conversation;
   onSubmitted: () => void;
 }) {
+  const narrow = useNarrowRemote();
   const send = useAppStore((state) => state.send);
   const sendGroup = useAppStore((state) => state.sendGroup);
   const interrupt = useAppStore((state) => state.interrupt);
@@ -333,8 +336,8 @@ export function Composer({
   };
 
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, [conversation.viewId]);
+    if (!narrow) textareaRef.current?.focus();
+  }, [conversation.viewId, narrow]);
 
   useEffect(() => {
     setPromptHistory(readPromptHistoryEntries(conversation.projectPath));
@@ -469,6 +472,9 @@ export function Composer({
       </div>
     ) : null}
     <QueuedMessages conversation={conversation} onEdit={editQueued} />
+    {/* 手机上的新会话照 ZCode：项目 / 分支选择放在输入框上方，与输入框合成一张卡 */}
+    <div className={cn(narrow && isDraft && "rounded-2xl bg-surface shadow-xl/5")}>
+    {narrow && isDraft ? <DraftContextBar conversation={conversation} className="p-1.5" /> : null}
     <form
       onSubmit={(event) => {
         event.preventDefault();
@@ -585,7 +591,7 @@ export function Composer({
             }
           }
         }}
-        placeholder={prediction.suggestion ?? (conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`)}
+        placeholder={prediction.suggestion ?? (narrow ? (running ? "输入消息以排队发送…" : `给 ${agent.name} 发消息…`) : conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`)}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
       {prediction.suggestion ? <PromptSuggestionHint onAccept={acceptPrediction} onDismiss={prediction.dismiss} /> : null}
@@ -672,14 +678,17 @@ export function Composer({
                     type="button"
                     variant="ghost"
                     size="sm"
+                    aria-label={`权限模式：${modeInfo.label}`}
                     className={cn(
                       "h-7 gap-1 rounded-lg px-2 text-ui-base",
+                      narrow && "w-7 px-0",
                       modeInfo.dangerous && "text-warning hover:text-warning",
                     )}
                   >
                     {modeIcon(modeInfo)}
-                    {modeInfo.label}
-                    <ChevronDownIcon className="size-3.5" />
+                    {/* 手机上照 ZCode 只留图标，给模型与发送按钮腾出同一行的空间 */}
+                    {narrow ? null : modeInfo.label}
+                    {narrow ? null : <ChevronDownIcon className="size-3.5" />}
                   </Button>
                 </DropdownMenuTrigger>
               </ControlHintTooltip>
@@ -689,7 +698,7 @@ export function Composer({
                   onValueChange={(mode) => void setPermissionMode(mode)}
                 >
                   {agent.permissionModes.map((item) => (
-                    <DropdownMenuRadioItem key={item.mode} value={item.mode} disabled={isRemote && item.dangerous} className="min-h-13 items-start gap-3 py-2">
+                    <DropdownMenuRadioItem key={item.mode} value={item.mode} className="min-h-13 items-start gap-3 py-2">
                       <span className="mt-0.5">{modeIcon(item, "size-4.5 shrink-0")}</span>
                       <span className="flex min-w-0 flex-col gap-0.5">
                         <span>{item.label}</span>
@@ -738,7 +747,7 @@ export function Composer({
                 onValueChange={(value) => void setModel(value === DEFAULT_MODEL_VALUE ? "" : value)}
                 tooltipTitle={intl.formatMessage({ id: "chat.toolbar.model.label" })}
                 labelVisibilityClassName="inline-flex"
-                triggerLabelClassName="block min-w-0 max-w-48 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate"
+                triggerLabelClassName={cn("block min-w-0 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate", narrow ? "max-w-32" : "max-w-48")}
                 focusSelectorOnClose={COMPOSER_INPUT_SELECTOR}
               />
             </span>
@@ -765,7 +774,8 @@ export function Composer({
         </div>
       </div>
     </form>
-    {isDraft ? <DraftContextBar conversation={conversation} /> : null}
+    </div>
+    {isDraft && !narrow ? <DraftContextBar conversation={conversation} /> : null}
     </>
   );
 }

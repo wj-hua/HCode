@@ -120,9 +120,9 @@ export function AppShell() {
             <Sidebar onOpenSearch={openSearch} />
           </aside>
         </div>
-        <div className={cn("flex min-h-0 flex-1 flex-col p-1 pt-0", narrow ? "min-w-0" : "min-w-[320px]", !collapsed && !narrow && "pl-0")}>
-          <div className="app-drag h-1 w-full" />
-          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
+        <div className={cn("flex min-h-0 flex-1 flex-col", narrow ? "min-w-0" : "min-w-[320px] p-1 pt-0", !collapsed && !narrow && "pl-0")}>
+          {!narrow ? <div className="app-drag h-1 w-full" /> : null}
+          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden", !narrow && "rounded-xl border border-border", !hasBackground && "bg-background")}>
             <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
             {conversation ? (
               <>

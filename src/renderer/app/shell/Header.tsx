@@ -55,7 +55,7 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
             <AgentBadge agent={conversation.agent} />
             {AGENTS[conversation.agent].name}
           </span>
-          <span className="shrink-0 text-foreground-subtle" title={shortenHome(conversation.projectPath)}>
+          <span className="min-w-0 max-w-[40%] truncate text-foreground-subtle" title={shortenHome(conversation.projectPath)}>
             {projectName}
           </span>
           <span className="shrink-0 text-foreground-subtlest">/</span>

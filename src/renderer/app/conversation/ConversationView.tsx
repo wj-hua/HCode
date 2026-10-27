@@ -16,6 +16,7 @@ import { TaskListPanel } from "./TaskListPanel";
 import { BackgroundTaskPanel } from './BackgroundTaskPanel';
 import { GitTools } from "./GitTools";
 import { NativeSubagents } from "./NativeSubagents";
+import { useNarrowRemote } from "../remote/useNarrowRemote";
 
 
 export function ConversationView({
@@ -29,6 +30,7 @@ export function ConversationView({
   column?: boolean;
 }) {
   const panel = useUiStore(state => state.sidePanel);
+  const narrow = useNarrowRemote();
   const collaborationOpen = panel?.type === "collaboration" && panel.viewId === conversation.viewId;
   const permissions = useAppStore((state) => state.permissions);
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
@@ -48,7 +50,7 @@ export function ConversationView({
       <div className={cn("conversation-content relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", collaborationOpen && "collaboration-content")}>
         <div className="relative min-h-0 flex-1">
           <div ref={scrollRef} onScroll={onScroll} aria-label="会话消息" tabIndex={0} className="absolute inset-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-            <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
+            <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column || narrow ? "px-3" : "px-6")}>
               {!column && !outsideProject ? <div className="mb-4 w-full max-w-64 self-end 2xl:absolute 2xl:right-5 2xl:top-4 2xl:z-10"><GitTools workspacePath={conversation.projectPath} running={running} /></div> : null}
               {conversation.loading ? (
                 <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">
@@ -60,9 +62,9 @@ export function ConversationView({
                   读取会话失败：{conversation.loadError}
                 </div>
               ) : conversation.rows.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-24 text-center">
+                <div className={cn("flex min-w-0 flex-col items-center gap-2 text-center", narrow ? "py-16" : "py-24")}>
                   <div className="text-ui-lg font-medium text-foreground">和 {AGENTS[conversation.agent].name} 开始对话</div>
-                  <div className="text-ui-base text-foreground-subtle">{outsideProject ? "不在项目中工作" : `工作目录：${conversation.projectPath}`}</div>
+                  <div className="max-w-full break-all text-ui-base text-foreground-subtle">{outsideProject ? "不在项目中工作" : <>工作目录：<span className="[overflow-wrap:anywhere]">{conversation.projectPath}</span></>}</div>
                 </div>
               ) : (
                 <Timeline
@@ -94,7 +96,7 @@ export function ConversationView({
             </Button>
           ) : null}
         </div>
-        <div className={cn("shrink-0", column ? "px-3" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
+        <div className={cn("shrink-0", column ? "px-3" : narrow ? "mx-auto w-full max-w-3xl px-3 pb-2" : "mx-auto w-full max-w-3xl px-6 pb-4")}>
           {!conversation.loading && conversation.sessionId ? <NativeSubagents key={`${conversation.agent}:${conversation.projectPath}:${conversation.sessionId}`} agent={conversation.agent} sessionId={conversation.sessionId} projectPath={conversation.projectPath} /> : null}
           <TaskListPanel conversation={conversation} />
           <BackgroundTaskPanel conversation={conversation} />
