@@ -16,7 +16,7 @@ import { CodexAgent } from "./agents/codex/codexAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
-import { beginGitTurn, commitFiles, createBranch, finishGitTurn, isGitRepository, listBranches, previewGitTurn, repositoryRoot, revertFile, switchBranch, validateTurnFiles, type GitTurnSnapshot } from "./git.js";
+import { commitChanges, createBranch, listBranches, pushChanges, repositoryRoot, switchBranch, worktree, worktreeDiff } from "./git.js";
 import { buildProjects } from "./projects.js";
 import { ConversationWorkspace } from "./conversationWorkspace.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
@@ -97,56 +97,21 @@ async function bootstrap() {
 
   // 有会话在运行且开关打开时阻止系统休眠
   const runningSessions = new Set<string>();
-  const activeGitTurns = new Set<string>();
-  const gitTurns = new Map<string, GitTurnSnapshot>();
-  const completedGitTurns = new Map<string, GitTurnSnapshot>();
+  const activeGitSessions = new Set<string>();
   const sessionGitRoots = new Map<string, string>();
   const startingGitSessions = new Set<string>();
   const gitOperationRoots = new Set<string>();
-  const pendingGitFinishes = new Map<string, { root: string; promise: Promise<void> }>();
-  const turnGenerations = new Map<string, number>();
-  const finishTurn = (sessionKey: string) => {
-    const turn = gitTurns.get(sessionKey);
-    if (!turn) return;
-    gitTurns.delete(sessionKey);
-    const generation = turnGenerations.get(sessionKey);
-    const promise = finishGitTurn(turn).then(
-      (diff) => {
-        if (!turnGenerations.has(sessionKey)) return;
-        if (turnGenerations.get(sessionKey) === generation) completedGitTurns.set(sessionKey, turn);
-        send("git:turnDiff", { sessionKey, diff });
-      },
-      (error) => {
-        if (!turnGenerations.has(sessionKey)) return;
-        if (turnGenerations.get(sessionKey) === generation) completedGitTurns.set(sessionKey, turn);
-        send("git:turnDiff", { sessionKey, turnId: turn.id, diff: { files: [], error: error instanceof Error ? error.message : String(error) } });
-      },
-    ).finally(() => {
-      if (pendingGitFinishes.get(sessionKey)?.promise === promise) pendingGitFinishes.delete(sessionKey);
-    });
-    pendingGitFinishes.set(sessionKey, { root: turn.root, promise });
-  };
   const withGitOperation = async (cwd: string, operation: () => Promise<void>) => {
     const root = await repositoryRoot(cwd, buildAgentEnv());
     if (gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请稍后重试");
-    if ([...pendingGitFinishes.values()].some((pending) => pending.root === root)) throw new Error("正在记录该仓库的本轮改动，请稍后重试");
     for (const [key, sessionRoot] of sessionGitRoots) {
-      if (sessionRoot === root && (activeGitTurns.has(key) || startingGitSessions.has(key))) {
+      if (sessionRoot === root && (activeGitSessions.has(key) || startingGitSessions.has(key))) {
         throw new Error("该仓库有会话正在运行或等待审批，请结束后再操作 Git");
       }
     }
     gitOperationRoots.add(root);
     try { await operation(); }
     finally { gitOperationRoots.delete(root); }
-  };
-  const requireGitTurn = (sessionKey: string) => {
-    const turn = completedGitTurns.get(sessionKey);
-    if (!turn) throw new Error("本轮改动记录不存在，请先完成一轮对话");
-    return turn;
-  };
-  const refreshGitTurn = async (sessionKey: string, turn: GitTurnSnapshot) => {
-    const diff = await finishGitTurn(turn);
-    if (completedGitTurns.get(sessionKey) === turn) send("git:turnDiff", { sessionKey, diff });
   };
   let sleepBlockerId: number | null = null;
   const syncSleepBlocker = () => {
@@ -164,14 +129,10 @@ async function bootstrap() {
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
     state: (event) => {
       if (event.sessionId) execution?.observeIdentity(event.sessionKey, event.agent, event.sessionId);
-      const wasActive = activeGitTurns.has(event.sessionKey);
       if (event.state === "running" || event.backgroundTasks) runningSessions.add(event.sessionKey);
       else runningSessions.delete(event.sessionKey);
-      if (event.state === "running" || event.state === "awaitingApproval") activeGitTurns.add(event.sessionKey);
-      else activeGitTurns.delete(event.sessionKey);
-      if (wasActive && (event.state === "idle" || event.state === "error")) {
-        finishTurn(event.sessionKey);
-      }
+      if (event.state === "running" || event.state === "awaitingApproval") activeGitSessions.add(event.sessionKey);
+      else activeGitSessions.delete(event.sessionKey);
       syncSleepBlocker();
       send("chat:state", event);
     },
@@ -276,7 +237,7 @@ async function bootstrap() {
     ordinaryContinuation: (params): Promise<string | undefined> => continuation.forMessage(params),
     send: (params) => agents.send(params),
     interrupt: async (key) => { await requireSession(key).interrupt(key); },
-    failedToSend: finishTurn,
+    failedToSend: () => {},
     finishedSending: (key) => startingGitSessions.delete(key),
     prepare: async (params) => {
       if (params.projectPath === conversationWorkspace.path) await conversationWorkspace.ensure();
@@ -288,19 +249,9 @@ async function bootstrap() {
         return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
       }));
       const root = await repositoryRoot(params.projectPath, buildAgentEnv()).catch(() => null);
-      // 排队发送前先完成上一轮的读取，避免把下一轮的写入算进上一轮历史。
-      await Promise.all([...pendingGitFinishes.values()].filter((pending) => pending.root === root).map((pending) => pending.promise));
       if (root && gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请完成后再发送消息");
       if (root) sessionGitRoots.set(params.sessionKey, root);
       startingGitSessions.add(params.sessionKey);
-      // 在 CLI 有机会修改文件前记录基线；Git 不可用时仍照常发送消息。
-      const turn = await beginGitTurn(params.projectPath, buildAgentEnv(), params.text).catch(() => null);
-      turnGenerations.set(params.sessionKey, (turnGenerations.get(params.sessionKey) ?? 0) + 1);
-      completedGitTurns.delete(params.sessionKey);
-      if (turn) {
-        gitTurns.set(params.sessionKey, turn);
-        send("git:turnDiff", { sessionKey: params.sessionKey, diff: null, turnId: turn.id });
-      }
       return { ...params, files };
     },
   });
@@ -391,41 +342,19 @@ async function bootstrap() {
   handle("chat:setModel", (sessionKey, model) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改模型"); return requireSession(sessionKey).setModel(sessionKey, model); });
   handle("chat:close", (sessionKey) => {
     if (execution!.isReserved(sessionKey)) return;
-    gitTurns.delete(sessionKey);
-    completedGitTurns.delete(sessionKey);
     sessionGitRoots.delete(sessionKey);
-    turnGenerations.delete(sessionKey);
-    activeGitTurns.delete(sessionKey);
+    activeGitSessions.delete(sessionKey);
     return agents.bySessionKey(sessionKey)?.closeSession(sessionKey);
   });
   handle("permission:respond", (interactionId, decision) => agents.respondPermission(interactionId, decision));
 
   handle("git:branches", (cwd) => listBranches(cwd, buildAgentEnv()));
+  handle("git:worktree", (cwd) => worktree(cwd, buildAgentEnv()));
+  handle("git:diff", (cwd, path) => worktreeDiff(cwd, buildAgentEnv(), path));
+  handle("git:commit", (cwd, message, stageAll) => withGitOperation(cwd, () => commitChanges(cwd, buildAgentEnv(), message, stageAll)));
+  handle("git:push", (cwd) => withGitOperation(cwd, () => pushChanges(cwd, buildAgentEnv())));
   handle("git:switchBranch", (cwd, branch) => withGitOperation(cwd, () => switchBranch(cwd, buildAgentEnv(), branch)));
-  handle("git:isRepository", (cwd) => isGitRepository(cwd, buildAgentEnv()));
   handle("git:createBranch", (cwd, name) => withGitOperation(cwd, () => createBranch(cwd, buildAgentEnv(), name)));
-  handle("git:previewTurn", (cwd, record) => previewGitTurn(cwd, buildAgentEnv(), record));
-  handle("git:refreshTurnDiff", (sessionKey) => {
-    const turn = requireGitTurn(sessionKey);
-    return withGitOperation(turn.root, () => refreshGitTurn(sessionKey, turn));
-  });
-  handle("git:commit", (sessionKey, files, message) => {
-    const turn = requireGitTurn(sessionKey);
-    return withGitOperation(turn.root, async () => {
-      await validateTurnFiles(turn, files);
-      await commitFiles(turn.root, buildAgentEnv(), files, message);
-      for (const path of files) turn.handled.add(path);
-      await refreshGitTurn(sessionKey, turn);
-    });
-  });
-  handle("git:revertFile", (sessionKey, file) => {
-    const turn = requireGitTurn(sessionKey);
-    return withGitOperation(turn.root, async () => {
-      await revertFile(turn, file);
-      await refreshGitTurn(sessionKey, turn);
-    });
-  });
-
   handle("fs:readText", readTextFile);
   const htmlPreview = new HtmlPreviewService();
   handle("fs:createHtmlPreview", (path, workspacePath) => htmlPreview.create(path, workspacePath));

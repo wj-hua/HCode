@@ -1,8 +1,7 @@
 // 会话头部：参照 ZCode WorkspaceHeader（项目名 / 会话标题 + 右侧操作）。
 import { presentationTitle } from "@hcode/shared/collaborationPresentation";
 import { usePresentationStore } from "../collaboration/presentationStore";
-import { FileDiffIcon, FolderIcon, GitBranchIcon, PanelLeftIcon, SquareTerminalIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FolderIcon, GitBranchIcon, PanelLeftIcon, SquareTerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
@@ -13,20 +12,10 @@ import { shortenHome } from "../format";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
-export function Header({ conversation, diffOpen, onToggleDiff }: { conversation: Conversation | undefined; diffOpen: boolean; onToggleDiff: () => void }) {
+export function Header({ conversation }: { conversation: Conversation | undefined }) {
   const project = useAppStore((state) => state.projects.find((item) => item.path === conversation?.projectPath));
   const outsideProject = project?.purpose === "conversation";
   const isOfficeMode = useIsOfficeMode();
-  const [gitProject, setGitProject] = useState<string | null>(null);
-  useEffect(() => {
-    const projectPath = conversation?.projectPath;
-    if (!projectPath) return;
-    let active = true;
-    void hcode.invoke("git:isRepository", projectPath).then((isRepository) => {
-      if (active) setGitProject(isRepository ? projectPath : null);
-    }).catch(() => { if (active) setGitProject(null); });
-    return () => { active = false; };
-  }, [conversation?.projectPath]);
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const fullscreen = useAppStore((state) => state.fullscreen);
   const setSidebarCollapsed = useAppStore((state) => state.setSidebarCollapsed);
@@ -83,21 +72,6 @@ export function Header({ conversation, diffOpen, onToggleDiff }: { conversation:
       )}
       {conversation ? (
         <div className="app-no-drag flex shrink-0 items-center gap-0.5">
-          {!isOfficeMode && (gitProject === conversation.projectPath || conversation.turnHistory.length > 0) ? (
-            <ControlHintTooltip title="查看本轮改动" side="bottom">
-              <Button
-                variant={diffOpen ? "secondary" : "ghost"}
-                size="sm"
-                className="gap-1.5 text-foreground-subtle"
-                onClick={onToggleDiff}
-                aria-label="查看本轮改动"
-                aria-pressed={diffOpen}
-              >
-                <FileDiffIcon className="size-4" />
-                改动{(conversation.turnDiff?.files.length ?? conversation.turnHistory.at(-1)?.files.length) ? ` ${conversation.turnDiff?.files.length ?? conversation.turnHistory.at(-1)?.files.length}` : ""}
-              </Button>
-            </ControlHintTooltip>
-          ) : null}
           <ControlHintTooltip title="在 Finder 中显示" side="bottom">
             <Button
               variant="ghost"

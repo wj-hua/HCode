@@ -14,6 +14,7 @@ import { Timeline } from "./Timeline";
 import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
 import { BackgroundTaskPanel } from './BackgroundTaskPanel';
+import { GitTools } from "./GitTools";
 
 
 export function ConversationView({
@@ -47,6 +48,7 @@ export function ConversationView({
         <div className="relative min-h-0 flex-1">
           <div ref={scrollRef} onScroll={onScroll} aria-label="会话消息" tabIndex={0} className="absolute inset-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
             <div ref={contentRef} className={cn("mx-auto flex w-full max-w-3xl flex-col pt-6 pb-10", column ? "px-3" : "px-6")}>
+              {!column && !outsideProject ? <div className="mb-4 w-full max-w-64 self-end 2xl:absolute 2xl:right-5 2xl:top-4 2xl:z-10"><GitTools workspacePath={conversation.projectPath} running={running} /></div> : null}
               {conversation.loading ? (
                 <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">
                   <LoaderIcon className="size-4 animate-spin" />

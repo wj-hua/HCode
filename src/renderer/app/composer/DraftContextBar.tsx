@@ -92,7 +92,7 @@ function FolderPicker({ conversation }: { conversation: Conversation }) {
   );
 }
 
-function BranchPicker({ projectPath }: { projectPath: string }) {
+export function BranchPicker({ projectPath, onChanged }: { projectPath: string; onChanged?: () => void }) {
   // undefined = 读取中；null = 不是 git 仓库
   const [git, setGit] = useState<GitBranches | null | undefined>(undefined);
   const [pending, setPending] = useState(false);
@@ -101,7 +101,7 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
   const [branchName, setBranchName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const running = useAppStore((state) => Object.values(state.conversations).some((item) => {
-    const root = item.turnDiff?.root ?? item.projectPath;
+    const root = item.projectPath;
     return (item.runState === "running" || item.runState === "awaitingApproval")
       && (root === projectPath || root.startsWith(`${projectPath}/`) || projectPath.startsWith(`${root}/`));
   }));
@@ -123,6 +123,7 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
     setPending(true);
     try {
       await hcode.invoke("git:switchBranch", projectPath, branch);
+      onChanged?.();
     } catch (error) {
       toast(`切换分支失败：${errorMessage(error)}`, { variant: "warning" });
     } finally {
@@ -136,6 +137,7 @@ function BranchPicker({ projectPath }: { projectPath: string }) {
     setCreateError(null);
     try {
       await hcode.invoke("git:createBranch", projectPath, branchName.trim());
+      onChanged?.();
       setCreateOpen(false);
       toast("已创建并切换到新分支");
     } catch (error) {

@@ -35,6 +35,7 @@ import { useUiStore } from "../store/uiStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { PermissionCard } from "./PermissionCard";
 import { useFilePreview } from "./FilePreviewContext";
+import { TurnChangeSummary } from "./TurnChangeSummary";
 
 interface Turn {
   turnId: string;
@@ -146,6 +147,7 @@ function TurnView({
           <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} />
         </div>
       ))}
+      {header && header.state !== "running" ? <TurnChangeSummary rows={turn.rows} /> : null}
       {showThinking ? (
         <div className="flex items-center gap-2 text-ui-base text-foreground-subtle">
           <LoaderIcon className="size-4 animate-spin" />

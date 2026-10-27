@@ -10,9 +10,6 @@ import type {
   ChatSendParams,
   ChatStateEvent,
   GitBranches,
-  GitTurnDiff,
-  GitTurnRecord,
-  GitTurnPreview,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -120,13 +117,12 @@ export interface InvokeMap {
   "chat:close": [[sessionKey: string], void];
   "permission:respond": [[interactionId: string, decision: PermissionDecision], void];
   "git:branches": [[cwd: string], GitBranches | null];
+  "git:worktree": [[cwd: string], import("./types.js").GitWorktree | null];
+  "git:diff": [[cwd: string, path: string], string];
+  "git:commit": [[cwd: string, message: string, stageAll: boolean], void];
+  "git:push": [[cwd: string], void];
   "git:switchBranch": [[cwd: string, branch: string], void];
-  "git:isRepository": [[cwd: string], boolean];
   "git:createBranch": [[cwd: string, name: string], void];
-  "git:commit": [[sessionKey: string, files: string[], message: string], void];
-  "git:revertFile": [[sessionKey: string, file: string], void];
-  "git:refreshTurnDiff": [[sessionKey: string], void];
-  "git:previewTurn": [[cwd: string, record: GitTurnRecord], GitTurnPreview];
   /** 有界 UTF-8 文本读取（最多 2 MiB）；二进制、超限或读取失败返回 null。 */
   "fs:readText": [[path: string, maxBytes?: number], string | null];
   "fs:createHtmlPreview": [[path: string, workspacePath?: string], import("./htmlPreview.js").HtmlPreviewLease];
@@ -166,7 +162,6 @@ export interface EventMap {
   "chat:state": ChatStateEvent;
   "chat:commands": SlashCommandsEvent;
   "chat:promptSuggestion": import('./types.js').ChatPromptSuggestionEvent;
-  "git:turnDiff": { sessionKey: string; diff: GitTurnDiff | null; turnId?: string };
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
@@ -218,13 +213,12 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "chat:close",
   "permission:respond",
   "git:branches",
-  "git:switchBranch",
-  "git:isRepository",
-  "git:createBranch",
+  "git:worktree",
+  "git:diff",
   "git:commit",
-  "git:revertFile",
-  "git:refreshTurnDiff",
-  "git:previewTurn",
+  "git:push",
+  "git:switchBranch",
+  "git:createBranch",
   "fs:readText",
   "fs:createHtmlPreview",
   "fs:releaseHtmlPreview",
@@ -256,7 +250,6 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "chat:state",
   "chat:commands",
   "chat:promptSuggestion",
-  "git:turnDiff",
   "permission:requested",
   "permission:resolved",
   "window:fullscreen",

@@ -7,7 +7,6 @@ import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { CompareView } from "../conversation/CompareView";
 import { ConversationView } from "../conversation/ConversationView";
 import { hcode } from "../bridge";
-import { TurnDiffPanel } from "../conversation/TurnDiffPanel";
 import { FilePreviewProvider } from "../conversation/FilePreviewContext";
 import { FilePreviewPanel } from "../conversation/FilePreviewPanel";
 import { FilePreviewLayout } from "../conversation/FilePreviewLayout";
@@ -22,13 +21,11 @@ import { SessionSearchDialog } from "./SessionSearchDialog";
 import { QuickSwitchDialog } from "./QuickSwitchDialog";
 import type { SessionSearchResult } from "@hcode/shared/types";
 import { APP_SHORTCUTS, type AppCommand } from "@hcode/shared/shortcuts";
-import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
 const SIDEBAR_WIDTH = 272;
 
 export function AppShell() {
   const panelWidth = usePanelWidthPreference();
-  const isOfficeMode = useIsOfficeMode();
   const hasBackground = useAppStore((state) => !!state.settings.background.path);
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
@@ -41,14 +38,13 @@ export function AppShell() {
   const sidePanel = useUiStore((state) => state.sidePanel);
   const setSidePanel = useUiStore((state) => state.setSidePanel);
   const panelOwnerExists = useAppStore((state) => !sidePanel || !!state.conversations[sidePanel.viewId]);
-  const diffOpen = !isOfficeMode && sidePanel?.type === "diff" && sidePanel.viewId === conversation?.viewId;
   const filePreview = sidePanel?.type === "file" && (sidePanel.viewId === conversation?.viewId || compareMembers.some((member) => member.viewId === sidePanel.viewId)) ? sidePanel : null;
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ id: string; rowId: number | null; key: number } | null>(null);
   useEffect(() => {
-    if (!panelOwnerExists || (isOfficeMode && sidePanel?.type === "diff")) setSidePanel(null);
-  }, [isOfficeMode, panelOwnerExists, sidePanel, setSidePanel]);
+    if (!panelOwnerExists) setSidePanel(null);
+  }, [panelOwnerExists, setSidePanel]);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
   useGlobalShortcuts(openSearch, openQuickSwitch);
@@ -82,11 +78,7 @@ export function AppShell() {
         <div className={cn("flex min-h-0 min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
           <div className="app-drag h-1 w-full" />
           <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
-            <Header
-              conversation={conversation}
-              diffOpen={diffOpen}
-              onToggleDiff={() => setSidePanel(diffOpen || !conversation ? null : { type: "diff", viewId: conversation.viewId })}
-            />
+            <Header conversation={conversation} />
             {conversation ? (
               <>
                 <FilePreviewLayout preview={filePreview ? (
@@ -104,9 +96,6 @@ export function AppShell() {
                     <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
                   )}
                 </FilePreviewLayout>
-                {diffOpen ? (
-                  <TurnDiffPanel key={conversation.viewId} conversation={conversation} onClose={() => setSidePanel(null)} />
-                ) : null}
               </>
             ) : (
               <EmptyState />

@@ -14,8 +14,6 @@ import type {
   ConversationRow,
   FileInput,
   ForkMode,
-  GitTurnDiff,
-  GitTurnRecord,
   ImageInput,
   NotificationEvent,
   PermissionDecision,
@@ -38,7 +36,6 @@ import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 import { selectConversationWorkspace } from "./conversationWorkspaceActions";
 import { SessionViewSync } from "./sessionViewSync";
-import { discardTurnHistory, loadTurnHistory, saveTurnHistory, turnDiffPatch } from "../conversation/turnHistory";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
 export interface QueuedMessage {
@@ -75,12 +72,6 @@ export interface Conversation {
   /** Claude 实际使用的模型 id（来自 init）。 */
   activeModel?: string;
   usage?: ChatUsage;
-  /** undefined = 尚无本轮记录；null = 正在收集本轮改动。 */
-  turnDiff?: GitTurnDiff | null;
-  currentTurnId?: string;
-  turnHistory: GitTurnRecord[];
-  /** 本轮发送的用户消息，用于生成提交说明。 */
-  turnPrompt?: string;
   /** 用户选择的思考强度（空串 = CLI 默认）；当前模型不支持时不发送。 */
   effort: string;
   codexSpeed: CodexSpeed;
@@ -283,7 +274,6 @@ export const useAppStore = create<AppState>((set, get) => {
       effort: settings.defaultEfforts[agent],
       codexSpeed: settings.codexSpeed,
       queue: [],
-      turnHistory: [],
     };
   };
 
@@ -337,7 +327,6 @@ export const useAppStore = create<AppState>((set, get) => {
     patchConversation(conv.viewId, {
       sessionKey,
       runState: "running",
-      turnPrompt: text,
       runStartedAt: conv.runStartedAt ?? Date.now(),
       error: undefined,
       // 队列已清空时，上次停止 / 出错留下的暂停状态没有意义
@@ -433,10 +422,6 @@ export const useAppStore = create<AppState>((set, get) => {
         });
       }
       if (wasBusy && event.state === "idle") drainQueue(conv.viewId);
-    });
-    hcode.on("git:turnDiff", ({ sessionKey, ...event }) => {
-      const conv = findBySessionKey(sessionKey);
-      if (conv) patchConversation(conv.viewId, turnDiffPatch(conv, event));
     });
     hcode.on("permission:requested", (event) => {
       const conv = findBySessionKey(event.sessionKey);
@@ -559,7 +544,6 @@ export const useAppStore = create<AppState>((set, get) => {
         effort: settings.defaultEfforts[summary.agent],
         codexSpeed: settings.codexSpeed,
         queue,
-        turnHistory: loadTurnHistory({ agent: summary.agent, projectPath: summary.projectPath, sessionId: summary.id }),
         ...(queue.length ? { queuePaused: "stopped" as const } : {}),
       };
       set((state) => ({
@@ -802,7 +786,6 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
       discardPersisted(conv ?? { sessionId: summary.id, projectPath: summary.projectPath });
-      discardTurnHistory({ agent: summary.agent, projectPath: summary.projectPath, sessionId: summary.id });
       if (conv) {
         sessionViews.cancelHistoryLoad(conv.viewId);
         set((state) => {
@@ -909,7 +892,6 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       discardPersisted(conv);
       sessionViews.cancelHistoryLoad(activeViewId);
-      discardTurnHistory(conv);
       drafts.delete(activeViewId);
       imageDrafts.delete(activeViewId);
       fileDrafts.delete(activeViewId);
@@ -951,19 +933,11 @@ export const useAppStore = create<AppState>((set, get) => {
 
 // 排队消息变化时写入 localStorage；按数组引用判断，流式输出时几乎没有开销
 const savedQueues = new Map<string, QueuedMessage[]>();
-const savedHistories = new Map<string, GitTurnRecord[]>();
 useAppStore.subscribe((state) => {
   for (const conv of Object.values(state.conversations)) {
-    if (conv.sessionId && savedHistories.get(conv.viewId) !== conv.turnHistory) {
-      savedHistories.set(conv.viewId, conv.turnHistory);
-      saveTurnHistory(conv, conv.turnHistory);
-    }
     if (!conv.sessionId || conv.compareId || savedQueues.get(conv.viewId) === conv.queue) continue;
     savedQueues.set(conv.viewId, conv.queue);
     saveQueue(conv.sessionId, conv.queue);
-  }
-  for (const viewId of savedHistories.keys()) {
-    if (!state.conversations[viewId]) savedHistories.delete(viewId);
   }
 });
 

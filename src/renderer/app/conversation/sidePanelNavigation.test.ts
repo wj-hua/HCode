@@ -14,7 +14,6 @@ it("文件证据可以返回原协作，关闭不会留下旧返回入口", () =
 });
 it("切换其他会话的文件不能返回之前会话的协作", () => {
   useUiStore.getState().setSidePanel({ type: "collaboration", viewId: "first" });
-  useUiStore.getState().setSidePanel({ type: "diff", viewId: "first" });
   useUiStore.getState().setSidePanel({ type: "file", viewId: "second", source: { type: "file", path: "/other/readme.md", title: "readme" } });
   expect(useUiStore.getState().returnPanel).toBeNull();
 });
