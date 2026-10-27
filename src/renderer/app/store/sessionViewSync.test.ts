@@ -44,7 +44,30 @@ beforeEach(async () => {
   await useAppStore.getState().init();
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it("未打开另一端的新会话也能刷新列表，连续索引通知不会推迟刷新", async () => {
+  vi.useFakeTimers();
+  useAppStore.setState({ expanded: { [summary.projectPath]: true } });
+  invoke.mockImplementation(async channel => {
+    if (channel === "sessions:list") return [summary];
+    if (channel === "projects:list") return [];
+    throw new Error(`未配置的 IPC: ${channel}`);
+  });
+  emitState("running");
+  emitRows("回复中");
+  const changed = () => listeners.get("sessions:indexChanged")!({ projectPaths: [summary.projectPath] });
+  changed();
+  await vi.advanceTimersByTimeAsync(150);
+  changed();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(useAppStore.getState().sessions[summary.projectPath]).toEqual([summary]);
+  expect(useAppStore.getState().conversations).toEqual({});
+  expect(invoke.mock.calls.filter(([channel]) => channel === "sessions:list")).toHaveLength(1);
+  changed();
+  await vi.advanceTimersByTimeAsync(200);
+  expect(invoke.mock.calls.filter(([channel]) => channel === "sessions:list")).toHaveLength(2);
+});
 
 it('后台任务在空闲会话和切换页面时保持详情，结束后同步清除运行数并保留结果', async () => {
   summary.agent = 'claude';

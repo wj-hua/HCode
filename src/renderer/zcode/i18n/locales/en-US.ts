@@ -4,6 +4,10 @@ const enUS: Record<string, string> = {
   'memory.subtitle': 'Long-term memory across CLIs and projects, off by default',
   'memory.enable': 'Allow AI to save and read long-term memory',
   'memory.hint': 'Applies to ordinary Claude/Codex chats in HCode only. Existing Codex threads can read snapshots; start a new thread to save memories. Uses a few extra tokens. Turning this off stops further injection and tool access; existing history is retained.',
+  'memory.instructionsTitle': 'How to ask AI to save a memory',
+  'memory.instructions': 'After enabling memory, tell AI what to remember in a supported ordinary chat and whether to save it globally or for the current project. Save lasting preferences and project conventions, not passwords, keys, or other sensitive information.',
+  'memory.globalExample': 'For example: “Save to global memory: reply to me in Chinese.”',
+  'memory.projectExample': 'For example: “Save to this project’s memory: prefer the standard library.” Project memories must be saved in a project chat.',
   'memory.localOnly': 'Manage memories in HCode on your computer.',
   'memory.count': '{count} / {limit} memories',
   'memory.add': 'Add memory',
@@ -23,8 +27,6 @@ const enUS: Record<string, string> = {
   'memory.user': 'User',
   'memory.delete': 'Delete',
   'memory.confirmDelete': 'Permanently delete this memory?',
-  'memory.enabled': 'Memory enabled',
-  'memory.composerHint': 'Ordinary chats read long-term memory (Settings → Notifications & system → Memory)',
   "startPlan.recommendation.subagentDescription":
     "Your Start Plan has quota available for {model}. Switch this subagent’s model to the Start Plan?",
   "startPlan.recommendation.preferenceSaveFailed":

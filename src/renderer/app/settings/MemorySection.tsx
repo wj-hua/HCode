@@ -89,6 +89,12 @@ export function MemorySection() {
       </div>
       <Switch id="memory-enabled" checked={enabled} disabled={busy || isRemote} onCheckedChange={value => void run(() => updateSettings({ memoryEnabled: value }))} />
     </div>
+    <div className="flex flex-col gap-2 px-4 pb-3 text-ui-sm leading-relaxed text-foreground-subtle">
+      <h4 className="font-medium text-foreground">{t('instructionsTitle')}</h4>
+      <p>{t('instructions')}</p>
+      <p>{t('globalExample')}</p>
+      <p>{t('projectExample')}</p>
+    </div>
     {isRemote ? <p className="px-4 py-3 text-ui-sm text-foreground-subtle">{t('localOnly')}</p> : <div className="flex flex-col gap-4 p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-ui-sm text-foreground-subtle">{t('count', { count: entries.length, limit: MEMORY_LIMIT })}</span>

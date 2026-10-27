@@ -1,8 +1,9 @@
 // 会话头部：参照 ZCode WorkspaceHeader（项目名 / 会话标题 + 右侧操作）。
 import { presentationTitle } from "@hcode/shared/collaborationPresentation";
 import { usePresentationStore } from "../collaboration/presentationStore";
-import { ExternalLinkIcon, FolderIcon, GitBranchIcon, PanelLeftIcon, PanelRightIcon, SquareTerminalIcon } from "lucide-react";
+import { ExternalLinkIcon, FolderIcon, GitBranchIcon, PaletteIcon, PanelLeftIcon, PanelRightIcon, SquareTerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
 import { AGENTS } from "@hcode/shared/agents";
@@ -19,6 +20,8 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const fullscreen = useAppStore((state) => state.fullscreen);
   const setSidebarCollapsed = useAppStore((state) => state.setSidebarCollapsed);
+  const theme = useAppStore((state) => state.settings.theme);
+  const updateSettings = useAppStore((state) => state.updateSettings);
   const summary = useAppStore((state) =>
     conversation?.sessionId
       ? state.sessions[conversation.projectPath]?.find((item) => item.id === conversation.sessionId)
@@ -108,6 +111,24 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
             </ControlHintTooltip>
           ) : null}
         </div>
+      ) : null}
+      {isRemote ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-md" className="app-no-drag shrink-0 text-foreground-subtle" aria-label="主题">
+              <PaletteIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuRadioGroup value={theme} onValueChange={(value) => {
+              if (value === "system" || value === "dark" || value === "light") void updateSettings({ theme: value });
+            }}>
+              <DropdownMenuRadioItem value="system">跟随系统</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">深色主题</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="light">浅色主题</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </header>
   );

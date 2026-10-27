@@ -134,7 +134,6 @@ export function Composer({
   const agentStatuses = useAppStore((state) => state.agentStatuses);
   const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
   const agentDelegation = useAppStore((state) => state.settings.agentDelegation);
-  const memoryEnabled = useAppStore((state) => state.settings.memoryEnabled);
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
   // 已有对比组的会话固定按普通对话发送（由 sendGroup 分发到组内每个 CLI）
   const selectedMode = useWorkMode(state => state.views[conversation.viewId]?.mode);
@@ -672,7 +671,6 @@ export function Composer({
             </ControlHintTooltip>
             {!conversation.compareId && !isRemote ? <WorkModeMenu mode={workMode} onMode={mode => useWorkMode.getState().select(conversation.viewId, mode)} onClose={restoreInputFocus} /> : null}
             {agentDelegation && !conversation.compareId && (conversation.agent === "claude" || conversation.agent === "codex") ? <span className="text-ui-sm text-foreground-subtle" title="普通对话可调用其他 AI（设置 → AI 委派）">委派已开启</span> : null}
-            {memoryEnabled && workMode === 'chat' && (conversation.agent === 'claude' || conversation.agent === 'codex') ? <span className="text-ui-sm text-foreground-subtle" title={intl.formatMessage({ id: 'memory.composerHint' })}>{intl.formatMessage({ id: 'memory.enabled' })}</span> : null}
             <DropdownMenu>
               <ControlHintTooltip title="权限模式">
                 <DropdownMenuTrigger asChild>

@@ -5,6 +5,15 @@ import type { RemoteOnlyInvokeMap, RemoteSessionSnapshot } from "@hcode/shared/r
 import type { PermissionRequestEvent, Settings, SettingsPatch } from "@hcode/shared/types";
 
 const HEADERS = { "Content-Type": "application/json", "X-HCode-Remote": "1" };
+const REMOTE_THEME_KEY = "hcode-remote-theme";
+
+function readRemoteTheme(): Settings["theme"] {
+  try {
+    const theme = localStorage.getItem(REMOTE_THEME_KEY);
+    if (theme === "system" || theme === "light" || theme === "dark") return theme;
+  } catch { /* 浏览器禁用存储时仍可在当前页面切换主题。 */ }
+  return "dark";
+}
 
 /** 本机专用功能在远程返回空结果，界面按“没有数据”显示，不弹错误。 */
 const EMPTY_RESULTS: Partial<Record<InvokeChannel, unknown>> = {
@@ -220,10 +229,13 @@ export function createRemoteBridge(): HCodeBridge & {
       if (channel in EMPTY_RESULTS) return EMPTY_RESULTS[channel] as never;
       switch (channel) {
         case "settings:get":
-          settings ??= await call(channel, args) as Settings;
+          settings ??= { ...await call(channel, args) as Settings, theme: readRemoteTheme() };
           return settings as never;
         case "settings:set":
-          settings = mergeLocal(settings ?? await call("settings:get", []) as Settings, args[0] as SettingsPatch);
+          settings = mergeLocal(settings ?? { ...await call("settings:get", []) as Settings, theme: readRemoteTheme() }, args[0] as SettingsPatch);
+          if ((args[0] as SettingsPatch).theme) {
+            try { localStorage.setItem(REMOTE_THEME_KEY, settings.theme); } catch { /* 存储不可用时只保留当前页面的设置。 */ }
+          }
           return settings as never;
         case "app:copyText":
           await navigator.clipboard.writeText(args[0] as string);

@@ -150,6 +150,7 @@ async function bootstrap() {
     turnOutcome: (event) => execution?.acceptOutcome(event),
     rows: (sessionKey, ops) => send("chat:rows", { sessionKey, ops }),
     state: (event) => {
+      agents.observeState(event);
       if (event.sessionId) execution?.observeIdentity(event.sessionKey, event.agent, event.sessionId);
       if (event.state === "running" || event.backgroundTasks) runningSessions.add(event.sessionKey);
       else runningSessions.delete(event.sessionKey);
@@ -176,7 +177,7 @@ async function bootstrap() {
     claude,
     codex,
     agy,
-  });
+  }, (projectPaths) => send("sessions:indexChanged", { projectPaths }));
   quota = new QuotaService(agents, (snapshot) => send("quota:updated", snapshot));
   const extensions = new ExtensionsService(claude, codex, buildAgentEnv);
   const requireSession = (sessionKey: string) => {
@@ -262,6 +263,7 @@ async function bootstrap() {
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
   handle("sessions:delete", async (ref) => {
     await agents.get(ref.agent).deleteSession(ref.id, ref.projectPath);
+    agents.forgetSession(ref);
     return store.removeSessionPin(ref);
   });
   handle("sessions:fork", (params) => {

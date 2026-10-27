@@ -210,8 +210,8 @@ function liveSummary(conv: Conversation & { sessionId: string }): SessionSummary
 }
 
 /**
- * CLI 的会话索引可能滞后（Codex 新线程要等本轮结束才刷新列表），
- * 把已打开但列表里还没有的会话补进去，否则切到别的会话后侧栏里就找不到它了。
+ * CLI 历史索引可能滞后；保留本端已打开会话的占位，避免刷新时丢失侧栏入口。
+ * 跨端的新会话由主进程列表统一补入，不依赖本端是否打开过。
  */
 function withLiveSessions(
   list: SessionSummary[],
@@ -436,8 +436,9 @@ export const useAppStore = create<AppState>((set, get) => {
     });
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     hcode.on("sessions:indexChanged", () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
+      if (refreshTimer) return;
       refreshTimer = setTimeout(() => {
+        refreshTimer = null;
         void get().refreshProjects();
         for (const [path, expanded] of Object.entries(get().expanded)) {
           if (expanded) void get().loadSessions(path);
