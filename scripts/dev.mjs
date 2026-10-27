@@ -15,6 +15,7 @@ const devUrl = vite.resolvedUrls.local[0];
 console.log(`[dev] renderer: ${devUrl}`);
 
 const { execFileSync } = await import("node:child_process");
+execFileSync(process.execPath, ["scripts/prepare-terminal.mjs"], { cwd: root, stdio: "inherit" });
 execFileSync(process.execPath, ["scripts/build-validation-runtime.mjs"], { cwd: root, stdio: "inherit" });
 const tsup = spawn("pnpm", ["exec", "tsup", "--watch"], { cwd: root, stdio: "inherit" });
 

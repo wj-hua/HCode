@@ -8,6 +8,7 @@ import type { CodeViewerSource } from "@/lib/codeViewer.js";
 
 type SidePanelState =
   | { type: "collaboration"; viewId: string; intent?: "plan" | "records"; runId?: string; citation?: ExpertClaimRef & { label: string } }
+  | { type: "terminal"; viewId: string; workspacePath: string }
   | { type: "file"; viewId: string; source: CodeViewerSource };
 
 interface UiState {

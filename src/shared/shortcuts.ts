@@ -2,7 +2,7 @@
 export type AppCommand =
   | "settings" | "newChat" | "openProject" | "closeView"
   | "toggleSidebar" | "quickSwitch" | "search" | "focusComposer"
-  | "copyLastReply" | "switchView";
+  | "copyLastReply" | "switchView" | "toggleTerminal";
 
 export interface ShortcutDefinition {
   command: AppCommand;
@@ -18,6 +18,7 @@ export const APP_SHORTCUTS: readonly ShortcutDefinition[] = [
   { command: "newChat", label: "新建会话", accelerator: "Command+N", key: "n" },
   { command: "closeView", label: "关闭当前会话", accelerator: "Command+W", key: "w" },
   { command: "toggleSidebar", label: "切换侧边栏", accelerator: "Command+B", key: "b" },
+  { command: "toggleTerminal", label: "切换终端", accelerator: "Command+J", key: "j" },
   { command: "quickSwitch", label: "快速切换…", accelerator: "Command+K", key: "k" },
   { command: "search", label: "搜索会话全文…", accelerator: "Command+F", key: "f" },
   { command: "focusComposer", label: "聚焦输入框", accelerator: "Command+L", key: "l" },

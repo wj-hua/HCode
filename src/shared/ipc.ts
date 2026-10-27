@@ -39,6 +39,10 @@ import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
+  "terminal:create": [[id: string, cwd: string, cols: number, rows: number], string];
+  "terminal:write": [[id: string, data: string], void];
+  "terminal:resize": [[id: string, cols: number, rows: number], void];
+  "terminal:close": [[id: string], void];
   "agentInvocation:list": [[sessionKey: string, sessionId?: string], import('./agentInvocation.js').AgentInvocation[]];
   "agentInvocation:cancel": [[id: string], void];
   "collaboration:presentation": [[], import("./collaborationPresentation.js").PresentationCatalog];
@@ -157,6 +161,7 @@ export interface InvokeMap {
 
 /** 主进程 → 渲染进程事件 */
 export interface EventMap {
+  "terminal:event": { id: string; data?: string; exitCode?: number };
   "agentInvocation:updated": import('./agentInvocation.js').AgentInvocation;
   "collaboration:codeDraftUpdated": CodeDraft;
   "collaboration:draftUpdated": ResearchDraft;
@@ -185,6 +190,7 @@ export interface HCodeBridge {
 }
 
 export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
+  "terminal:create", "terminal:write", "terminal:resize", "terminal:close",
   "agentInvocation:list", "agentInvocation:cancel",
   "collaboration:codeDraftCreate", "collaboration:codeDraftList", "collaboration:codeDraftUpdate", "collaboration:codeDraftPrepare", "collaboration:codeDraftConfirm", "collaboration:codeDraftCancel", "collaboration:codeDraftAbandon",
   "collaboration:expertDraftCreate", "collaboration:expertDraftList", "collaboration:expertDraftUpdate", "collaboration:expertDraftPrepare", "collaboration:expertDraftConfirm", "collaboration:expertDraftCancel", "collaboration:expertDraftAbandon",
@@ -252,6 +258,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
+  "terminal:event",
   "agentInvocation:updated",
   "collaboration:codeDraftUpdated",
   "collaboration:draftUpdated", "collaboration:expertDraftUpdated",

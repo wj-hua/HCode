@@ -1,7 +1,7 @@
 // 会话头部：参照 ZCode WorkspaceHeader（项目名 / 会话标题 + 右侧操作）。
 import { presentationTitle } from "@hcode/shared/collaborationPresentation";
 import { usePresentationStore } from "../collaboration/presentationStore";
-import { FolderIcon, GitBranchIcon, PanelLeftIcon, SquareTerminalIcon } from "lucide-react";
+import { ExternalLinkIcon, FolderIcon, GitBranchIcon, PanelLeftIcon, PanelRightIcon, SquareTerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { cn } from "@/components/lib/utils.js";
@@ -12,7 +12,7 @@ import { shortenHome } from "../format";
 import { useAppStore, type Conversation } from "../store/appStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
-export function Header({ conversation }: { conversation: Conversation | undefined }) {
+export function Header({ conversation, onToggleTerminal, terminalVisible, onToggleSideTerminal, sideTerminalVisible }: { conversation: Conversation | undefined; onToggleTerminal: () => void; terminalVisible: boolean; onToggleSideTerminal: () => void; sideTerminalVisible: boolean }) {
   const project = useAppStore((state) => state.projects.find((item) => item.path === conversation?.projectPath));
   const outsideProject = project?.purpose === "conversation";
   const isOfficeMode = useIsOfficeMode();
@@ -72,6 +72,8 @@ export function Header({ conversation }: { conversation: Conversation | undefine
       )}
       {conversation ? (
         <div className="app-no-drag flex shrink-0 items-center gap-0.5">
+          {!isOfficeMode ? <ControlHintTooltip title={terminalVisible ? "收起内置终端" : "打开内置终端"} side="bottom"><Button variant="ghost" size="icon-md" className="text-foreground-subtle" aria-label={terminalVisible ? "收起内置终端" : "打开内置终端"} aria-pressed={terminalVisible} onClick={onToggleTerminal}><SquareTerminalIcon /></Button></ControlHintTooltip> : null}
+          {!isOfficeMode ? <ControlHintTooltip title={sideTerminalVisible ? "收起侧边终端" : "打开侧边终端"} side="bottom"><Button variant="ghost" size="icon-md" className="text-foreground-subtle" aria-label={sideTerminalVisible ? "收起侧边终端面板" : "打开侧边终端"} aria-pressed={sideTerminalVisible} onClick={onToggleSideTerminal}><PanelRightIcon /></Button></ControlHintTooltip> : null}
           <ControlHintTooltip title="在 Finder 中显示" side="bottom">
             <Button
               variant="ghost"
@@ -101,7 +103,7 @@ export function Header({ conversation }: { conversation: Conversation | undefine
                   )
                 }
               >
-                <SquareTerminalIcon />
+                <ExternalLinkIcon />
               </Button>
             </ControlHintTooltip>
           ) : null}

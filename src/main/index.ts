@@ -39,6 +39,7 @@ import { CodeDraftService } from "./collaboration/drafts/codeDraftService.js";
 import { ExpertDraftService } from "./collaboration/drafts/expertDraftService.js";
 import { ResearchDraftService } from "./collaboration/drafts/researchDraftService.js";
 import { CollaborationRepository } from "./collaboration/collaborationRepository.js";
+import { TerminalService } from "./terminalService.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -94,6 +95,11 @@ async function bootstrap() {
   shellEnv = (await captureLoginShellEnvSnapshot()) ?? {};
   const store = new AppStore(app.getPath("userData"));
   const conversationWorkspace = new ConversationWorkspace(app.getPath("userData"));
+  const terminals = new TerminalService(event => send("terminal:event", event));
+  handle("terminal:create", (id, cwd, cols, rows) => terminals.create(id, cwd, buildAgentEnv(), cols, rows));
+  handle("terminal:write", (id, data) => terminals.write(id, data));
+  handle("terminal:resize", (id, cols, rows) => terminals.resize(id, cols, rows));
+  handle("terminal:close", id => terminals.close(id));
   let quota: QuotaService | null = null;
   let execution: SessionExecutionService | null = null;
 
@@ -482,12 +488,24 @@ async function bootstrap() {
 
   agents.startWatching();
   if (process.platform === "darwin") installApplicationMenu(() => mainWindow, store.settings.shortcuts);
-  mainWindow = createMainWindow(store);
+  const openMainWindow = () => {
+    const window = createMainWindow(store);
+    window.on("closed", () => terminals.dispose());
+    window.webContents.on("render-process-gone", () => terminals.dispose());
+    window.webContents.on("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => {
+      if (isMainFrame && !_inPlace) terminals.dispose();
+    });
+    return window;
+  };
+  mainWindow = openMainWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(store);
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = openMainWindow();
+    }
   });
   app.on("before-quit", () => {
+    terminals.dispose();
     invocations.dispose(); execution?.dispose();
     drafts.dispose(); expertDrafts.dispose(); codeDrafts.dispose();
     collaboration.dispose();

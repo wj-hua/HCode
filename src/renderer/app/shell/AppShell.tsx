@@ -15,6 +15,9 @@ import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 import { Header } from "./Header";
+import { TerminalPanel } from "./TerminalPanel";
+import { TerminalResizeHandle } from "../terminal/TerminalResizeHandle";
+import { SideTerminalPanel } from "../terminal/SideTerminalPanel";
 import { AppBackground } from "./AppBackground";
 import { Sidebar } from "./Sidebar";
 import { SessionSearchDialog } from "./SessionSearchDialog";
@@ -40,6 +43,19 @@ export function AppShell() {
   const panelOwnerExists = useAppStore((state) => !sidePanel || !!state.conversations[sidePanel.viewId]);
   const filePreview = sidePanel?.type === "file" && (sidePanel.viewId === conversation?.viewId || compareMembers.some((member) => member.viewId === sidePanel.viewId)) ? sidePanel : null;
   const [searchOpen, setSearchOpen] = useState(false);
+  const [terminalProjects, setTerminalProjects] = useState<string[]>([]);
+  const [sideTerminalProjects, setSideTerminalProjects] = useState<string[]>([]);
+  const [terminalVisible, setTerminalVisible] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(256);
+  const openWorkspacePaths = useAppStore(useShallow(state => [...new Set(Object.values(state.conversations).map(item => item.projectPath))]));
+  useEffect(() => {
+    setTerminalProjects(current => current.filter(path => openWorkspacePaths.includes(path)));
+    setSideTerminalProjects(current => current.filter(path => openWorkspacePaths.includes(path)));
+  }, [openWorkspacePaths]);
+  useEffect(() => {
+    if (!terminalVisible || !conversation) return;
+    setTerminalProjects(projects => projects.includes(conversation.projectPath) ? projects : [...projects, conversation.projectPath]);
+  }, [terminalVisible, conversation?.projectPath]);
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [searchTarget, setSearchTarget] = useState<{ id: string; rowId: number | null; key: number } | null>(null);
   useEffect(() => {
@@ -47,7 +63,28 @@ export function AppShell() {
   }, [panelOwnerExists, setSidePanel]);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
-  useGlobalShortcuts(openSearch, openQuickSwitch);
+  const toggleTerminal = useCallback(() => {
+    if (!useAppStore.getState().activeViewId) return;
+    setTerminalVisible(value => !value);
+  }, []);
+  const terminalEmpty = useCallback((path: string) => {
+    setTerminalProjects(current => current.filter(item => item !== path));
+    const state = useAppStore.getState();
+    if (state.activeViewId && state.conversations[state.activeViewId]?.projectPath === path) setTerminalVisible(false);
+  }, []);
+  const sideTerminalVisible = sidePanel?.type === "terminal" && sidePanel.workspacePath === conversation?.projectPath;
+  const toggleSideTerminal = () => {
+    if (!conversation) return;
+    if (sideTerminalVisible) { setSidePanel(null); return; }
+    setSideTerminalProjects(current => current.includes(conversation.projectPath) ? current : [...current, conversation.projectPath]);
+    setSidePanel({ type: "terminal", viewId: conversation.viewId, workspacePath: conversation.projectPath });
+  };
+  const sideTerminalEmpty = useCallback((path: string) => {
+    setSideTerminalProjects(current => current.filter(item => item !== path));
+    const panel = useUiStore.getState().sidePanel;
+    if (panel?.type === "terminal" && panel.workspacePath === path) useUiStore.getState().setSidePanel(null);
+  }, []);
+  useGlobalShortcuts(openSearch, openQuickSwitch, toggleTerminal);
   // 切到有未读标记的会话、或窗口重新聚焦时清除未读
   const activeViewId = conversation?.viewId;
   const activeUnread = conversation?.unread;
@@ -78,18 +115,15 @@ export function AppShell() {
         <div className={cn("flex min-h-0 min-w-[320px] flex-1 flex-col p-1 pt-0", !collapsed && "pl-0")}>
           <div className="app-drag h-1 w-full" />
           <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border", !hasBackground && "bg-background")}>
-            <Header conversation={conversation} />
+            <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
             {conversation ? (
               <>
-                <FilePreviewLayout preview={filePreview ? (
-                  <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
-                    <FilePreviewPanel
-                      key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`}
-                      source={filePreview.source}
-                      onClose={() => setSidePanel(null)}
-                    />
-                  </FilePreviewProvider>
-                ) : null}>
+                <FilePreviewLayout preview={<>
+                  {filePreview ? <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
+                    <FilePreviewPanel key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`} source={filePreview.source} onClose={() => setSidePanel(null)} />
+                  </FilePreviewProvider> : null}
+                  {sideTerminalProjects.map(path => <SideTerminalPanel key={path} cwd={path} visible={!!sideTerminalVisible && path === conversation.projectPath} onHide={() => setSidePanel(null)} onEmpty={sideTerminalEmpty} />)}
+                </>}>
                   {compareMembers.length > 1 ? (
                     <CompareView members={compareMembers} active={conversation} />
                   ) : (
@@ -100,6 +134,8 @@ export function AppShell() {
             ) : (
               <EmptyState />
             )}
+            {terminalVisible && conversation ? <TerminalResizeHandle height={terminalHeight} setHeight={setTerminalHeight} /> : null}
+            {terminalProjects.map(path => <TerminalPanel key={path} cwd={path} height={terminalHeight} visible={terminalVisible && conversation?.projectPath === path} onHide={() => setTerminalVisible(false)} onEmpty={terminalEmpty} />)}
           </section>
         </div>
       </div>
@@ -117,7 +153,7 @@ export function AppShell() {
   );
 }
 
-function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void) {
+function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void, toggleTerminal: () => void) {
   useEffect(() => {
     const runCommand = (command: AppCommand, index?: number): boolean => {
       const state = useAppStore.getState();
@@ -141,6 +177,9 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void)
           return true;
         case "toggleSidebar":
           state.setSidebarCollapsed(!state.sidebarCollapsed);
+          return true;
+        case "toggleTerminal":
+          toggleTerminal();
           return true;
         case "quickSwitch":
           openQuickSwitch();
@@ -191,5 +230,5 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void)
       window.removeEventListener("keydown", onKeyDown);
       offMenuCommand();
     };
-  }, [openSearch, openQuickSwitch]);
+  }, [openSearch, openQuickSwitch, toggleTerminal]);
 }

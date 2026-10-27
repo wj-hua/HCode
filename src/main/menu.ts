@@ -61,6 +61,7 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null, ov
       label: "视图",
       submenu: [
         shortcut("toggleSidebar"),
+        shortcut("toggleTerminal"),
         shortcut("quickSwitch"),
         shortcut("search"),
         shortcut("focusComposer"),

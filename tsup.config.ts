@@ -4,7 +4,7 @@ const shared = {
   platform: "node" as const,
   target: "node22",
   sourcemap: true,
-  external: ["electron"],
+  external: ["electron", "node-pty"],
   // 保留 node: 前缀：node:sqlite 只能带前缀导入
   removeNodeProtocol: false,
   // SDK 只依赖 Node 内置模块，打进 main 包；运行时通过 pathToClaudeCodeExecutable 使用用户安装的 claude
