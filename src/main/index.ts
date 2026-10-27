@@ -9,7 +9,7 @@ import { MemoryRepository } from './memory/memoryRepository.js';
 import { MemoryService } from './memory/memoryService.js';
 import { mergeHosted } from './sessions/researchRuntime.js';
 import { pathToFileURL } from "node:url";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerSaveBlocker, protocol, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerMonitor, powerSaveBlocker, protocol, shell } from "electron";
 import type { EventChannel, EventMap, InvokeChannel, InvokeMap } from "../shared/ipc.js";
 import { AGENTS } from "../shared/agents.js";
 import { BACKGROUND_IMAGE_EXTENSIONS, BACKGROUND_VIDEO_EXTENSIONS, getDefaultModel } from "../shared/types.js";
@@ -534,6 +534,7 @@ async function bootstrap() {
 
   agents.startWatching();
   void remote.apply();
+  powerMonitor.on("resume", () => remote?.reconnect());
   if (process.platform === "darwin") installApplicationMenu(() => mainWindow, store.settings.shortcuts);
   const openMainWindow = () => {
     const window = createMainWindow(store);

@@ -25,8 +25,8 @@ const EMPTY_RESULTS: Partial<Record<InvokeChannel, unknown>> = {
 
 export class RemoteUnauthorizedError extends Error {}
 
-async function post(path: string, body: unknown): Promise<unknown> {
-  const response = await fetch(path, { method: "POST", headers: HEADERS, credentials: "same-origin", body: JSON.stringify(body) });
+async function post(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(path, { method: "POST", headers: HEADERS, credentials: "same-origin", body: JSON.stringify(body), signal });
   const data = await response.json().catch(() => ({})) as { ok?: boolean; result?: unknown; error?: string };
   if (response.status === 401 && path === "api/invoke") throw new RemoteUnauthorizedError(data.error ?? "需要登录");
   if (!response.ok || !data.ok) throw new Error(data.error ?? `请求失败（${response.status}）`);
@@ -34,7 +34,7 @@ async function post(path: string, body: unknown): Promise<unknown> {
 }
 
 export function remoteLogin(token: string): Promise<unknown> {
-  return post("api/login", { token });
+  return post("api/login", { token }, AbortSignal.timeout(15_000));
 }
 
 /** 浅合并到第二层，与主进程按 CLI 合并设置的效果一致。 */
@@ -51,8 +51,13 @@ function mergeLocal(settings: Settings, patch: SettingsPatch): Settings {
 }
 
 type Frame = { channel: EventChannel; payload: unknown; id: number };
+export type RemoteConnectionState = "connecting" | "connected" | "disconnected";
 
-export function createRemoteBridge(): HCodeBridge & { connect(): Promise<void> } {
+export function createRemoteBridge(): HCodeBridge & {
+  connect(signal?: AbortSignal): Promise<void>;
+  disconnect(): void;
+  onConnectionChange(listener: (state: RemoteConnectionState) => void): () => void;
+} {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const emit = (channel: EventChannel, payload: unknown) => {
     for (const listener of listeners.get(channel) ?? []) listener(payload);
@@ -63,10 +68,18 @@ export function createRemoteBridge(): HCodeBridge & { connect(): Promise<void> }
   const floors = new Map<string, number>();
   let buffer: Frame[] | null = null;
   let source: EventSource | null = null;
+  let eventRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let syncGeneration = 0;
+  let connection: RemoteConnectionState = "disconnected";
+  const connectionListeners = new Set<(state: RemoteConnectionState) => void>();
+  const setConnection = (state: RemoteConnectionState) => {
+    connection = state;
+    for (const listener of connectionListeners) listener(state);
+  };
 
   const call = async (channel: string, args: unknown[]) => {
     try {
-      return await post("api/invoke", { channel, args });
+      return await post("api/invoke", { channel, args }, channel === "chat:live" || channel === "chat:snapshot" ? AbortSignal.timeout(15_000) : undefined);
     } catch (error) {
       // 口令被重新生成或电脑上关闭了远程操控：回到登录页。
       if (error instanceof RemoteUnauthorizedError) location.reload();
@@ -86,12 +99,14 @@ export function createRemoteBridge(): HCodeBridge & { connect(): Promise<void> }
     emit(channel, payload);
   };
 
-  const resync = async () => {
+  const resync = async (events: EventSource) => {
+    const generation = ++syncGeneration;
     buffer ??= [];
     try {
       const live = await call("chat:live", []) as RemoteOnlyInvokeMap["chat:live"][1];
       const snapshots = await Promise.all(live.map((state) =>
         (call("chat:snapshot", [state.sessionKey]) as Promise<RemoteSessionSnapshot | null>).then((snapshot) => ({ state, snapshot }))));
+      if (source !== events || generation !== syncGeneration) return;
       floors.clear();
       const stale = new Map(pendingPermissions);
       for (const { state, snapshot } of snapshots) {
@@ -111,9 +126,19 @@ export function createRemoteBridge(): HCodeBridge & { connect(): Promise<void> }
         emit("permission:resolved", { sessionKey, interactionId });
       }
       emit("sessions:indexChanged", { projectPaths: [] });
+      setConnection("connected");
     } catch {
-      // 下一次重连会再取快照
+      // SSE 已恢复但快照请求仍失败时也要继续恢复，不能等下一次断线。
+      if (source === events && generation === syncGeneration) {
+        setConnection("disconnected");
+        if (eventRetryTimer) clearTimeout(eventRetryTimer);
+        eventRetryTimer = setTimeout(() => {
+          eventRetryTimer = null;
+          if (source === events) openEvents();
+        }, 3000);
+      }
     } finally {
+      if (source !== events || generation !== syncGeneration) return;
       const frames = buffer ?? [];
       buffer = null;
       for (const frame of frames) deliver(frame);
@@ -121,29 +146,68 @@ export function createRemoteBridge(): HCodeBridge & { connect(): Promise<void> }
   };
 
   const openEvents = () => {
+    if (eventRetryTimer) clearTimeout(eventRetryTimer);
+    eventRetryTimer = null;
     source?.close();
+    syncGeneration++;
+    buffer = null;
+    setConnection("connecting");
     const events = new EventSource("api/events");
     source = events;
     // 每次（重新）连上都会先收到 hello，在此对齐断线期间错过的内容。
-    events.addEventListener("hello", () => void resync());
+    events.addEventListener("hello", () => {
+      if (source !== events) return;
+      if (eventRetryTimer) clearTimeout(eventRetryTimer);
+      eventRetryTimer = null;
+      setConnection("connecting");
+      void resync(events);
+    });
     for (const channel of EVENT_CHANNELS) {
       events.addEventListener(channel, (message) => {
+        if (source !== events) return;
         const frame = { channel, payload: JSON.parse((message as MessageEvent<string>).data), id: Number((message as MessageEvent).lastEventId) || 0 };
         if (buffer) buffer.push(frame);
         else deliver(frame);
       });
     }
     events.onerror = () => {
+      if (source !== events) return;
+      syncGeneration++;
+      setConnection("disconnected");
       if (events.readyState !== EventSource.CLOSED) return;
       // 浏览器不再自动重连（如服务返回 401）：检查登录后重新连接。
-      setTimeout(() => {
-        if (source === events) void call("chat:live", []).then(openEvents, () => setTimeout(openEvents, 5000));
+      eventRetryTimer = setTimeout(() => {
+        eventRetryTimer = null;
+        if (source !== events) return;
+        void call("chat:live", []).then(
+          () => { if (source === events) openEvents(); },
+          () => {
+            if (source === events) eventRetryTimer = setTimeout(() => {
+              eventRetryTimer = null;
+              if (source === events) openEvents();
+            }, 5000);
+          },
+        );
       }, 3000);
     };
   };
 
   return {
     remote: true,
+    onConnectionChange(listener) {
+      connectionListeners.add(listener);
+      listener(connection);
+      return () => { connectionListeners.delete(listener); };
+    },
+    disconnect() {
+      source?.close();
+      syncGeneration++;
+      source = null;
+      buffer = null;
+      if (eventRetryTimer) clearTimeout(eventRetryTimer);
+      eventRetryTimer = null;
+      setConnection("disconnected");
+    },
     platform: "linux",
     getPathForFile: () => null,
     on(channel, listener) {
@@ -176,8 +240,11 @@ export function createRemoteBridge(): HCodeBridge & { connect(): Promise<void> }
       }
     },
     /** 登录有效时打开事件流；未登录抛出 RemoteUnauthorizedError。 */
-    async connect() {
-      await post("api/invoke", { channel: "chat:live", args: [] });
+    async connect(signal) {
+      setConnection("connecting");
+      const timeout = AbortSignal.timeout(15_000);
+      await post("api/invoke", { channel: "chat:live", args: [] }, signal ? AbortSignal.any([signal, timeout]) : timeout);
+      signal?.throwIfAborted();
       openEvents();
     },
   };

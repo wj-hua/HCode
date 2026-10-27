@@ -123,6 +123,10 @@ export class RemoteControlService {
     this.stop();
   }
 
+  reconnect() {
+    this.tunnel.reconnect();
+  }
+
   private async applyNow() {
     const config = this.deps.config();
     if (!config.enabled) {

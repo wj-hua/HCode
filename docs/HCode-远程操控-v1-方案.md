@@ -74,7 +74,8 @@ remoteControl: {
   - `POST /api/login`：常量时间比较口令（`crypto.timingSafeEqual`）；成功下发 `HttpOnly; SameSite=Strict` 的随机会话 Cookie，代理声明 HTTPS 时附加 `Secure`，路径由代理前缀决定。会话仅存内存、7 天过期、应用重启失效。登录失败共用限流：每分钟最多 5 次。
   - `POST /api/invoke`：校验 Cookie 和自定义头 `X-HCode-Remote: 1`（防 CSRF），请求体 `{ channel, args }`，返回 `{ ok, result }` 或 `{ ok: false, error }`。请求体上限为 30 MiB。
   - `GET /api/events`：SSE，`event: <channel>` + `data: <json>`；每 15 秒发注释心跳。
-- `tunnel.ts`：`child_process.spawn("ssh", ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-R", `${remoteBind}:127.0.0.1:${localPort}`, sshHost])`。使用登录 shell 环境中的 `ssh`；退出后按 2s / 5s / 15s / 30s 退避重连；`BatchMode=yes` 避免弹出交互密码。stderr 只记录错误类型，不记录服务器地址和用户名。
+- `tunnel.ts`：使用系统 `/usr/bin/ssh`，开启 `ExitOnForwardFailure=yes`、`BatchMode=yes`，以 `ServerAliveInterval=5` / `ServerAliveCountMax=2` 检测失联。禁用 SSH 主连接复用、持久化与后台运行，使隧道归当前子进程管理。普通失败按 1s / 2s / 5s / 10s 退避；远端转发失败时每 2s 重试，等待旧监听释放。stderr 只归纳错误类型，不保存原始输出。
+- 网络恢复：每 2s 检查非回环网卡地址变化，稳定 2s 后重建连接；系统唤醒也触发恢复，窗口关闭后仍然有效。地址未变化的路由或代理切换由 SSH 心跳兜底。重建时先结束旧进程，2s 未退出则强制结束，收到关闭通知后才建立新连接。认证/转发阶段另有 20s 总超时。
 - `index.ts`：组合 server + tunnel，维护状态 `{ state, clients, error }`，变化时向本机窗口发 `remote:status` 事件。
 
 ### 3.3 接入现有 IPC
@@ -133,6 +134,7 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
   - `getPathForFile` → 返回 `null`（附件自动走已有的 `fs:stageAttachment` 上传分支，`Composer.tsx` 已支持）。
   - 新增 `remote: boolean` 标记，供界面隐藏本机功能。
 - 未登录时（invoke 返回 401）显示一个只有口令输入框的登录页。
+- 首次连接的探测请求最多等待 15s，失败后每 3s 自动重试，支持手动立即重试和浏览器恢复联网时提前重试。已打开页面断线时保留对话并提示重连；事件流恢复后重新取快照，快照失败也继续重试。取消页面连接时清理重连定时器和事件流，过期快照不覆盖新连接的数据。
 - `remote` 为 true 时隐藏：添加项目、终端、在 Finder 显示/打开文件、外部终端、Git 操作、协作「工作方式」菜单（固定普通对话）、设置对话框（只保留主题切换）、背景设置。权限菜单允许选择当前 CLI 支持的模式，包括完全放行。
 - 本机界面：设置中新增「远程操控」分组——开关、SSH 别名、服务器监听地址、状态、在线客户端数、复制/重新生成口令；有远程客户端在线时侧边栏底部显示提示，可一键关闭。
 
@@ -145,12 +147,13 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
 1. **受限隧道用户**：新建无登录 shell 的用户（如 `hcode-tunnel`），为它单独生成一把本机密钥（不复用 root 密钥）。`authorized_keys` 该行加限制：
    `restrict,port-forwarding,permitlisten="<网关地址>:<端口>" ssh-ed25519 …`
    （服务器 OpenSSH 8.0 支持 `permitlisten`）。
-2. **sshd**：为该用户加 `Match User` 块：`GatewayPorts clientspecified`、`AllowTcpForwarding remote`、`PermitTTY no`、`X11Forwarding no`、`ClientAliveInterval 30`、`ClientAliveCountMax 3`（及时清理断掉的旧隧道，否则重连会因端口占用失败）。改前备份，改后 `sshd -t` 校验再重载。
+2. **sshd**：为该用户加 `Match User` 块：`GatewayPorts clientspecified`、`AllowTcpForwarding remote`、`PermitTTY no`、`X11Forwarding no`、`ClientAliveInterval 5`、`ClientAliveCountMax 2`（及时清理断掉的旧隧道，否则重连会因端口占用失败；当前部署实测约 15s 清理无响应连接）。改前备份，改后 `sshd -t` 校验再重载。重载后的心跳配置适用于新建立的会话。
 3. **nginx**：在 443 server 中加：
 
    ```nginx
    location = /hcode { return 301 /hcode/; }
    location /hcode/ {
+       error_page 500 502 503 504 =503 @hcode_unavailable;
        proxy_pass http://<网关地址>:<端口>/;
        proxy_http_version 1.1;
        proxy_buffering off;          # SSE 必需
@@ -160,9 +163,15 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
        proxy_set_header X-Forwarded-Proto https;
        proxy_set_header X-Forwarded-Prefix /hcode;  # Cookie 只限此路径
    }
+   location @hcode_unavailable {
+       default_type text/plain;
+       charset utf-8;
+       add_header Cache-Control "no-store" always;
+       return 503 "HCode 暂时无法连接，请稍后重试。\n";
+   }
    ```
 
-   改前备份，`nginx -t` 校验后 reload 容器。配置文件以单文件方式挂载进容器时，需原地写入（保持 inode），`sed -i` 等替换文件的方式会让容器继续读到旧内容。隧道未连接时该路径返回 502，属正常。
+   改前备份，`nginx -t` 校验后 reload 容器。配置文件以单文件方式挂载进容器时，需原地写入（保持 inode），`sed -i` 等替换文件的方式会让容器继续读到旧内容。隧道未连接时该路径返回 503，使用独立响应避免缺失的全局错误页把故障转换成 404。
 4. **防火墙**：不新增端口。`<网关地址>:<端口>` 只在 Docker 网桥上可达，公网仍只开 22/80/443。
 5. **本机 `~/.ssh/config`**：为隧道用户写一个 Host 别名（`User`、`IdentityFile`、`IdentitiesOnly yes`），HCode 设置里只填这个别名和 `<网关地址>:<端口>`。HCode 以 `BatchMode=yes` 运行 ssh，首次使用前需先在终端连接一次以信任主机密钥。
 
