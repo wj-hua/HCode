@@ -23,7 +23,7 @@ import { CodexAgent } from "./agents/codex/codexAgent.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
-import { commitChanges, createBranch, listBranches, pushChanges, repositoryRoot, switchBranch, worktree, worktreeDiff } from "./git.js";
+import { branchSwitchPreview, commitAndSwitch, commitChanges, commitGraph, createBranch, listBranches, pushChanges, repositoryRoot, switchBranch, worktree, worktreeDiff } from "./git.js";
 import { buildProjects } from "./projects.js";
 import { ConversationWorkspace } from "./conversationWorkspace.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
@@ -47,6 +47,7 @@ import { CollaborationRepository } from "./collaboration/collaborationRepository
 import { TerminalService } from "./terminalService.js";
 import { RemoteControlService } from "./remoteControl/remoteControlService.js";
 import { RemoteTokenStore } from "./remoteControl/tokenStore.js";
+import { browseProjectDirectories, prepareProjectDirectory } from "./remoteControl/projectDirectory.js";
 
 app.setName("HCode");
 // 开发时 userData 与正式版分开（必须在申请单实例锁之前，否则会和正在运行的正式版冲突）
@@ -126,7 +127,7 @@ async function bootstrap() {
   const sessionGitRoots = new Map<string, string>();
   const startingGitSessions = new Set<string>();
   const gitOperationRoots = new Set<string>();
-  const withGitOperation = async (cwd: string, operation: () => Promise<void>) => {
+  const withGitOperation = async <T>(cwd: string, operation: () => Promise<T>): Promise<T> => {
     const root = await repositoryRoot(cwd, buildAgentEnv());
     if (gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请稍后重试");
     for (const [key, sessionRoot] of sessionGitRoots) {
@@ -135,7 +136,7 @@ async function bootstrap() {
       }
     }
     gitOperationRoots.add(root);
-    try { await operation(); }
+    try { return await operation(); }
     finally { gitOperationRoots.delete(root); }
   };
   let sleepBlockerId: number | null = null;
@@ -224,6 +225,15 @@ async function bootstrap() {
     const projects = buildProjects(await agents.allSessions(), store, conversationWorkspace.path);
     return projects.find((project) => project.path === path) ?? null;
   });
+  handle("projects:addPath", async (input, create) => {
+    const path = await prepareProjectDirectory(input, create, conversationWorkspace.path);
+    store.updateProjects((prefs) => ({ ...prefs, manual: prefs.manual.includes(path) ? prefs.manual : [path, ...prefs.manual] }));
+    const project = buildProjects(await agents.allSessions(), store, conversationWorkspace.path).find((item) => item.path === path);
+    if (!project) throw new Error("无法添加项目");
+    send("sessions:indexChanged", { projectPaths: [path] });
+    return project;
+  });
+  handle("projects:browseDirectories", (path, showHidden) => browseProjectDirectories(path, showHidden));
   handle("projects:setPinned", (path, pinned) => {
     if (path === conversationWorkspace.path) throw new Error("对话目录不支持项目置顶");
     store.updateProjects((prefs) => ({
@@ -407,11 +417,14 @@ async function bootstrap() {
   handle("permission:respond", (interactionId, decision) => agents.respondPermission(interactionId, decision));
 
   handle("git:branches", (cwd) => listBranches(cwd, buildAgentEnv()));
+  handle("git:graph", (cwd, maxCount, skip) => commitGraph(cwd, buildAgentEnv(), maxCount, skip));
   handle("git:worktree", (cwd) => worktree(cwd, buildAgentEnv()));
   handle("git:diff", (cwd, path) => worktreeDiff(cwd, buildAgentEnv(), path));
   handle("git:commit", (cwd, message, stageAll) => withGitOperation(cwd, () => commitChanges(cwd, buildAgentEnv(), message, stageAll)));
   handle("git:push", (cwd) => withGitOperation(cwd, () => pushChanges(cwd, buildAgentEnv())));
   handle("git:switchBranch", (cwd, branch) => withGitOperation(cwd, () => switchBranch(cwd, buildAgentEnv(), branch)));
+  handle("git:branchSwitchPreview", (cwd) => branchSwitchPreview(cwd, buildAgentEnv()));
+  handle("git:commitAndSwitch", (cwd, branch, message, preview) => withGitOperation(cwd, () => commitAndSwitch(cwd, buildAgentEnv(), branch, message, preview)));
   handle("git:createBranch", (cwd, name) => withGitOperation(cwd, () => createBranch(cwd, buildAgentEnv(), name)));
   handle("fs:readText", readTextFile);
   const htmlPreview = new HtmlPreviewService();

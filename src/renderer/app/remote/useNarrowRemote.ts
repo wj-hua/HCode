@@ -10,6 +10,10 @@ function subscribe(onChange: () => void) {
   return () => media.removeEventListener("change", onChange);
 }
 
+export function isNarrowRemote(): boolean {
+  return isRemote && window.matchMedia(QUERY).matches;
+}
+
 export function useNarrowRemote(): boolean {
-  return useSyncExternalStore(isRemote ? subscribe : () => () => {}, () => isRemote && window.matchMedia(QUERY).matches);
+  return useSyncExternalStore(isRemote ? subscribe : () => () => {}, isNarrowRemote);
 }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, type AgentKind, type ChatStateEvent, type ConversationRow, type SessionSummary } from "@hcode/shared/types";
 
 const { invoke, listeners } = vi.hoisted(() => ({ invoke: vi.fn(), listeners: new Map<string, (event: unknown) => void>() }));
-vi.mock("../bridge", () => ({ hcode: { invoke, on: (channel: string, listener: (event: unknown) => void) => { listeners.set(channel, listener); return () => listeners.delete(channel); } } }));
+vi.mock("../bridge", () => ({ isRemote: false, hcode: { invoke, on: (channel: string, listener: (event: unknown) => void) => { listeners.set(channel, listener); return () => listeners.delete(channel); } } }));
 vi.mock("@/components/ui/toast.js", () => ({ toast: vi.fn() }));
 vi.mock("@/useTheme.js", () => ({ applyTheme: vi.fn() }));
 import { useAppStore } from "./appStore";

@@ -25,7 +25,6 @@ const EMPTY_RESULTS: Partial<Record<InvokeChannel, unknown>> = {
   "collaboration:codeDraftList": [],
   "collaboration:expertDraftList": [],
   "agentInvocation:list": [],
-  "git:branches": null,
   "git:worktree": null,
   "fs:stat": null,
   "fs:readText": null,

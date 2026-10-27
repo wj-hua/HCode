@@ -122,6 +122,8 @@ export interface GitBranches {
   current: string | null;
   /** 本地分支，最近提交的在前。 */
   branches: string[];
+  /** 工作区中有更改的文件数；读取失败时为 null。 */
+  dirtyFileCount: number | null;
 }
 
 export interface GitWorktreeFile {
@@ -137,6 +139,17 @@ export interface GitWorktree {
   branch: string | null;
   files: GitWorktreeFile[];
 }
+
+export type GitBranchSwitchResult = { ok: true } | { ok: false; reason: "changes-would-be-overwritten" };
+
+export interface GitBranchSwitchPreview {
+  branch: string | null;
+  head: string | null;
+  identityReady: boolean;
+  files: GitWorktreeFile[];
+}
+
+export type GitCommitAndSwitchResult = { switched: true } | { switched: false; error: string };
 
 export interface SessionRef {
   agent: AgentKind;

@@ -19,3 +19,16 @@ describe("远程权限模式", () => {
     expect(() => checkRemoteInvoke(context, "chat:send", [{ projectPath: "/other", sessionKey: "session", agent: "codex", permissionMode: "full-access" }])).toThrow("远程只能访问已添加的项目");
   });
 });
+
+describe("远程项目和分支", () => {
+  it("允许管理已添加项目的分支，拒绝其他路径", () => {
+    for (const channel of ["git:branches", "git:graph", "git:switchBranch", "git:createBranch", "git:branchSwitchPreview", "git:commitAndSwitch"]) {
+      expect(checkRemoteInvoke(context, channel, ["/project", "feature"])).toBe(true);
+      expect(() => checkRemoteInvoke(context, channel, ["/other", "feature"])).toThrow("远程只能访问已添加的项目");
+    }
+    expect(checkRemoteInvoke(context, "projects:addPath", ["/project", false])).toBe(true);
+    expect(checkRemoteInvoke(context, "projects:browseDirectories", [null, false])).toBe(true);
+    expect(checkRemoteInvoke(context, "projects:add", [])).toBe(false);
+    expect(checkRemoteInvoke(context, "fs:readText", ["/other/secret"])).toBe(false);
+  });
+});

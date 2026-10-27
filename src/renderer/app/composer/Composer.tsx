@@ -472,9 +472,8 @@ export function Composer({
       </div>
     ) : null}
     <QueuedMessages conversation={conversation} onEdit={editQueued} />
-    {/* 手机上的新会话照 ZCode：项目 / 分支选择放在输入框上方，与输入框合成一张卡 */}
-    <div className={cn(narrow && isDraft && "rounded-2xl bg-surface shadow-xl/5")}>
-    {narrow && isDraft ? <DraftContextBar conversation={conversation} className="p-1.5" /> : null}
+    <div className={cn(isDraft && "rounded-2xl bg-surface shadow-xl/5")}>
+    {isDraft ? <DraftContextBar conversation={conversation} className="p-1.5" /> : null}
     <form
       onSubmit={(event) => {
         event.preventDefault();
@@ -775,7 +774,6 @@ export function Composer({
       </div>
     </form>
     </div>
-    {isDraft && !narrow ? <DraftContextBar conversation={conversation} /> : null}
     </>
   );
 }

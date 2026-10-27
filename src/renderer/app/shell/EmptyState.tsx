@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button.js";
 import { formatRelativeTime, shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
 import { isRemote } from "../bridge";
+import { useEffect } from "react";
 
 export function EmptyState() {
   const projects = useAppStore((state) => state.projects);
@@ -15,6 +16,10 @@ export function EmptyState() {
   const noAgent = agentStatuses !== null && agentStatuses.every((status) => !status.found);
   const setSettingsOpen = useAppStore((state) => state.setSettingsOpen);
   const recent = projects.filter((project) => project.exists && project.purpose !== "conversation").slice(0, 6);
+
+  useEffect(() => {
+    void workOutsideProject(true);
+  }, [workOutsideProject]);
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-8">
@@ -56,14 +61,14 @@ export function EmptyState() {
               ) : null}
             </button>
           ))}
-          {!isRemote ? <button
+          <button
             type="button"
             onClick={() => void addProject()}
             className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground-subtle hover:bg-surface-hover hover:text-foreground"
           >
             <FolderPlusIcon className="size-4 shrink-0" />
             <span className="text-ui-base">添加项目文件夹…</span>
-          </button> : null}
+          </button>
           <button type="button" disabled={pending} onClick={() => void workOutsideProject(true)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-foreground-subtle hover:bg-surface-hover hover:text-foreground disabled:opacity-50">
             <MessageCircleIcon className="size-4 shrink-0" />
             <span className="text-ui-base">{pending ? "打开对话中…" : "不在项目中工作"}</span>

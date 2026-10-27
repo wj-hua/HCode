@@ -37,6 +37,17 @@ afterEach(() => {
 });
 
 describe("远程网页连接恢复", () => {
+  it("通过宿主浏览项目目录", async () => {
+    const listing = { path: "/home", parent: "/", directories: [] };
+    fetchMock.mockResolvedValueOnce(response(listing));
+    await expect(bridge.invoke("projects:browseDirectories", "/home", true)).resolves.toEqual(listing);
+    expect(fetchMock).toHaveBeenCalledWith("api/invoke", expect.objectContaining({ body: JSON.stringify({ channel: "projects:browseDirectories", args: ["/home", true] }) }));
+  });
+  it("通过宿主读取项目分支", async () => {
+    fetchMock.mockResolvedValueOnce(response({ current: "main", branches: ["main"] }));
+    await expect(bridge.invoke("git:branches", "/project")).resolves.toEqual({ current: "main", branches: ["main"] });
+    expect(fetchMock).toHaveBeenCalledWith("api/invoke", expect.objectContaining({ body: JSON.stringify({ channel: "git:branches", args: ["/project"] }) }));
+  });
   it("首次连接失败后可以重试，认证失败仍返回登录状态", async () => {
     fetchMock.mockResolvedValueOnce(new Response("unavailable", { status: 503 }));
     await expect(bridge.connect()).rejects.toThrow("503");

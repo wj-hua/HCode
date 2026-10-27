@@ -14,6 +14,7 @@ import { useUiStore } from "../store/uiStore";
 import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
+import { RemoteProjectDialog } from "./RemoteProjectDialog";
 import { Header } from "./Header";
 import { TerminalPanel } from "./TerminalPanel";
 import { TerminalResizeHandle } from "../terminal/TerminalResizeHandle";
@@ -148,6 +149,7 @@ export function AppShell() {
         </div>
       </div>
       <SettingsDialog />
+      {isRemote ? <RemoteProjectDialog /> : null}
       <QuickSwitchDialog open={quickSwitchOpen} onOpenChange={setQuickSwitchOpen} />
       <SessionSearchDialog
         open={searchOpen}

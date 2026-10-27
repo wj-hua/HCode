@@ -29,7 +29,7 @@ import { DEFAULT_SETTINGS, getDefaultModel } from "@hcode/shared/types";
 import { sessionPinKey } from "@hcode/shared/sessionPins";
 import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
-import { hcode } from "../bridge";
+import { hcode, isRemote } from "../bridge";
 import { playNotificationSound } from "../notificationSound";
 import { drafts, fileDrafts, imageDrafts } from "../composer/drafts";
 import { usePromptSuggestionStore } from '../composer/promptSuggestionStore';
@@ -37,6 +37,7 @@ import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 import { selectConversationWorkspace } from "./conversationWorkspaceActions";
 import { SessionViewSync } from "./sessionViewSync";
+import { isNarrowRemote } from "../remote/useNarrowRemote";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
 export interface QueuedMessage {
@@ -102,6 +103,8 @@ export interface AppState {
   permissions: Record<string, PermissionRequestEvent>;
   sidebarCollapsed: boolean;
   settingsOpen: boolean;
+  remoteProjectDialogOpen: boolean;
+  setRemoteProjectDialogOpen(open: boolean): void;
   settingsTab: "general" | "agents" | "notifications" | "extensions" | "remote";
   fullscreen: boolean;
   /** 编辑重发：待写入某个会话输入框的内容，输入框挂载后取走。 */
@@ -478,6 +481,8 @@ export const useAppStore = create<AppState>((set, get) => {
     permissions: {},
     sidebarCollapsed: false,
     settingsOpen: false,
+    remoteProjectDialogOpen: false,
+    setRemoteProjectDialogOpen(open) { set({ remoteProjectDialogOpen: open }); },
     settingsTab: "general",
     fullscreen: false,
     composerPrefill: null,
@@ -493,6 +498,9 @@ export const useAppStore = create<AppState>((set, get) => {
       if (first) get().toggleProject(first.path, true);
       const conversation = get().projects.find((project) => project.purpose === "conversation");
       if (conversation && conversation !== first) get().toggleProject(conversation.path, true);
+      // 首帧前建好非项目草稿并收起窄屏侧栏，避免刷新后先闪出项目列表
+      if (isNarrowRemote()) set({ sidebarCollapsed: true });
+      if (!get().activeViewId) await get().workOutsideProject(true);
       set({ ready: true });
       set({ agentStatuses: await hcode.invoke("agent:status") });
     },
@@ -733,6 +741,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async addProject() {
+      if (isRemote) { set({ remoteProjectDialogOpen: true }); return; }
       const project = await hcode.invoke("projects:add");
       if (!project) return;
       await get().refreshProjects();

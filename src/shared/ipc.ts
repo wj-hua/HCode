@@ -11,6 +11,9 @@ import type {
   ChatSendParams,
   ChatStateEvent,
   GitBranches,
+  GitBranchSwitchPreview,
+  GitBranchSwitchResult,
+  GitCommitAndSwitchResult,
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
@@ -38,6 +41,12 @@ import type { ExpertStartParams, ExpertResumeParams } from './experts.js';
 import type { MemoryEntry, MemorySaveInput } from './memory.js';
 
 import type { CodeAdmission, CandidatePreview } from "./codeDelivery.js";
+
+export interface ProjectDirectoryListing {
+  path: string;
+  parent: string | null;
+  directories: { name: string; path: string; isSymbolicLink: boolean }[];
+}
 
 /** invoke 通道：名字 → [参数, 返回值] */
 export interface InvokeMap {
@@ -109,6 +118,8 @@ export interface InvokeMap {
   "projects:list": [[], Project[]];
   "workspace:conversation": [[], string];
   "projects:add": [[], Project | null];
+  "projects:addPath": [[path: string, create: boolean], Project];
+  "projects:browseDirectories": [[path: string | null, showHidden: boolean], ProjectDirectoryListing];
   "projects:setPinned": [[path: string, pinned: boolean], void];
   "projects:reorder": [[paths: string[]], void];
   "projects:remove": [[path: string], void];
@@ -133,11 +144,14 @@ export interface InvokeMap {
   "chat:close": [[sessionKey: string], void];
   "permission:respond": [[interactionId: string, decision: PermissionDecision], void];
   "git:branches": [[cwd: string], GitBranches | null];
+  "git:graph": [[cwd: string, maxCount?: number, skip?: number], import("@zcode/shared").GitCommitGraphResult];
   "git:worktree": [[cwd: string], import("./types.js").GitWorktree | null];
   "git:diff": [[cwd: string, path: string], string];
   "git:commit": [[cwd: string, message: string, stageAll: boolean], void];
   "git:push": [[cwd: string], void];
-  "git:switchBranch": [[cwd: string, branch: string], void];
+  "git:switchBranch": [[cwd: string, branch: string], GitBranchSwitchResult];
+  "git:branchSwitchPreview": [[cwd: string], GitBranchSwitchPreview];
+  "git:commitAndSwitch": [[cwd: string, branch: string, message: string, preview: GitBranchSwitchPreview], GitCommitAndSwitchResult];
   "git:createBranch": [[cwd: string, name: string], void];
   /** 有界 UTF-8 文本读取（最多 2 MiB）；二进制、超限或读取失败返回 null。 */
   "fs:readText": [[path: string, maxBytes?: number], string | null];
@@ -226,6 +240,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "projects:list",
   "workspace:conversation",
   "projects:add",
+  "projects:addPath",
+  "projects:browseDirectories",
   "projects:setPinned",
   "projects:reorder",
   "projects:remove",
@@ -248,11 +264,14 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "chat:close",
   "permission:respond",
   "git:branches",
+  "git:graph",
   "git:worktree",
   "git:diff",
   "git:commit",
   "git:push",
   "git:switchBranch",
+  "git:branchSwitchPreview",
+  "git:commitAndSwitch",
   "git:createBranch",
   "fs:readText",
   "fs:createHtmlPreview",

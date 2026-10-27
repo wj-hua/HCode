@@ -174,7 +174,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
                     )}
                   </button>
                 </CollapsibleTrigger>
-                {!isRemote ? <div className="flex shrink-0 items-center pr-1.5 opacity-0 transition-opacity group-hover/purpose-section:opacity-100 group-focus-within/purpose-section:opacity-100">
+                <div className={cn("flex shrink-0 items-center pr-1.5 transition-opacity", !isRemote && "opacity-0 group-hover/purpose-section:opacity-100 group-focus-within/purpose-section:opacity-100")}>
                   <ControlHintTooltip title="添加项目">
                     <Button
                       type="button"
@@ -187,7 +187,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
                       <PlusIcon className="size-3.5" />
                     </Button>
                   </ControlHintTooltip>
-                </div> : null}
+                </div>
               </div>
               <CollapsibleContent>
                 {visibleProjects.length === 0 ? (
