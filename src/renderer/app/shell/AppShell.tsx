@@ -22,6 +22,7 @@ import { SideTerminalPanel } from "../terminal/SideTerminalPanel";
 import { AppBackground } from "./AppBackground";
 import { Sidebar } from "./Sidebar";
 import { useNarrowRemote } from "../remote/useNarrowRemote";
+import { useSidebarSwipe } from "../remote/useSidebarSwipe";
 import { SessionSearchDialog } from "./SessionSearchDialog";
 import { QuickSwitchDialog } from "./QuickSwitchDialog";
 import type { SessionSearchResult } from "@hcode/shared/types";
@@ -35,6 +36,7 @@ export function AppShell() {
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
   const narrow = useNarrowRemote();
+  useSidebarSwipe(narrow);
   // 窄屏侧边栏覆盖在内容上：进入页面和切换会话后收起。
   useEffect(() => {
     if (narrow) useAppStore.getState().setSidebarCollapsed(true);
