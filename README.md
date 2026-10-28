@@ -26,6 +26,16 @@ macOS 桌面版编程助手工作台，界面与对话卡片复刻 [ZCode](../ZC
 - 已添加项目中，终端新建或更新的会话会自动刷新；Claude Code 正在终端运行的会话会提示冲突风险
 - 订阅额度：侧边栏底部显示 Claude Code、Codex、Antigravity 的 5 小时和每周剩余额度，点开查看分组明细与重置时间（API key 等没有订阅额度的登录方式会注明）
 
+## 接入 HTools MCP
+
+HTools 提供本机只读查询，包括 token 用量、AI 进程、已保存的待办和 ADB/HDC 设备。先构建 HTools（例如在 HTools 目录执行 `swift build -c release`），确认生成的可执行文件存在且可执行。路径由各 CLI 的 MCP 配置保存，不内置在 HCode 中。
+
+在 HCode 选择项目后，打开「设置 → MCP 与技能」，分别选择 Claude 和 Codex，添加命令类型的服务器：名称 `htools`，命令填写本机 HTools 可执行文件的绝对路径，参数填写 `--mcp`，范围选择用户。已有同名配置应先检查，避免覆盖。配置变更后重启 HCode 或对应会话，再问「今天 Codex 用了多少 token？」；普通权限模式可能要求批准工具调用。
+
+Antigravity 的 MCP 不在 HCode 此管理界面中配置，可使用 `agy mcp list` 检查现有配置，再用 `agy mcp add htools -- <HTools可执行文件的绝对路径> --mcp` 添加；具体工具可用性取决于 agy 和会话模式。协作研究、只读委派及文件范围受限任务使用隔离工具集，不会因普通会话配置而开放 HTools。
+
+如果 HTools 未安装、清理构建目录或移动路径，需重新构建并在对应 Provider 的 MCP 配置中更新路径，然后重启会话。Claude 可在 MCP 管理中查看连接状态，或运行 `claude mcp list`；Codex 管理页的「已配置」仅表示配置启用，不代表服务连接成功，可检查会话中的启动错误及 `codex mcp list`。HTools 查询依赖本机可读记录，可能不完整，token 统计不等于账单；待办只包含已保存内容。设备桥接工具失败时设备列表可能为空。
+
 ## 使用
 
 需要 Node 24+、pnpm 10+，以及已登录的 `claude`、`codex`、`agy` 中至少一个命令（默认从登录 shell 的 PATH 查找，可在设置里指定路径）。
