@@ -32,12 +32,6 @@
   .collaboration-content { margin-right: var(--collaboration-panel-width); }
   .collaboration-side-panel { width: var(--collaboration-panel-width); }
 }
-.composer-input { container: composer-input / inline-size; }
-@container composer-input (max-width: 40rem) {
-  .composer-toolbar-primary { flex-basis: 100%; }
-  .composer-toolbar-controls { flex-wrap: wrap; }
-}
-
 /* 系统减少动态效果时保留状态与颜色反馈，收起位移、循环动画和自动平滑滚动。 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -57,7 +51,7 @@
 }
 .expert-summary { line-height: 1.65; }
 .composer-toolbar { gap: 0.5rem 0.75rem; }
-.composer-toolbar-secondary { flex: 1 1 18rem; }
+.composer-toolbar-secondary { flex: 1 1 max-content; }
 .collaboration-resize-handle {
   position: absolute;
   inset-block: 0;
