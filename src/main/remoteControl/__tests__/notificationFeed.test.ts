@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { ChatStateEvent, PermissionRequestEvent } from "../../../shared/types.js";
 import { NotificationFeed } from "../notificationFeed.js";
 
@@ -9,6 +9,60 @@ const state = (sessionKey: string, value: ChatStateEvent["state"], extra: Partia
 const permission = (sessionKey: string): PermissionRequestEvent => ({
   sessionKey, interactionId: "i1", toolUseId: "t1", toolName: "Bash", input: { command: "rm -rf secret" },
   title: "运行 rm -rf secret", canAllowForSession: false,
+});
+
+it("完成、错误和审批摘要包含单行有界的会话标题", async () => {
+  const feed = new NotificationFeed(() => 1000, async () => "  修复通知\n跳转  ");
+  await feed.observe("chat:state", state("s1", "running"));
+  await feed.observe("permission:requested", permission("s1"));
+  await feed.observe("chat:state", state("s1", "idle"));
+  await feed.observe("chat:state", state("s2", "running"));
+  await feed.observe("chat:state", state("s2", "error"));
+  expect(feed.since(undefined, true).map(event => [event.type, event.title])).toEqual([
+    ["approval", "修复通知 跳转"], ["done", "修复通知 跳转"], ["error", "修复通知 跳转"],
+  ]);
+  const long = new NotificationFeed(() => 1000, async () => "名".repeat(300));
+  await long.observe("chat:state", state("s1", "running"));
+  await long.observe("chat:state", state("s1", "idle"));
+  expect(Array.from(long.since(undefined, true)[0]!.title!)).toHaveLength(120);
+});
+
+it("标题读取失败仍发项目摘要，并记录诊断", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const feed = new NotificationFeed(() => 1000, async () => { throw new Error("history unavailable"); });
+    await feed.observe("chat:state", state("s1", "running"));
+    await feed.observe("chat:state", state("s1", "idle"));
+    expect(feed.since(undefined, true)[0]).toMatchObject({ type: "done", project: "GTools" });
+    expect(feed.since(undefined, true)[0]).not.toHaveProperty("title");
+    expect(warning).toHaveBeenCalledOnce();
+  } finally { warning.mockRestore(); }
+});
+
+it("标题读取超时不阻塞后续事件，事件和补发顺序一致", async () => {
+  vi.useFakeTimers();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const feed = new NotificationFeed(() => 1000, async event => {
+      if (event.sessionKey === "slow") return new Promise<string>(() => {});
+      return "后续会话";
+    });
+    feed.observe("chat:state", state("slow", "running"));
+    const first = feed.observe("chat:state", state("slow", "idle"));
+    feed.observe("chat:state", state("next", "running"));
+    const second = feed.observe("chat:state", state("next", "error"));
+    await vi.runAllTimersAsync();
+    await Promise.all([first, second]);
+    const events = feed.since(undefined, true);
+    expect(events.map(event => event.sessionKey)).toEqual(["slow", "next"]);
+    expect(events[0]).not.toHaveProperty("title");
+    expect(events[1]!.title).toBe("后续会话");
+    expect(feed.since(events[0]!.id)).toEqual([events[1]]);
+    expect(warning).toHaveBeenCalledOnce();
+  } finally {
+    warning.mockRestore();
+    vi.useRealTimers();
+  }
 });
 
 it("忙碌后回到空闲记为完成，忙碌后出错记为出错；只有空闲到空闲不产生事件", () => {

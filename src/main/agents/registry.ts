@@ -53,6 +53,20 @@ export class AgentRegistry {
     return this.bySessionKey(sessionKey)?.liveRows(sessionKey);
   }
 
+  /** 通知沿用会话列表标题；原生历史尚未收录的新会话使用本进程的列表占位。读取失败交由调用方处理。 */
+  async sessionTitle(state: ChatStateEvent): Promise<string | undefined> {
+    const pending = this.pendingSessions.get(state.sessionKey);
+    const matchesPending = pending?.agent === state.agent && pending.projectPath === state.projectPath
+      && (!state.sessionId || !pending.id || pending.id === state.sessionId);
+    if (state.sessionId) {
+      const sessions = await this.get(state.agent).listSessions();
+      const summary = sessions.find(session => session.id === state.sessionId
+        && session.agent === state.agent && session.projectPath === state.projectPath);
+      if (summary?.title.trim()) return summary.title;
+    }
+    return matchesPending ? pending.title : undefined;
+  }
+
   statuses(refresh = false): Promise<AgentStatus[]> {
     return Promise.all(this.all().map((provider) => provider.getStatus(refresh)));
   }

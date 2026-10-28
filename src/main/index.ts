@@ -542,6 +542,7 @@ async function bootstrap() {
     },
     liveRows: (sessionKey) => agents.liveRows(sessionKey),
     hasSession: (sessionKey) => agents.bySessionKey(sessionKey) !== undefined,
+    sessionTitle: (state) => agents.sessionTitle(state),
     staticDir: join(app.getAppPath(), "out", "renderer"),
     env: buildAgentEnv,
     onStatus: (status) => send("remote:status", status),

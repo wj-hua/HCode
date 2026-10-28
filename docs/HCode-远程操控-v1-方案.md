@@ -231,8 +231,9 @@ HCode 只负责提供事件摘要；推送到手机（APNs、IM 机器人等）�
 - **事件**（`NotificationFeedEvent`，`src/shared/remoteControl.ts`）：
 
   ```json
-  {"id":"9f3a1c2b.7","type":"done","sessionKey":"…","sessionId":"…","agent":"claude","project":"HCode","at":1793180000000}
+  {"id":"9f3a1c2b.7","type":"done","sessionKey":"…","sessionId":"…","agent":"claude","project":"HCode","title":"修复通知跳转","at":1793180000000}
   ```
 
   `type` 的取值：`done`（运行中或等待审批之后回到空闲）、`error`（运行中之后出错，不含错误详情）、`approval`（出现工具审批或提问，附带 `tool` 工具名，不含命令或参数）。`id` 可以直接作为去重键。
+- **会话标题**：可选 `title` 沿用所属 CLI 的会话列表标题；按 CLI、项目和原生会话 ID 精确匹配，新会话尚未进入历史时使用主进程已有的列表占位标题。标题可能来自首条消息的摘要，压成单行并限制为 120 个 Unicode 码点，不发送完整对话或审批参数。读取失败或超过 1.5 秒时记录诊断并省略标题，仍发送项目摘要；异步读取保持事件及补发顺序。旧订阅方可忽略此新增字段，旧 HCode 事件也仍然有效。
 - **判断位置**：在主进程中根据 `chat:state` 的状态变化和 `permission:requested` 判断，不依赖窗口是否打开。排队连续发送的消息每结束一轮都会产生一次 `done`；委派、协作子会话的状态变化也会被计入。

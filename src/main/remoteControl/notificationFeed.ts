@@ -1,5 +1,5 @@
 // 通知事件流（通用能力）：把主进程事件归纳为「完成 / 出错 / 等待审批」摘要，供对接方服务器订阅后自行推送。
-// 摘要只含类型、会话标识、CLI、项目名与工具名，不含对话、命令或错误详情；内存保留最近 50 条，按 Last-Event-ID 补发。
+// 摘要只含类型、会话标识与标题、CLI、项目名与工具名，不含对话正文、命令或错误详情；保留最近 50 条供补发。
 import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import type { ServerResponse } from "node:http";
@@ -8,6 +8,8 @@ import type { NotificationFeedEvent } from "../../shared/remoteControl.js";
 import type { ChatStateEvent, PermissionRequestEvent } from "../../shared/types.js";
 
 const MAX_EVENTS = 50;
+const TITLE_MAX_LENGTH = 120;
+const TITLE_LOOKUP_TIMEOUT_MS = 1500;
 const BUSY_STATES = new Set<ChatStateEvent["state"]>(["running", "awaitingApproval"]);
 /** 订阅方读取过慢时断开，由它带 Last-Event-ID 重连补发。 */
 const MAX_PENDING_BYTES = 1024 * 1024;
@@ -19,8 +21,12 @@ export class NotificationFeed {
   private readonly events: NotificationFeedEvent[] = [];
   private readonly states = new Map<string, ChatStateEvent>();
   private readonly subscribers = new Set<ServerResponse>();
+  private pending = Promise.resolve();
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly sessionTitle?: (state: ChatStateEvent) => Promise<string | undefined>,
+  ) {}
 
   get subscriberCount(): number {
     return this.subscribers.size;
@@ -28,8 +34,8 @@ export class NotificationFeed {
 
   /** 由远程服务的 publish 调用；不论订阅是否开启都归纳，开启后可补发最近事件。 */
   observe<C extends EventChannel>(channel: C, payload: EventMap[C]) {
-    if (channel === "chat:state") this.observeState(payload as ChatStateEvent);
-    if (channel === "permission:requested") this.observePermission(payload as PermissionRequestEvent);
+    if (channel === "chat:state") return this.observeState(payload as ChatStateEvent);
+    if (channel === "permission:requested") return this.observePermission(payload as PermissionRequestEvent);
   }
 
   /**
@@ -70,13 +76,13 @@ export class NotificationFeed {
     const previous = this.states.get(event.sessionKey);
     this.states.set(event.sessionKey, event);
     if (!previous || !BUSY_STATES.has(previous.state)) return;
-    if (event.state === "idle") this.emit("done", event);
-    else if (event.state === "error") this.emit("error", event);
+    if (event.state === "idle") return this.emit("done", event);
+    if (event.state === "error") return this.emit("error", event);
   }
 
   private observePermission(event: PermissionRequestEvent) {
     const state = this.states.get(event.sessionKey);
-    if (state) this.emit("approval", state, event.toolName);
+    if (state) return this.emit("approval", state, event.toolName);
   }
 
   private emit(type: NotificationFeedEvent["type"], state: ChatStateEvent, tool?: string) {
@@ -90,6 +96,36 @@ export class NotificationFeed {
       ...(tool ? { tool } : {}),
       at: this.now(),
     };
+    if (!this.sessionTitle) return this.publish(event);
+    // 标题并行读取，避免连续事件累计等待超时；发送和补发仍保持事件 id 的原始顺序。
+    const title = this.readTitle(state);
+    this.pending = this.pending.then(async () => {
+      const resolvedTitle = await title;
+      if (resolvedTitle) event.title = resolvedTitle;
+      this.publish(event);
+    });
+    return this.pending;
+  }
+
+  /** CLI 历史可能未就绪、失败或卡住；标题是可选摘要，限时后记录原因并继续发送项目名。 */
+  private async readTitle(state: ChatStateEvent): Promise<string | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("title lookup timeout")), TITLE_LOOKUP_TIMEOUT_MS);
+      });
+      const title = await Promise.race([this.sessionTitle!(state), timeout]);
+      return title ? Array.from(title.replace(/\s+/gu, " ").trim()).slice(0, TITLE_MAX_LENGTH).join("") : undefined;
+    } catch {
+      // 不打印底层错误或标题，避免历史服务把对话内容写入日志。
+      console.warn(`[notification-feed] ${state.agent} 会话标题读取失败或超时，发送项目摘要`);
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private publish(event: NotificationFeedEvent) {
     this.events.push(event);
     if (this.events.length > MAX_EVENTS) this.events.shift();
     const data = frame(event);
