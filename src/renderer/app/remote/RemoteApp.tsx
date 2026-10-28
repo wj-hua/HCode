@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button.js";
 import { App } from "../App";
 import { remoteBridge } from "../bridge";
 import { RemoteUnauthorizedError, type RemoteConnectionState } from "../remoteBridge";
+import { RemoteConnectionBanner } from "./RemoteConnectionBanner";
 import { RemoteLogin } from "./RemoteLogin";
 
 /** 首次打开和断线恢复共用同一 bridge，不刷新已经打开的对话。 */
@@ -56,9 +57,7 @@ export function RemoteApp() {
   if (page === "login") return <RemoteLogin />;
   if (page === "ready") return <>
     <App />
-    {connection !== "connected" ? <div role="status" className="fixed inset-x-0 top-0 z-50 bg-background p-2 text-center text-ui-base text-foreground shadow-sm">
-      与电脑的连接已中断，正在自动重连…
-    </div> : null}
+    <RemoteConnectionBanner connection={connection} />
   </>;
   return <div className="flex h-dvh items-center justify-center bg-background p-6 text-foreground">
     <div className="flex max-w-sm flex-col gap-3" role="status">
