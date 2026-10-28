@@ -8,6 +8,7 @@ import { extname, join, normalize, sep } from "node:path";
 import type { EventChannel, EventMap, InvokeChannel } from "../../shared/ipc.js";
 import type { RemoteControlStatus, RemoteSessionSnapshot } from "../../shared/remoteControl.js";
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent, RemoteControlSettings, Settings } from "../../shared/types.js";
+import { compress, isCompressible, negotiateEncoding, type ContentEncoding } from "./httpCompression.js";
 import { NotificationFeed } from "./notificationFeed.js";
 import { checkRemoteInvoke, remoteSettings, REMOTE_EVENTS, type RemotePolicyContext } from "./policy.js";
 import { REMOTE_SESSION_TTL_MS, type RemoteSessionStore } from "./sessionStore.js";
@@ -22,6 +23,10 @@ const MAX_INVOKE_BYTES = 30 * 1024 * 1024;
 const HEARTBEAT_MS = 15_000;
 /** 客户端读取太慢时断开，由它重连后重新取快照。 */
 const MAX_PENDING_EVENT_BYTES = 8 * 1024 * 1024;
+/** 构建产物目录：文件名带内容哈希，内容变化必然换名，可让浏览器永久缓存。 */
+const HASHED_ASSET_DIR = "assets";
+const HASHED_ASSET_CACHE = "public, max-age=31536000, immutable";
+const STATIC_CACHE = "public, max-age=3600";
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -81,6 +86,8 @@ export class RemoteControlService {
   private readonly states = new Map<string, ChatStateEvent>();
   private readonly permissions = new Map<string, PermissionRequestEvent>();
   private readonly feed: NotificationFeed;
+  /** 带哈希构建产物的压缩结果，键为“路径 + 编码”；内容不变，进程内缓存即可。 */
+  private readonly compressedAssets = new Map<string, Promise<Buffer>>();
 
   constructor(private readonly deps: RemoteControlDeps) {
     this.feed = new NotificationFeed(Date.now, deps.sessionTitle);
@@ -313,7 +320,7 @@ export class RemoteControlService {
     const channel = typeof body.channel === "string" ? body.channel : "";
     const args = Array.isArray(body.args) ? body.args : [];
     try {
-      sendJson(res, 200, { ok: true, result: await this.dispatch(channel, args) });
+      await sendCompressedJson(req, res, { ok: true, result: await this.dispatch(channel, args) });
     } catch (error) {
       if (error instanceof HttpError) throw error;
       sendJson(res, 200, { ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -360,12 +367,33 @@ export class RemoteControlService {
       throw new HttpError(404, "Not found");
     }
     const type = CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream";
+    const hashed = path.startsWith(join(root, HASHED_ASSET_DIR) + sep);
+    const cacheControl = type.startsWith("text/html") ? "no-store" : hashed ? HASHED_ASSET_CACHE : STATIC_CACHE;
+    const compressible = isCompressible(type, data.length);
+    const encoding = compressible ? negotiateEncoding(req.headers["accept-encoding"]) : null;
+    const body = encoding ? await this.compressStatic(path, data, encoding, hashed) : data;
     res.writeHead(200, {
       "Content-Type": type,
-      "Content-Length": data.length,
-      "Cache-Control": type.startsWith("text/html") ? "no-store" : "public, max-age=3600",
+      "Content-Length": body.length,
+      "Cache-Control": cacheControl,
+      ...(compressible ? { Vary: "Accept-Encoding" } : {}),
+      ...(encoding ? { "Content-Encoding": encoding } : {}),
     });
-    res.end(req.method === "HEAD" ? undefined : data);
+    res.end(req.method === "HEAD" ? undefined : body);
+  }
+
+  /** 只缓存带哈希的产物；index.html 等可能随构建变化的文件每次现场压缩。 */
+  private compressStatic(path: string, data: Buffer, encoding: ContentEncoding, hashed: boolean): Promise<Buffer> {
+    if (!hashed) return compress(data, encoding, "dynamic");
+    const key = `${path}\0${encoding}`;
+    let pending = this.compressedAssets.get(key);
+    if (!pending) {
+      pending = compress(data, encoding, "static");
+      this.compressedAssets.set(key, pending);
+      // 压缩失败不能留在缓存里，否则该文件之后每次都失败。
+      pending.catch(() => this.compressedAssets.delete(key));
+    }
+    return pending;
   }
 }
 
@@ -403,6 +431,21 @@ async function readJson(req: IncomingMessage, limit: number): Promise<unknown> {
   } catch {
     throw new HttpError(400, "请求格式错误");
   }
+}
+
+/** invoke 结果可能是整段对话快照，按客户端支持的编码压缩后发送。 */
+async function sendCompressedJson(req: IncomingMessage, res: ServerResponse, value: unknown) {
+  const body = Buffer.from(JSON.stringify(value));
+  const type = "application/json; charset=utf-8";
+  const encoding = isCompressible(type, body.length) ? negotiateEncoding(req.headers["accept-encoding"]) : null;
+  const payload = encoding ? await compress(body, encoding, "dynamic") : body;
+  res.writeHead(200, {
+    "Content-Type": type,
+    "Content-Length": payload.length,
+    Vary: "Accept-Encoding",
+    ...(encoding ? { "Content-Encoding": encoding } : {}),
+  });
+  res.end(payload);
 }
 
 function sendJson(res: ServerResponse, status: number, value: unknown) {
