@@ -218,3 +218,21 @@ v1 复用桌面界面，只保证能用：
 - 远程模式下可选的阻止休眠。
 - 多台 Mac 时的设备选择。
 - 服务器迁到离使用地更近的机器以降低延迟（方案不变，只换隧道目标和 nginx 所在机器）。
+
+## 11. 通知事件流（通用对接能力）
+
+HCode 只负责提供事件摘要；推送到手机（APNs、IM 机器人等）由对接方服务器实现。
+
+- **开关**：设置 → 远程操控 → 通知订阅 →「允许订阅通知事件」（`remoteControl.notificationFeed`，默认关闭），必须同时开启远程操控。关闭后立即断开已有订阅。
+- **订阅令牌**：与访问口令分开生成和存储（userData 下的 `remote-notification-token`，用 safeStorage 加密）。只能读事件摘要，不能登录页面或调用 invoke；重新生成后，已有订阅立即断开。
+- **接口**：`GET /api/notifications/stream`，带 `Authorization: Bearer <订阅令牌>`，返回 SSE。每条事件格式为 `id: <启动标识>.<序号>`、`event: notification`、`data: <JSON>`，每 15 秒发一次注释心跳。
+- **只接受直连**：请求带任意 `X-Forwarded-*` 头时一律返回 404。对接方服务器应经 SSH 隧道直连服务器侧的监听地址，并在公网反向代理上屏蔽 `/api/notifications/`。
+- **补发**：内存保留最近 50 条。重连时带 `Last-Event-ID`：属于本次启动的，补发它之后的事件；属于其他启动的（HCode 重启过），补发全部缓存。首次订阅不带该头时不补发历史事件。HCode 重启后缓存清空，期间的事件不会补发。
+- **事件**（`NotificationFeedEvent`，`src/shared/remoteControl.ts`）：
+
+  ```json
+  {"id":"9f3a1c2b.7","type":"done","sessionKey":"…","sessionId":"…","agent":"claude","project":"HCode","at":1793180000000}
+  ```
+
+  `type` 的取值：`done`（运行中或等待审批之后回到空闲）、`error`（运行中之后出错，不含错误详情）、`approval`（出现工具审批或提问，附带 `tool` 工具名，不含命令或参数）。`id` 可以直接作为去重键。
+- **判断位置**：在主进程中根据 `chat:state` 的状态变化和 `permission:requested` 判断，不依赖窗口是否打开。排队连续发送的消息每结束一轮都会产生一次 `done`；委派、协作子会话的状态变化也会被计入。

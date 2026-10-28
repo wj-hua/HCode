@@ -15,8 +15,28 @@ export interface RemoteControlStatus {
   port?: number;
   /** 在线的远程事件连接数。 */
   clients: number;
+  /** 通知事件流的在线订阅数。 */
+  notificationSubscribers: number;
   error?: string;
   tunnel: TunnelStatus;
+}
+
+/**
+ * 通知事件流（GET /api/notifications/stream，SSE `event: notification`）的公开协议。
+ * id 形如 `<启动标识>.<序号>`，可直接作为对接方的去重键；内容不含对话、命令或错误详情。
+ */
+export interface NotificationFeedEvent {
+  id: string;
+  type: "done" | "error" | "approval";
+  sessionKey: string;
+  sessionId?: string;
+  agent: import("./types.js").AgentKind;
+  /** 项目目录名。 */
+  project: string;
+  /** 等待审批时的工具名。 */
+  tool?: string;
+  /** 毫秒时间戳。 */
+  at: number;
 }
 
 /** 远程客户端打开活动会话时获取的完整状态；seq 之前（含）的事件已包含在快照里。 */

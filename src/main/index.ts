@@ -524,9 +524,11 @@ async function bootstrap() {
   });
 
   const remoteTokens = new RemoteTokenStore(app.getPath("userData"));
+  const remoteNotificationTokens = new RemoteTokenStore(app.getPath("userData"), "remote-notification-token");
   remote = new RemoteControlService({
     config: () => store.settings.remoteControl,
     tokens: remoteTokens,
+    notificationTokens: remoteNotificationTokens,
     sessions: new RemoteSessionStore(app.getPath("userData")),
     policy: {
       projectPaths: () => [...store.projects.manual, conversationWorkspace.path],
@@ -547,6 +549,8 @@ async function bootstrap() {
   handle("remote:status", () => remote!.getStatus());
   handle("remote:token", () => remoteTokens.get());
   handle("remote:regenerateToken", () => remote!.regenerateToken());
+  handle("remote:notificationToken", () => remoteNotificationTokens.get());
+  handle("remote:regenerateNotificationToken", () => remote!.regenerateNotificationToken());
 
   handle("settings:get", () => store.settings);
   handle("settings:set", (patch) => {

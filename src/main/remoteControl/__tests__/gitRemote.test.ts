@@ -15,8 +15,9 @@ it("远程 Git 请求需要登录且限制为已添加的项目，并能预览�
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
   const service = new RemoteControlService({
-    config: () => ({ enabled: true, localPort: 0, sshHost: "", remoteBind: "" }),
+    config: () => ({ enabled: true, localPort: 0, sshHost: "", remoteBind: "", notificationFeed: false }),
     tokens: { matches: (value: string) => value === "test-login" } as unknown as RemoteTokenStore,
+    notificationTokens: { matches: () => false } as unknown as RemoteTokenStore,
     sessions: new RemoteSessionStore(userData),
     policy: { projectPaths: () => [cwd], attachmentsDir: join(cwd, "attachments"), sessionState: () => undefined },
     invoke: async (channel, args) => {

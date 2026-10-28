@@ -16,7 +16,7 @@ const services: RemoteControlService[] = [];
 
 beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "hcode-remote-session-"));
-  config = { enabled: true, localPort: 0, sshHost: "", remoteBind: "" };
+  config = { enabled: true, localPort: 0, sshHost: "", remoteBind: "", notificationFeed: false };
 });
 
 afterEach(async () => {
@@ -33,6 +33,7 @@ async function launch() {
   const service = new RemoteControlService({
     config: () => config,
     tokens,
+    notificationTokens: { matches: () => false } as unknown as RemoteTokenStore,
     sessions: new RemoteSessionStore(dataDir),
     policy: { projectPaths: () => [], attachmentsDir: join(dataDir, "attachments"), sessionState: () => undefined },
     invoke: async () => ({ theme: "dark" }),

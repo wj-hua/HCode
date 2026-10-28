@@ -937,20 +937,43 @@ function CommitInput({ value, onCommit, placeholder, className }: { value: strin
   );
 }
 
+/** 访问口令与订阅令牌共用：默认隐藏，显示或复制时才从主进程读取；重新生成后立即替换显示值。 */
+function RemoteTokenRow({ label, readChannel, regenerateChannel }: {
+  label: string;
+  readChannel: "remote:token" | "remote:notificationToken";
+  regenerateChannel: "remote:regenerateToken" | "remote:regenerateNotificationToken";
+}) {
+  const [token, setToken] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
+  const loadToken = async (): Promise<string> => {
+    if (token) return token;
+    const value = await hcode.invoke(readChannel);
+    setToken(value);
+    return value;
+  };
+  return (
+    <SettingRow label={label} hint={showToken && token ? undefined : "已加密保存在本机钥匙串中"}>
+      {showToken && token ? <span className="max-w-56 truncate font-mono text-ui-xs text-foreground">{token}</span> : null}
+      <Button variant="ghost" size="sm" aria-label={showToken ? `隐藏${label}` : `显示${label}`} onClick={async () => { if (!showToken) await loadToken(); setShowToken(!showToken); }}>
+        {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+      </Button>
+      <Button variant="outline" size="sm" onClick={async () => void hcode.invoke("app:copyText", await loadToken())}>
+        <Copy className="size-3.5 mr-1" />
+        复制
+      </Button>
+      <Button variant="outline" size="sm" onClick={async () => setToken(await hcode.invoke(regenerateChannel))}>
+        <RefreshCw className="size-3.5 mr-1" />
+        重新生成
+      </Button>
+    </SettingRow>
+  );
+}
+
 function RemoteTab() {
   const settings = useAppStore((state) => state.settings.remoteControl);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const status = useRemoteStatus();
-  const [token, setToken] = useState<string | null>(null);
-  const [showToken, setShowToken] = useState(false);
   const [port, setPort] = useState(String(settings.localPort || ""));
-
-  const loadToken = async (): Promise<string> => {
-    if (token) return token;
-    const value = await hcode.invoke("remote:token");
-    setToken(value);
-    return value;
-  };
   const savePort = () => {
     const value = port.trim() ? Number(port) : 0;
     if (!Number.isInteger(value) || value < 0 || value > 65535) {
@@ -1001,20 +1024,20 @@ function RemoteTab() {
       </CardGroup>
 
       <CardGroup title="访问口令" subtitle="手机登录时输入；不要分享。重新生成后已登录的设备需要重新登录">
-        <SettingRow label="口令" hint={showToken && token ? undefined : "已加密保存在本机钥匙串中"}>
-          {showToken && token ? <span className="max-w-56 truncate font-mono text-ui-xs text-foreground">{token}</span> : null}
-          <Button variant="ghost" size="sm" aria-label={showToken ? "隐藏口令" : "显示口令"} onClick={async () => { if (!showToken) await loadToken(); setShowToken(!showToken); }}>
-            {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-          </Button>
-          <Button variant="outline" size="sm" onClick={async () => void hcode.invoke("app:copyText", await loadToken())}>
-            <Copy className="size-3.5 mr-1" />
-            复制
-          </Button>
-          <Button variant="outline" size="sm" onClick={async () => setToken(await hcode.invoke("remote:regenerateToken"))}>
-            <RefreshCw className="size-3.5 mr-1" />
-            重新生成
-          </Button>
+        <RemoteTokenRow label="口令" readChannel="remote:token" regenerateChannel="remote:regenerateToken" />
+      </CardGroup>
+
+      <CardGroup title="通知订阅" subtitle="供你自己的服务器经隧道订阅任务完成、出错、等待审批的摘要，再推送到手机。摘要不含对话内容；订阅令牌只能读事件，不能登录或操作">
+        <ToggleRow
+          label="允许订阅通知事件"
+          hint="接口 GET /api/notifications/stream，需随远程操控一起开启；关闭后立即断开订阅"
+          checked={settings.notificationFeed}
+          onChange={(notificationFeed) => void updateSettings({ remoteControl: { notificationFeed } })}
+        />
+        <SettingRow label="订阅状态">
+          <span className="text-ui-sm text-foreground-subtle">{status ? `在线 ${status.notificationSubscribers} 个订阅` : "…"}</span>
         </SettingRow>
+        <RemoteTokenRow label="订阅令牌" readChannel="remote:notificationToken" regenerateChannel="remote:regenerateNotificationToken" />
       </CardGroup>
     </div>
   );

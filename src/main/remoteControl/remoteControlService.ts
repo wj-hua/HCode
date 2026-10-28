@@ -1,5 +1,6 @@
 // 远程操控本地服务：只监听回环地址，经反向隧道对外。
-// 提供界面静态文件、口令登录、白名单 invoke（POST /api/invoke）与事件推送（SSE /api/events）。
+// 提供界面静态文件、口令登录、白名单 invoke（POST /api/invoke）与事件推送（SSE /api/events），
+// 以及供对接方服务器订阅的通知事件流（SSE /api/notifications/stream，独立订阅令牌）。
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -7,6 +8,7 @@ import { extname, join, normalize, sep } from "node:path";
 import type { EventChannel, EventMap, InvokeChannel } from "../../shared/ipc.js";
 import type { RemoteControlStatus, RemoteSessionSnapshot } from "../../shared/remoteControl.js";
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent, RemoteControlSettings, Settings } from "../../shared/types.js";
+import { NotificationFeed } from "./notificationFeed.js";
 import { checkRemoteInvoke, remoteSettings, REMOTE_EVENTS, type RemotePolicyContext } from "./policy.js";
 import { REMOTE_SESSION_TTL_MS, type RemoteSessionStore } from "./sessionStore.js";
 import type { RemoteTokenStore } from "./tokenStore.js";
@@ -41,6 +43,8 @@ const CONTENT_TYPES: Record<string, string> = {
 export interface RemoteControlDeps {
   config(): RemoteControlSettings;
   tokens: RemoteTokenStore;
+  /** 通知事件流的订阅令牌；只能读事件摘要，不能登录或调用 invoke。 */
+  notificationTokens: RemoteTokenStore;
   /** 登录会话；跨重启保留，关闭开关或重新生成口令时清除。 */
   sessions: RemoteSessionStore;
   policy: RemotePolicyContext;
@@ -64,7 +68,7 @@ class HttpError extends Error {
 export class RemoteControlService {
   private server: Server | null = null;
   private port = 0;
-  private status: RemoteControlStatus = { state: "off", clients: 0, tunnel: { state: "off" } };
+  private status: RemoteControlStatus = { state: "off", clients: 0, notificationSubscribers: 0, tunnel: { state: "off" } };
   private readonly tunnel: ReverseTunnel;
   private seq = 0;
   private readonly clients = new Set<ServerResponse>();
@@ -74,6 +78,7 @@ export class RemoteControlService {
   // 中途接入的远程客户端需要的状态；不论开关是否打开都跟踪，开启后立即可用。
   private readonly states = new Map<string, ChatStateEvent>();
   private readonly permissions = new Map<string, PermissionRequestEvent>();
+  private readonly feed = new NotificationFeed();
 
   constructor(private readonly deps: RemoteControlDeps) {
     this.tunnel = new ReverseTunnel(deps.env, (tunnel) => this.setStatus({ tunnel }));
@@ -100,6 +105,13 @@ export class RemoteControlService {
     return token;
   }
 
+  regenerateNotificationToken(): string {
+    const token = this.deps.notificationTokens.regenerate();
+    this.feed.disconnectAll();
+    this.updateSubscribers();
+    return token;
+  }
+
   /** 由 send() 调用：先更新跟踪状态，再推给在线的远程客户端。 */
   publish<C extends EventChannel>(channel: C, payload: EventMap[C]) {
     if (channel === "chat:state") {
@@ -111,6 +123,7 @@ export class RemoteControlService {
     } else if (channel === "permission:resolved") {
       this.permissions.delete((payload as EventMap["permission:resolved"]).interactionId);
     }
+    this.feed.observe(channel, payload);
     if (!this.server || this.clients.size === 0 || !REMOTE_EVENTS.has(channel)) return;
     const frame = `id: ${++this.seq}\nevent: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`;
     for (const client of this.clients) {
@@ -133,6 +146,10 @@ export class RemoteControlService {
       this.stop();
       this.deps.sessions.clear();
       return;
+    }
+    if (!config.notificationFeed) {
+      this.feed.disconnectAll();
+      this.updateSubscribers();
     }
     if (!this.server || (config.localPort !== 0 && config.localPort !== this.port)) await this.listen(config);
     if (!this.server) return;
@@ -176,6 +193,7 @@ export class RemoteControlService {
     this.port = (server.address() as AddressInfo).port;
     this.heartbeat = setInterval(() => {
       for (const client of this.clients) client.write(": ping\n\n");
+      this.feed.ping();
     }, HEARTBEAT_MS);
     this.setStatus({ state: "listening", port: this.port, error: undefined });
   }
@@ -185,13 +203,15 @@ export class RemoteControlService {
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.disconnectClients();
+    this.feed.disconnectAll();
+    this.updateSubscribers();
     if (this.server) {
       this.server.close();
       this.server.closeAllConnections();
       this.server = null;
       this.port = 0;
     }
-    if (this.status.state !== "off") this.setStatus({ state: "off", port: undefined, clients: 0, error: undefined });
+    if (this.status.state !== "off") this.setStatus({ state: "off", port: undefined, clients: 0, notificationSubscribers: 0, error: undefined });
   }
 
   private disconnectClients() {
@@ -209,6 +229,11 @@ export class RemoteControlService {
     if (this.status.clients !== this.clients.size) this.setStatus({ clients: this.clients.size });
   }
 
+  private updateSubscribers() {
+    const count = this.feed.subscriberCount;
+    if (this.status.notificationSubscribers !== count) this.setStatus({ notificationSubscribers: count });
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse) {
     const { pathname } = new URL(req.url ?? "/", "http://localhost");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -216,6 +241,7 @@ export class RemoteControlService {
     res.setHeader("Referrer-Policy", "no-referrer");
     if (!pathname.startsWith("/api/")) return this.serveStatic(req, res, pathname);
     res.setHeader("Cache-Control", "no-store");
+    if (req.method === "GET" && pathname === "/api/notifications/stream") return this.openNotificationStream(req, res);
     if (req.method === "POST" && pathname === "/api/login") return this.login(req, res);
     if (req.method === "POST" && pathname === "/api/logout") {
       const sid = sessionCookie(req);
@@ -227,6 +253,19 @@ export class RemoteControlService {
     if (req.method === "GET" && pathname === "/api/events") return this.openEvents(req, res);
     if (req.method === "POST" && pathname === "/api/invoke") return this.invoke(req, res);
     throw new HttpError(404, "Not found");
+  }
+
+  /**
+   * 只接受未经反向代理的直连请求（对接方服务器经 SSH 隧道直连本地端口），
+   * 带 X-Forwarded-* 的请求来自公网代理，一律按不存在处理；订阅令牌与登录口令、Cookie 互不通用。
+   */
+  private openNotificationStream(req: IncomingMessage, res: ServerResponse) {
+    const forwarded = Object.keys(req.headers).some((name) => name.startsWith("x-forwarded-"));
+    if (!this.deps.config().notificationFeed || forwarded) throw new HttpError(404, "Not found");
+    const match = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+    if (!match || !this.deps.notificationTokens.matches(match[1]!)) throw new HttpError(401, "订阅令牌无效");
+    const lastEventId = req.headers["last-event-id"];
+    this.feed.attach(res, typeof lastEventId === "string" ? lastEventId : undefined, () => this.updateSubscribers());
   }
 
   private async login(req: IncomingMessage, res: ServerResponse) {

@@ -405,6 +405,8 @@ export interface RemoteControlSettings {
   remoteBind: string;
   /** 本地服务端口；0 = 启动时随机分配。 */
   localPort: number;
+  /** 通知事件流：对接方服务器用独立订阅令牌读取任务完成、出错、等待审批的摘要。默认关闭。 */
+  notificationFeed: boolean;
 }
 
 /** 按 CLI 分组的设置项。 */
@@ -436,7 +438,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationSound: "system",
   customSounds: { start: "", done: "", error: "", approval: "" },
   background: { path: "", blur: 20, mask: 60 },
-  remoteControl: { enabled: false, sshHost: "", remoteBind: "", localPort: 0 },
+  remoteControl: { enabled: false, sshHost: "", remoteBind: "", localPort: 0, notificationFeed: false },
 };
 
 /** 尚无手动选择记录时沿用原来的固定模型。 */
