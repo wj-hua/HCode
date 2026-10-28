@@ -17,6 +17,20 @@ function fixture(agent: AgentKind = "codex") {
 }
 
 describe("跨端新会话列表", () => {
+  it.each<AgentKind>(["claude", "codex", "agy"])("%s 通知优先使用当前列表标题，未收录时使用新会话占位", async agent => {
+    const { registry, history, params, state } = fixture(agent);
+    await registry.send(params);
+    expect(await registry.sessionTitle({ ...state, sessionId: undefined })).toBe("修复登录");
+    registry.observeState(state);
+    expect(await registry.sessionTitle(state)).toBe("修复登录");
+    history.push({ id: state.sessionId!, agent, projectPath: params.projectPath, title: "正式标题", createdAt: 1, updatedAt: 2 });
+    expect(await registry.sessionTitle(state)).toBe("正式标题");
+    history[0]!.title = "重命名后的标题";
+    expect(await registry.sessionTitle(state)).toBe("重命名后的标题");
+    expect(await registry.sessionTitle({ ...state, projectPath: "/other" })).toBeUndefined();
+    expect(await registry.sessionTitle({ ...state, sessionId: "different" })).toBeUndefined();
+  });
+
   it.each<AgentKind>(["claude", "codex", "agy"])("%s 历史仍为空时，原生 ID 在发送返回前到达也立即可列出", async agent => {
     const { registry, changed, send, params, state } = fixture(agent);
     send.mockImplementation(async () => {

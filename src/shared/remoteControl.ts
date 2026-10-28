@@ -23,7 +23,7 @@ export interface RemoteControlStatus {
 
 /**
  * 通知事件流（GET /api/notifications/stream，SSE `event: notification`）的公开协议。
- * id 形如 `<启动标识>.<序号>`，可直接作为对接方的去重键；内容不含对话、命令或错误详情。
+ * id 形如 `<启动标识>.<序号>`，可直接作为对接方的去重键；包含会话列表标题，不含完整对话、命令或错误详情。
  */
 export interface NotificationFeedEvent {
   id: string;
@@ -33,6 +33,8 @@ export interface NotificationFeedEvent {
   agent: import("./types.js").AgentKind;
   /** 项目目录名。 */
   project: string;
+  /** 会话列表标题，单行、最多 120 个 Unicode 码点；历史尚不可用时省略。 */
+  title?: string;
   /** 等待审批时的工具名。 */
   tool?: string;
   /** 毫秒时间戳。 */

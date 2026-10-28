@@ -31,6 +31,7 @@ beforeEach(async () => {
     sessions: new RemoteSessionStore(dataDir),
     policy: { projectPaths: () => [], attachmentsDir: join(dataDir, "attachments"), sessionState: () => undefined },
     invoke: async () => null,
+    sessionTitle: async () => "通知链路联调",
     liveRows: () => undefined, hasSession: () => false, staticDir: dataDir, env: () => ({}), onStatus: () => {},
   });
   await service.apply();
@@ -81,7 +82,7 @@ it("订阅令牌正确时推送实时事件，内容只有摘要", async () => {
   const { body, close } = await pending;
   close();
   const data = JSON.parse(body.split("data: ").at(-1)!.split("\n")[0]!);
-  expect(data).toMatchObject({ type: "done", sessionKey: "s1", agent: "codex", project: "GTools" });
+  expect(data).toMatchObject({ type: "done", sessionKey: "s1", agent: "codex", project: "GTools", title: "通知链路联调" });
 });
 
 it("断线重连带 Last-Event-ID 时补发错过的事件", async () => {

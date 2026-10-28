@@ -1027,7 +1027,7 @@ function RemoteTab() {
         <RemoteTokenRow label="口令" readChannel="remote:token" regenerateChannel="remote:regenerateToken" />
       </CardGroup>
 
-      <CardGroup title="通知订阅" subtitle="供你自己的服务器经隧道订阅任务完成、出错、等待审批的摘要，再推送到手机。摘要不含对话内容；订阅令牌只能读事件，不能登录或操作">
+      <CardGroup title="通知订阅" subtitle="供你自己的服务器经隧道订阅任务完成、出错、等待审批的摘要，再推送到手机。摘要包含项目名和会话标题，不含完整对话、命令参数或错误详情；订阅令牌只能读事件，不能登录或操作">
         <ToggleRow
           label="允许订阅通知事件"
           hint="接口 GET /api/notifications/stream，需随远程操控一起开启；关闭后立即断开订阅"

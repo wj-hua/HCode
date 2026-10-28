@@ -52,6 +52,8 @@ export interface RemoteControlDeps {
   invoke(channel: InvokeChannel, args: unknown[]): Promise<unknown>;
   liveRows(sessionKey: string): ConversationRow[] | undefined;
   hasSession(sessionKey: string): boolean;
+  /** 从主进程会话元数据读取通知标题，不访问对话正文。 */
+  sessionTitle?(state: ChatStateEvent): Promise<string | undefined>;
   /** 渲染进程构建产物目录。 */
   staticDir: string;
   /** ssh 进程的环境变量。 */
@@ -78,9 +80,10 @@ export class RemoteControlService {
   // 中途接入的远程客户端需要的状态；不论开关是否打开都跟踪，开启后立即可用。
   private readonly states = new Map<string, ChatStateEvent>();
   private readonly permissions = new Map<string, PermissionRequestEvent>();
-  private readonly feed = new NotificationFeed();
+  private readonly feed: NotificationFeed;
 
   constructor(private readonly deps: RemoteControlDeps) {
+    this.feed = new NotificationFeed(Date.now, deps.sessionTitle);
     this.tunnel = new ReverseTunnel(deps.env, (tunnel) => this.setStatus({ tunnel }));
   }
 
