@@ -182,6 +182,10 @@ export interface InvokeMap {
   "remote:token": [[], string];
   /** 重新生成口令，所有已登录的远程客户端立即失效。 */
   "remote:regenerateToken": [[], string];
+  /** 通知事件流的订阅令牌；首次调用时生成。 */
+  "remote:notificationToken": [[], string];
+  /** 重新生成订阅令牌，已有订阅立即断开。 */
+  "remote:regenerateNotificationToken": [[], string];
 }
 
 /** 主进程 → 渲染进程事件 */
@@ -294,6 +298,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "remote:status",
   "remote:token",
   "remote:regenerateToken",
+  "remote:notificationToken",
+  "remote:regenerateNotificationToken",
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [

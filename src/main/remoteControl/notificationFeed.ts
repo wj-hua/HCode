@@ -1,0 +1,105 @@
+// 通知事件流（通用能力）：把主进程事件归纳为「完成 / 出错 / 等待审批」摘要，供对接方服务器订阅后自行推送。
+// 摘要只含类型、会话标识、CLI、项目名与工具名，不含对话、命令或错误详情；内存保留最近 50 条，按 Last-Event-ID 补发。
+import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
+import type { ServerResponse } from "node:http";
+import type { EventChannel, EventMap } from "../../shared/ipc.js";
+import type { NotificationFeedEvent } from "../../shared/remoteControl.js";
+import type { ChatStateEvent, PermissionRequestEvent } from "../../shared/types.js";
+
+const MAX_EVENTS = 50;
+const BUSY_STATES = new Set<ChatStateEvent["state"]>(["running", "awaitingApproval"]);
+/** 订阅方读取过慢时断开，由它带 Last-Event-ID 重连补发。 */
+const MAX_PENDING_BYTES = 1024 * 1024;
+
+export class NotificationFeed {
+  /** 每次启动不同：重启后旧 id 不会与新事件混淆，订阅方的去重键也不会冲突。 */
+  private readonly boot = randomBytes(4).toString("hex");
+  private seq = 0;
+  private readonly events: NotificationFeedEvent[] = [];
+  private readonly states = new Map<string, ChatStateEvent>();
+  private readonly subscribers = new Set<ServerResponse>();
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  get subscriberCount(): number {
+    return this.subscribers.size;
+  }
+
+  /** 由远程服务的 publish 调用；不论订阅是否开启都归纳，开启后可补发最近事件。 */
+  observe<C extends EventChannel>(channel: C, payload: EventMap[C]) {
+    if (channel === "chat:state") this.observeState(payload as ChatStateEvent);
+    if (channel === "permission:requested") this.observePermission(payload as PermissionRequestEvent);
+  }
+
+  /**
+   * lastEventId 属于本次启动时返回其后的事件；属于其他启动（HCode 重启过）时返回全部缓存。
+   * 没有 lastEventId 表示首次订阅，默认不补发旧事件，避免对接方把历史当新通知推送。
+   */
+  since(lastEventId: string | undefined, includeAll = false): NotificationFeedEvent[] {
+    if (lastEventId === undefined) return includeAll ? [...this.events] : [];
+    const [boot, seq] = lastEventId.split(".");
+    if (boot !== this.boot) return [...this.events];
+    const after = Number(seq);
+    return this.events.filter((event) => Number(event.id.split(".")[1]) > after);
+  }
+
+  /** 接管一条已鉴权的 SSE 连接：先补发，再持续推送。 */
+  attach(res: ServerResponse, lastEventId: string | undefined, onChange: () => void) {
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store" });
+    res.write("retry: 3000\n\n");
+    for (const event of this.since(lastEventId)) res.write(frame(event));
+    this.subscribers.add(res);
+    onChange();
+    res.on("close", () => {
+      this.subscribers.delete(res);
+      onChange();
+    });
+  }
+
+  ping() {
+    for (const subscriber of this.subscribers) subscriber.write(": ping\n\n");
+  }
+
+  disconnectAll() {
+    for (const subscriber of this.subscribers) subscriber.end();
+    this.subscribers.clear();
+  }
+
+  private observeState(event: ChatStateEvent) {
+    const previous = this.states.get(event.sessionKey);
+    this.states.set(event.sessionKey, event);
+    if (!previous || !BUSY_STATES.has(previous.state)) return;
+    if (event.state === "idle") this.emit("done", event);
+    else if (event.state === "error") this.emit("error", event);
+  }
+
+  private observePermission(event: PermissionRequestEvent) {
+    const state = this.states.get(event.sessionKey);
+    if (state) this.emit("approval", state, event.toolName);
+  }
+
+  private emit(type: NotificationFeedEvent["type"], state: ChatStateEvent, tool?: string) {
+    const event: NotificationFeedEvent = {
+      id: `${this.boot}.${++this.seq}`,
+      type,
+      sessionKey: state.sessionKey,
+      ...(state.sessionId ? { sessionId: state.sessionId } : {}),
+      agent: state.agent,
+      project: basename(state.projectPath),
+      ...(tool ? { tool } : {}),
+      at: this.now(),
+    };
+    this.events.push(event);
+    if (this.events.length > MAX_EVENTS) this.events.shift();
+    const data = frame(event);
+    for (const subscriber of this.subscribers) {
+      if (subscriber.writableLength > MAX_PENDING_BYTES) subscriber.destroy();
+      else subscriber.write(data);
+    }
+  }
+}
+
+function frame(event: NotificationFeedEvent): string {
+  return `id: ${event.id}\nevent: notification\ndata: ${JSON.stringify(event)}\n\n`;
+}

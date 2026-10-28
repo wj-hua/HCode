@@ -1,4 +1,4 @@
-// 远程访问口令：经 safeStorage（macOS 钥匙串）加密后单独存放，不进入 settings.json。
+// 远程访问口令与通知订阅令牌：经 safeStorage（macOS 钥匙串）加密后各自单独存放，不进入 settings.json。
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,8 +8,8 @@ export class RemoteTokenStore {
   private readonly path: string;
   private token: string | null = null;
 
-  constructor(dataDir: string) {
-    this.path = join(dataDir, "remote-control-token");
+  constructor(dataDir: string, fileName = "remote-control-token") {
+    this.path = join(dataDir, fileName);
   }
 
   get(): string {
@@ -23,7 +23,7 @@ export class RemoteTokenStore {
   }
 
   regenerate(): string {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error("系统加密存储不可用，无法保存远程访问口令");
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("系统加密存储不可用，无法保存远程令牌");
     const token = randomBytes(24).toString("base64url");
     writeFileSync(this.path, safeStorage.encryptString(token), { mode: 0o600 });
     this.token = token;
