@@ -6,15 +6,18 @@ import { expect, it } from "vitest";
 import { branchSwitchPreview, commitAndSwitch, commitGraph, listBranches, switchBranch } from "../../git.js";
 import type { GitBranchSwitchPreview } from "../../../shared/types.js";
 import { RemoteControlService } from "../remoteControlService.js";
+import { RemoteSessionStore } from "../sessionStore.js";
 import type { RemoteTokenStore } from "../tokenStore.js";
 
 it("远程 Git 请求需要登录且限制为已添加的项目，并能预览冲突后提交切换", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "hcode-remote-git-"));
+  const userData = await mkdtemp(join(tmpdir(), "hcode-remote-git-userdata-"));
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
   const service = new RemoteControlService({
     config: () => ({ enabled: true, localPort: 0, sshHost: "", remoteBind: "" }),
     tokens: { matches: (value: string) => value === "test-login" } as unknown as RemoteTokenStore,
+    sessions: new RemoteSessionStore(userData),
     policy: { projectPaths: () => [cwd], attachmentsDir: join(cwd, "attachments"), sessionState: () => undefined },
     invoke: async (channel, args) => {
       const [path, branch, message, preview] = args;
@@ -54,5 +57,5 @@ it("远程 Git 请求需要登录且限制为已添加的项目，并能预览�
     expect((await invoke("git:commitAndSwitch", [cwd, "other", "save local changes", preview])).result).toEqual({ switched: true });
     expect(git("branch", "--show-current")).toBe("other");
     expect(git("show", `${original}:file.txt`)).toBe("local");
-  } finally { service.dispose(); await rm(cwd, { recursive: true, force: true }); }
+  } finally { service.dispose(); await rm(cwd, { recursive: true, force: true }); await rm(userData, { recursive: true, force: true }); }
 });

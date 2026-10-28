@@ -71,7 +71,7 @@ remoteControl: {
 
 - `remoteControlService.ts`：`http.createServer`，监听 `127.0.0.1:<本地端口>`。
   - 静态文件：从 `out/renderer` 读取，限制在该目录内，开发模式可代理到 Vite。
-  - `POST /api/login`：常量时间比较口令（`crypto.timingSafeEqual`）；成功下发 `HttpOnly; SameSite=Strict` 的随机会话 Cookie，代理声明 HTTPS 时附加 `Secure`，路径由代理前缀决定。会话仅存内存、7 天过期、应用重启失效。登录失败共用限流：每分钟最多 5 次。
+  - `POST /api/login`：常量时间比较口令（`crypto.timingSafeEqual`）；成功下发 `HttpOnly; SameSite=Strict` 的随机会话 Cookie，代理声明 HTTPS 时附加 `Secure`，路径由代理前缀决定。会话 7 天过期，应用重启或更新后保留：userData 下 `remote-control-sessions.json`（权限 600）只存会话标识的 SHA-256 摘要与过期时间，最多 50 条；重新生成口令、关闭远程操控、登出时清除，文件损坏时视为无已登录会话。登录失败共用限流：每分钟最多 5 次。
   - `POST /api/invoke`：校验 Cookie 和自定义头 `X-HCode-Remote: 1`（防 CSRF），请求体 `{ channel, args }`，返回 `{ ok, result }` 或 `{ ok: false, error }`。请求体上限为 30 MiB。
   - `GET /api/events`：SSE，`event: <channel>` + `data: <json>`；每 15 秒发注释心跳。
 - `tunnel.ts`：使用系统 `/usr/bin/ssh`，开启 `ExitOnForwardFailure=yes`、`BatchMode=yes`，以 `ServerAliveInterval=5` / `ServerAliveCountMax=2` 检测失联。禁用 SSH 主连接复用、持久化与后台运行，使隧道归当前子进程管理。普通失败按 1s / 2s / 5s / 10s 退避；远端转发失败时每 2s 重试，等待旧监听释放。stderr 只归纳错误类型，不保存原始输出。

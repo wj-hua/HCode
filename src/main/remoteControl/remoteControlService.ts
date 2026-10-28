@@ -1,6 +1,5 @@
 // 远程操控本地服务：只监听回环地址，经反向隧道对外。
 // 提供界面静态文件、口令登录、白名单 invoke（POST /api/invoke）与事件推送（SSE /api/events）。
-import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -9,11 +8,11 @@ import type { EventChannel, EventMap, InvokeChannel } from "../../shared/ipc.js"
 import type { RemoteControlStatus, RemoteSessionSnapshot } from "../../shared/remoteControl.js";
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent, RemoteControlSettings, Settings } from "../../shared/types.js";
 import { checkRemoteInvoke, remoteSettings, REMOTE_EVENTS, type RemotePolicyContext } from "./policy.js";
+import { REMOTE_SESSION_TTL_MS, type RemoteSessionStore } from "./sessionStore.js";
 import type { RemoteTokenStore } from "./tokenStore.js";
 import { ReverseTunnel, validateTunnelConfig } from "./tunnel.js";
 
 const COOKIE = "hcode_remote";
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_FAILURE_WINDOW_MS = 60_000;
 const MAX_LOGIN_FAILURES = 5;
 /** fs:stageAttachment 的 base64 上限为 28 MB，再留出 JSON 外壳。 */
@@ -42,6 +41,8 @@ const CONTENT_TYPES: Record<string, string> = {
 export interface RemoteControlDeps {
   config(): RemoteControlSettings;
   tokens: RemoteTokenStore;
+  /** 登录会话；跨重启保留，关闭开关或重新生成口令时清除。 */
+  sessions: RemoteSessionStore;
   policy: RemotePolicyContext;
   /** 调用 handle() 注册的同一个 handler。 */
   invoke(channel: InvokeChannel, args: unknown[]): Promise<unknown>;
@@ -67,7 +68,6 @@ export class RemoteControlService {
   private readonly tunnel: ReverseTunnel;
   private seq = 0;
   private readonly clients = new Set<ServerResponse>();
-  private readonly logins = new Map<string, number>();
   private loginFailures: number[] = [];
   private heartbeat: NodeJS.Timeout | null = null;
   private applying: Promise<void> = Promise.resolve();
@@ -95,7 +95,7 @@ export class RemoteControlService {
 
   regenerateToken(): string {
     const token = this.deps.tokens.regenerate();
-    this.logins.clear();
+    this.deps.sessions.clear();
     this.disconnectClients();
     return token;
   }
@@ -131,6 +131,7 @@ export class RemoteControlService {
     const config = this.deps.config();
     if (!config.enabled) {
       this.stop();
+      this.deps.sessions.clear();
       return;
     }
     if (!this.server || (config.localPort !== 0 && config.localPort !== this.port)) await this.listen(config);
@@ -184,7 +185,6 @@ export class RemoteControlService {
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.disconnectClients();
-    this.logins.clear();
     if (this.server) {
       this.server.close();
       this.server.closeAllConnections();
@@ -219,7 +219,7 @@ export class RemoteControlService {
     if (req.method === "POST" && pathname === "/api/login") return this.login(req, res);
     if (req.method === "POST" && pathname === "/api/logout") {
       const sid = sessionCookie(req);
-      if (sid) this.logins.delete(sid);
+      if (sid) this.deps.sessions.revoke(sid);
       res.setHeader("Set-Cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=${cookiePath(req)}; Max-Age=0`);
       return sendJson(res, 200, { ok: true });
     }
@@ -239,22 +239,15 @@ export class RemoteControlService {
       this.loginFailures.push(now);
       throw new HttpError(401, "口令错误");
     }
-    const sid = randomBytes(32).toString("base64url");
-    this.logins.set(sid, now + SESSION_TTL_MS);
+    const sid = this.deps.sessions.create(now);
     const secure = req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
-    res.setHeader("Set-Cookie", `${COOKIE}=${sid}; HttpOnly; SameSite=Strict; Path=${cookiePath(req)}; Max-Age=${SESSION_TTL_MS / 1000}${secure}`);
+    res.setHeader("Set-Cookie", `${COOKIE}=${sid}; HttpOnly; SameSite=Strict; Path=${cookiePath(req)}; Max-Age=${REMOTE_SESSION_TTL_MS / 1000}${secure}`);
     sendJson(res, 200, { ok: true });
   }
 
   private authorized(req: IncomingMessage): boolean {
     const sid = sessionCookie(req);
-    const expiresAt = sid ? this.logins.get(sid) : undefined;
-    if (!sid || !expiresAt) return false;
-    if (expiresAt < Date.now()) {
-      this.logins.delete(sid);
-      return false;
-    }
-    return true;
+    return sid !== undefined && this.deps.sessions.isValid(sid);
   }
 
   private openEvents(req: IncomingMessage, res: ServerResponse) {
