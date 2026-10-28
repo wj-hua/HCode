@@ -47,6 +47,7 @@ import { CollaborationRepository } from "./collaboration/collaborationRepository
 import { TerminalService } from "./terminalService.js";
 import { RemoteControlService } from "./remoteControl/remoteControlService.js";
 import { RemoteTokenStore } from "./remoteControl/tokenStore.js";
+import { RemoteSessionStore } from "./remoteControl/sessionStore.js";
 import { browseProjectDirectories, prepareProjectDirectory } from "./remoteControl/projectDirectory.js";
 
 app.setName("HCode");
@@ -526,6 +527,7 @@ async function bootstrap() {
   remote = new RemoteControlService({
     config: () => store.settings.remoteControl,
     tokens: remoteTokens,
+    sessions: new RemoteSessionStore(app.getPath("userData")),
     policy: {
       projectPaths: () => [...store.projects.manual, conversationWorkspace.path],
       attachmentsDir: join(app.getPath("userData"), "attachments"),
