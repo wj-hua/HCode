@@ -1,5 +1,5 @@
 // 远程操控：普通浏览器里没有 preload，window.hcode 改由 HTTP + SSE 实现。
-// 断线重连后先取活动会话快照覆盖本地内容，快照 seq 之前的事件丢弃，避免流式文字重复。
+// 断线重连后先取活动会话列表，再逐个会话取快照覆盖本地内容；快照 seq 之前的事件丢弃，避免流式文字重复。
 import { EVENT_CHANNELS, type EventChannel, type HCodeBridge, type InvokeChannel } from "@hcode/shared/ipc";
 import type { RemoteOnlyInvokeMap, RemoteSessionSnapshot } from "@hcode/shared/remoteControl";
 import type { ChatStateEvent, PermissionRequestEvent, Settings, SettingsPatch } from "@hcode/shared/types";
@@ -59,7 +59,17 @@ function mergeLocal(settings: Settings, patch: SettingsPatch): Settings {
 }
 
 type Frame = { channel: EventChannel; payload: unknown; id: number };
-export type RemoteConnectionState = "connecting" | "connected" | "disconnected";
+/** syncing：事件流已连上、界面可操作，但仍有会话快照在下载，这些会话的内容可能暂时落后。 */
+export type RemoteConnectionState = "connecting" | "syncing" | "connected" | "disconnected";
+
+const LIVE_TIMEOUT_MS = 15_000;
+/** 长对话快照经慢隧道可能要几十秒；超时只用来发现卡死的请求，不能按普通接口设得太短。 */
+const SNAPSHOT_TIMEOUT_MS = 60_000;
+const CALL_TIMEOUTS: Partial<Record<string, number>> = { "chat:live": LIVE_TIMEOUT_MS, "chat:snapshot": SNAPSHOT_TIMEOUT_MS };
+const EVENT_RETRY_MS = 3000;
+const LOGIN_CHECK_RETRY_MS = 5000;
+const SNAPSHOT_RETRY_BASE_MS = 3000;
+const SNAPSHOT_RETRY_MAX_MS = 30_000;
 
 export function createRemoteBridge(): HCodeBridge & {
   connect(signal?: AbortSignal): Promise<void>;
@@ -79,7 +89,11 @@ export function createRemoteBridge(): HCodeBridge & {
   let settings: Settings | null = null;
   const pendingPermissions = new Map<string, string>();
   const floors = new Map<string, number>();
+  /** 事件流刚连上、活动会话列表返回前收到的全部事件。 */
   let buffer: Frame[] | null = null;
+  /** 等待快照的会话 → 本次快照请求发出后收到的该会话事件，快照到达后按 seq 过滤再补发。 */
+  const awaiting = new Map<string, Frame[]>();
+  const snapshotTimers = new Set<ReturnType<typeof setTimeout>>();
   let source: EventSource | null = null;
   let eventRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let syncGeneration = 0;
@@ -91,8 +105,9 @@ export function createRemoteBridge(): HCodeBridge & {
   };
 
   const call = async (channel: string, args: unknown[]) => {
+    const timeout = CALL_TIMEOUTS[channel];
     try {
-      return await post("api/invoke", { channel, args }, channel === "chat:live" || channel === "chat:snapshot" ? AbortSignal.timeout(15_000) : undefined);
+      return await post("api/invoke", { channel, args }, timeout ? AbortSignal.timeout(timeout) : undefined);
     } catch (error) {
       // 口令被重新生成或电脑上关闭了远程操控：回到登录页。
       if (error instanceof RemoteUnauthorizedError) location.reload();
@@ -100,9 +115,17 @@ export function createRemoteBridge(): HCodeBridge & {
     }
   };
 
-  const deliver = ({ channel, payload, id }: Frame) => {
+  const deliver = (frame: Frame) => {
+    const { channel, payload, id } = frame;
     const sessionKey = (payload as { sessionKey?: unknown } | null)?.sessionKey;
-    if (typeof sessionKey === "string" && id <= (floors.get(sessionKey) ?? 0)) return;
+    if (typeof sessionKey === "string") {
+      const waiting = awaiting.get(sessionKey);
+      if (waiting) {
+        waiting.push(frame);
+        return;
+      }
+      if (id <= (floors.get(sessionKey) ?? 0)) return;
+    }
     if (channel === "permission:requested") {
       const event = payload as PermissionRequestEvent;
       pendingPermissions.set(event.interactionId, event.sessionKey);
@@ -112,59 +135,105 @@ export function createRemoteBridge(): HCodeBridge & {
     emit(channel, payload);
   };
 
-  const resync = async (events: EventSource) => {
-    const generation = ++syncGeneration;
-    buffer ??= [];
-    try {
-      const live = await call("chat:live", []) as RemoteOnlyInvokeMap["chat:live"][1];
-      const snapshots = await Promise.all(live.map((state) =>
-        (call("chat:snapshot", [state.sessionKey]) as Promise<RemoteSessionSnapshot | null>).then((snapshot) => ({ state, snapshot }))));
-      if (source !== events || generation !== syncGeneration) return;
-      latestStates.clear();
-      floors.clear();
-      const stale = new Map(pendingPermissions);
-      for (const { state, snapshot } of snapshots) {
-        if (!snapshot) continue;
-        floors.set(state.sessionKey, snapshot.seq);
-        emit("chat:state", snapshot.state ?? state);
-        emit("chat:rows", { sessionKey: state.sessionKey, ops: [{ op: "reset", rows: snapshot.rows }] });
-        for (const permission of snapshot.permissions) {
-          stale.delete(permission.interactionId);
-          pendingPermissions.set(permission.interactionId, permission.sessionKey);
-          emit("permission:requested", permission);
-        }
-      }
-      // 断线期间已经处理掉的审批
-      for (const [interactionId, sessionKey] of stale) {
-        pendingPermissions.delete(interactionId);
-        emit("permission:resolved", { sessionKey, interactionId });
-      }
-      emit("sessions:indexChanged", { projectPaths: [] });
-      setConnection("connected");
-    } catch {
-      // SSE 已恢复但快照请求仍失败时也要继续恢复，不能等下一次断线。
-      if (source === events && generation === syncGeneration) {
-        setConnection("disconnected");
-        if (eventRetryTimer) clearTimeout(eventRetryTimer);
-        eventRetryTimer = setTimeout(() => {
-          eventRetryTimer = null;
-          if (source === events) openEvents();
-        }, 3000);
-      }
-    } finally {
-      if (source !== events || generation !== syncGeneration) return;
-      const frames = buffer ?? [];
-      buffer = null;
-      for (const frame of frames) deliver(frame);
+  /** 作废进行中的同步：迟到的旧快照按代次丢弃，等待中的快照重试一并取消。 */
+  const cancelSync = () => {
+    syncGeneration++;
+    buffer = null;
+    awaiting.clear();
+    for (const timer of snapshotTimers) clearTimeout(timer);
+    snapshotTimers.clear();
+  };
+
+  /** 断线期间已在电脑上处理掉的审批不会再出现在快照里，补发 resolved 让界面关闭审批卡片。 */
+  const resolveMissingPermissions = (inScope: (sessionKey: string) => boolean, current: PermissionRequestEvent[]) => {
+    const kept = new Set(current.map((permission) => permission.interactionId));
+    for (const [interactionId, sessionKey] of pendingPermissions) {
+      if (!inScope(sessionKey) || kept.has(interactionId)) continue;
+      pendingPermissions.delete(interactionId);
+      emit("permission:resolved", { sessionKey, interactionId });
     }
+  };
+
+  const applySnapshot = (state: ChatStateEvent, snapshot: RemoteSessionSnapshot | null) => {
+    const { sessionKey } = state;
+    const frames = awaiting.get(sessionKey) ?? [];
+    awaiting.delete(sessionKey);
+    resolveMissingPermissions((key) => key === sessionKey, snapshot?.permissions ?? []);
+    // 快照为空表示会话在取列表后已结束，只补发期间收到的事件。
+    if (snapshot) {
+      floors.set(sessionKey, snapshot.seq);
+      emit("chat:state", snapshot.state ?? state);
+      emit("chat:rows", { sessionKey, ops: [{ op: "reset", rows: snapshot.rows }] });
+      for (const permission of snapshot.permissions) {
+        pendingPermissions.set(permission.interactionId, permission.sessionKey);
+        emit("permission:requested", permission);
+      }
+    }
+    for (const frame of frames) deliver(frame);
+    if (awaiting.size === 0) setConnection("connected");
+  };
+
+  /**
+   * 单个会话的快照失败只退避重试它自己，不断开事件流、不影响其他会话。
+   * 每次请求前清空该会话的暂存事件：新快照在请求到达电脑后生成，已包含此前的所有事件。
+   */
+  const syncSession = (events: EventSource, generation: number, state: ChatStateEvent, attempt = 0) => {
+    const current = () => source === events && generation === syncGeneration;
+    awaiting.set(state.sessionKey, []);
+    (call("chat:snapshot", [state.sessionKey]) as Promise<RemoteSessionSnapshot | null>).then(
+      (snapshot) => { if (current()) applySnapshot(state, snapshot); },
+      () => {
+        if (!current()) return;
+        const timer = setTimeout(() => {
+          snapshotTimers.delete(timer);
+          if (current()) syncSession(events, generation, state, attempt + 1);
+        }, Math.min(SNAPSHOT_RETRY_BASE_MS * 2 ** attempt, SNAPSHOT_RETRY_MAX_MS));
+        snapshotTimers.add(timer);
+      },
+    );
+  };
+
+  /** 每次（重新）连上事件流：先取活动会话列表并立即更新运行状态，再按会话各自取快照补齐内容。 */
+  const resync = async (events: EventSource) => {
+    cancelSync();
+    const generation = syncGeneration;
+    buffer = [];
+    setConnection("syncing");
+    let live: RemoteOnlyInvokeMap["chat:live"][1];
+    try {
+      live = await call("chat:live", []) as RemoteOnlyInvokeMap["chat:live"][1];
+    } catch {
+      // 连列表都取不到说明请求通道不可用：重开事件流，连上后整体重来，不能停在假的已连接状态。
+      if (source !== events || generation !== syncGeneration) return;
+      setConnection("disconnected");
+      if (eventRetryTimer) clearTimeout(eventRetryTimer);
+      eventRetryTimer = setTimeout(() => {
+        eventRetryTimer = null;
+        if (source === events) openEvents();
+      }, EVENT_RETRY_MS);
+      return;
+    }
+    if (source !== events || generation !== syncGeneration) return;
+    latestStates.clear();
+    floors.clear();
+    const liveKeys = new Set(live.map((state) => state.sessionKey));
+    resolveMissingPermissions((key) => !liveKeys.has(key), []);
+    for (const state of live) {
+      emit("chat:state", state);
+      syncSession(events, generation, state);
+    }
+    emit("sessions:indexChanged", { projectPaths: [] });
+    const frames = buffer ?? [];
+    buffer = null;
+    for (const frame of frames) deliver(frame);
+    if (awaiting.size === 0) setConnection("connected");
   };
 
   const openEvents = () => {
     if (eventRetryTimer) clearTimeout(eventRetryTimer);
     eventRetryTimer = null;
     source?.close();
-    syncGeneration++;
-    buffer = null;
+    cancelSync();
     setConnection("connecting");
     const events = new EventSource("api/events");
     source = events;
@@ -173,7 +242,6 @@ export function createRemoteBridge(): HCodeBridge & {
       if (source !== events) return;
       if (eventRetryTimer) clearTimeout(eventRetryTimer);
       eventRetryTimer = null;
-      setConnection("connecting");
       void resync(events);
     });
     for (const channel of EVENT_CHANNELS) {
@@ -186,7 +254,7 @@ export function createRemoteBridge(): HCodeBridge & {
     }
     events.onerror = () => {
       if (source !== events) return;
-      syncGeneration++;
+      cancelSync();
       setConnection("disconnected");
       if (events.readyState !== EventSource.CLOSED) return;
       // 浏览器不再自动重连（如服务返回 401）：检查登录后重新连接。
@@ -199,10 +267,10 @@ export function createRemoteBridge(): HCodeBridge & {
             if (source === events) eventRetryTimer = setTimeout(() => {
               eventRetryTimer = null;
               if (source === events) openEvents();
-            }, 5000);
+            }, LOGIN_CHECK_RETRY_MS);
           },
         );
-      }, 3000);
+      }, EVENT_RETRY_MS);
     };
   };
 
@@ -215,9 +283,8 @@ export function createRemoteBridge(): HCodeBridge & {
     },
     disconnect() {
       source?.close();
-      syncGeneration++;
+      cancelSync();
       source = null;
-      buffer = null;
       if (eventRetryTimer) clearTimeout(eventRetryTimer);
       eventRetryTimer = null;
       setConnection("disconnected");
@@ -260,7 +327,7 @@ export function createRemoteBridge(): HCodeBridge & {
     /** 登录有效时打开事件流；未登录抛出 RemoteUnauthorizedError。 */
     async connect(signal) {
       setConnection("connecting");
-      const timeout = AbortSignal.timeout(15_000);
+      const timeout = AbortSignal.timeout(LIVE_TIMEOUT_MS);
       await post("api/invoke", { channel: "chat:live", args: [] }, signal ? AbortSignal.any([signal, timeout]) : timeout);
       signal?.throwIfAborted();
       openEvents();

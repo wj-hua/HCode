@@ -110,19 +110,19 @@ describe("远程网页连接恢复", () => {
 
   it("重连后用快照恢复状态，并丢弃快照之前的重复事件", async () => {
     const state = { sessionKey: "session" };
-    const listener = vi.fn();
-    bridge.on("chat:state", listener);
+    const rows = vi.fn();
+    bridge.on("chat:rows", rows);
     await bridge.connect();
     fetchMock.mockResolvedValueOnce(response([state]));
     fetchMock.mockResolvedValueOnce(response({ seq: 10, rows: [], state, permissions: [] }));
     const events = Events.instances[0]!;
     events.send("hello", {});
     await vi.advanceTimersByTimeAsync(0);
-    expect(listener).toHaveBeenCalledTimes(1);
-    events.send("chat:state", state, 9);
-    expect(listener).toHaveBeenCalledTimes(1);
-    events.send("chat:state", state, 11);
-    expect(listener).toHaveBeenCalledTimes(2);
+    expect(rows).toHaveBeenCalledTimes(1);
+    events.send("chat:rows", { sessionKey: "session", ops: [] }, 9);
+    expect(rows).toHaveBeenCalledTimes(1);
+    events.send("chat:rows", { sessionKey: "session", ops: [] }, 11);
+    expect(rows).toHaveBeenCalledTimes(2);
   });
 
   it("页面订阅晚于连接恢复时仍收到已完成的会话状态", async () => {
@@ -139,8 +139,8 @@ describe("远程网页连接恢复", () => {
 
   it("同一事件流再次恢复后，迟到的旧快照不会覆盖新快照", async () => {
     const state = { sessionKey: "session" };
-    const listener = vi.fn();
-    bridge.on("chat:state", listener);
+    const rows = vi.fn();
+    bridge.on("chat:rows", rows);
     await bridge.connect();
     let complete!: (value: Response) => void;
     fetchMock.mockResolvedValueOnce(response([state]));
@@ -150,11 +150,102 @@ describe("远程网页连接恢复", () => {
     await vi.advanceTimersByTimeAsync(0);
     events.onerror!();
     fetchMock.mockResolvedValueOnce(response([state]));
-    fetchMock.mockResolvedValueOnce(response({ seq: 20, rows: [], state, permissions: [] }));
+    fetchMock.mockResolvedValueOnce(response({ seq: 20, rows: [{ id: "new" }], state, permissions: [] }));
     events.send("hello", {});
     await vi.advanceTimersByTimeAsync(0);
-    complete(response({ seq: 10, rows: [], state, permissions: [] }));
+    complete(response({ seq: 10, rows: [{ id: "old" }], state, permissions: [] }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(listener).toHaveBeenCalledTimes(1);
+    expect(rows).toHaveBeenCalledTimes(1);
+    expect(rows).toHaveBeenLastCalledWith({ sessionKey: "session", ops: [{ op: "reset", rows: [{ id: "new" }] }] });
+  });
+});
+
+/** 按通道响应 invoke，便于模拟某个会话的快照单独失败。 */
+function routeInvoke(routes: Record<string, (args: unknown[]) => Response | Promise<Response>>) {
+  fetchMock.mockImplementation(async (_path: string, init: RequestInit) => {
+    const { channel, args } = JSON.parse(String(init.body)) as { channel: string; args: unknown[] };
+    return routes[channel]?.(args) ?? response();
+  });
+}
+
+describe("慢速网络下的会话同步", () => {
+  const slow = { sessionKey: "slow" };
+  const quick = { sessionKey: "quick" };
+
+  it("单个会话快照失败时保持事件流，只退避重试该会话", async () => {
+    let slowFailures = 1;
+    routeInvoke({
+      "chat:live": () => response([slow, quick]),
+      "chat:snapshot": ([key]) => {
+        if (key === "slow" && slowFailures-- > 0) throw new Error("timeout");
+        return response({ seq: 5, rows: [{ id: `${String(key)}-row` }], state: { sessionKey: key }, permissions: [] });
+      },
+    });
+    const changes = vi.fn();
+    const rows = vi.fn();
+    bridge.onConnectionChange(changes);
+    bridge.on("chat:rows", rows);
+    await bridge.connect();
+    Events.instances[0]!.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows).toHaveBeenCalledWith({ sessionKey: "quick", ops: [{ op: "reset", rows: [{ id: "quick-row" }] }] });
+    expect(changes).toHaveBeenLastCalledWith("syncing");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(rows).toHaveBeenCalledWith({ sessionKey: "slow", ops: [{ op: "reset", rows: [{ id: "slow-row" }] }] });
+    expect(changes).toHaveBeenLastCalledWith("connected");
+    expect(Events.instances).toHaveLength(1);
+    expect(Events.instances[0]!.close).not.toHaveBeenCalled();
+  });
+
+  it("等待快照期间收到的会话事件，快照到达后只补发更新的部分", async () => {
+    let complete!: (value: Response) => void;
+    routeInvoke({
+      "chat:live": () => response([slow]),
+      "chat:snapshot": () => new Promise<Response>((resolve) => { complete = resolve; }),
+    });
+    const rows = vi.fn();
+    bridge.on("chat:rows", rows);
+    await bridge.connect();
+    const events = Events.instances[0]!;
+    events.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    events.send("chat:rows", { sessionKey: "slow", ops: [{ op: "included" }] }, 7);
+    events.send("chat:rows", { sessionKey: "slow", ops: [{ op: "later" }] }, 8);
+    expect(rows).not.toHaveBeenCalled();
+    complete(response({ seq: 7, rows: [], state: slow, permissions: [] }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows.mock.calls.map(([event]) => event.ops[0].op)).toEqual(["reset", "later"]);
+  });
+
+  it("活动会话的运行状态先于快照更新", async () => {
+    routeInvoke({
+      "chat:live": () => response([{ sessionKey: "slow", state: "running" }]),
+      "chat:snapshot": () => new Promise<Response>(() => {}),
+    });
+    const states = vi.fn();
+    bridge.on("chat:state", states);
+    await bridge.connect();
+    Events.instances[0]!.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states).toHaveBeenCalledWith({ sessionKey: "slow", state: "running" });
+  });
+
+  it("断线期间已处理的审批在会话快照到达后关闭", async () => {
+    const permission = { sessionKey: "slow", interactionId: "approval" };
+    routeInvoke({
+      "chat:live": () => response([slow]),
+      "chat:snapshot": () => response({ seq: 3, rows: [], state: slow, permissions: [] }),
+    });
+    const resolved = vi.fn();
+    bridge.on("permission:resolved", resolved);
+    await bridge.connect();
+    const events = Events.instances[0]!;
+    events.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    events.send("permission:requested", permission, 4);
+    events.onerror!();
+    events.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toHaveBeenCalledWith({ sessionKey: "slow", interactionId: "approval" });
   });
 });
