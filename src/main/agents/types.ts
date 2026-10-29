@@ -54,7 +54,7 @@ export interface AgentProvider {
   /** 订阅额度（5 小时 / 每周）；不支持的 CLI 不实现。 */
   getQuota?(): Promise<AgentQuota>;
   /** 全部历史会话（按更新时间倒序）。 */
-  listSessions(): Promise<SessionSummary[]>;
+  listSessions(refresh?: boolean): Promise<SessionSummary[]>;
   /** 已知的会话原始记录文件路径，供全文搜索预筛；未提供时直接读取历史投影。 */
   sessionFilePath?(id: string): string | undefined;
   loadSession(id: string, projectPath: string): Promise<SessionLoadResult>;

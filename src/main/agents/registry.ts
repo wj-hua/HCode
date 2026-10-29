@@ -72,8 +72,8 @@ export class AgentRegistry {
   }
 
   /** 所有 CLI 的会话合并，按更新时间倒序；某个 CLI 读取失败不影响其他。 */
-  async allSessions(): Promise<SessionSummary[]> {
-    const lists = await Promise.all(this.all().map((provider) => provider.listSessions().catch(() => [])));
+  async allSessions(refresh = false): Promise<SessionSummary[]> {
+    const lists = await Promise.all(this.all().map((provider) => refresh ? provider.listSessions(true) : provider.listSessions().catch(() => [])));
     const sessions = lists.flat();
     const indexed = new Set(sessions.map(identityKey));
     for (const [key, session] of this.pendingSessions) {

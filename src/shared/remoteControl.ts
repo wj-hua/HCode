@@ -1,6 +1,16 @@
 // 远程操控：本机界面查询的状态，以及只对远程客户端开放的快照接口。
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent } from "./types.js";
 
+export type RemoteRowSource = { sessionKey: string; projectPath?: string } | { ref: import("./types.js").SessionRef };
+export interface RemoteFileChange { path: string; additions: number; deletions: number; hasPatch: boolean }
+export type RemoteToolRow = Extract<ConversationRow, { kind: "toolCall" }> & {
+  remoteDetails: { ref: string; changes: RemoteFileChange[] };
+};
+/** 仅 HTTP 摘要行携带详情引用；桌面和完整导出继续使用原始工具行。 */
+export function isRemoteToolRow(row: ConversationRow): row is RemoteToolRow {
+  return row.kind === "toolCall" && "remoteDetails" in row;
+}
+
 /** 相对地址兼容根路径与反向代理子路径，图片内容始终经过远程登录鉴权。 */
 export const REMOTE_MEDIA_PATH = "api/media/";
 
@@ -55,6 +65,8 @@ export interface RemoteSessionSnapshot {
 
 /** 只对远程客户端开放的 invoke 通道（本机窗口不需要，因此不在 ipc.ts 中）。 */
 export interface RemoteOnlyInvokeMap {
+  "tools:detail": [[ref: string], Extract<ConversationRow, { kind: "toolCall" }>];
+  "sessions:refresh": [[ref: import("./types.js").SessionRef, firstRowId?: number], import("./types.js").SessionLoadResult];
   "sessions:page": [[ref: import("./types.js").SessionRef, beforeRowId?: number], import("./types.js").SessionLoadResult];
   /** 当前活动会话的最新状态。 */
   "chat:live": [[], ChatStateEvent[]];

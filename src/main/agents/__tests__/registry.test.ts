@@ -103,3 +103,10 @@ describe("跨端新会话列表", () => {
     expect(await registry.allSessions()).toEqual([expect.objectContaining({ title: "重试消息" })]);
   });
 });
+
+it("手动刷新明确要求所有 provider 重建索引，错误不伪装为空列表", async () => {
+  const provider = { listSessions: vi.fn().mockRejectedValue(new Error("index unavailable")) };
+  const registry = new AgentRegistry({ codex: provider } as unknown as Record<AgentKind, AgentProvider>, vi.fn());
+  await expect(registry.allSessions(true)).rejects.toThrow("index unavailable");
+  expect(provider.listSessions).toHaveBeenCalledWith(true);
+});

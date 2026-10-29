@@ -162,6 +162,7 @@ export function MarkdownImage({
     });
     return fileLink && isImagePreviewPath(fileLink.path) ? fileLink : null;
   }, [resolvedSrc, workspaceHomePath, workspacePath]);
+  const [retryVersion, setRetryVersion] = useState(0);
   const [localImageDataUrl, setLocalImageDataUrl] = useState<string | null>(null);
   const [localImageFailed, setLocalImageFailed] = useState(false);
   const [artifactImageUrl, setArtifactImageUrl] = useState<string | null>(null);
@@ -179,7 +180,8 @@ export function MarkdownImage({
   useEffect(() => {
     setLocalImageDataUrl(null);
     setLocalImageFailed(false);
-    if (!localImageLink || !services) return;
+    if (!localImageLink) return;
+    if (!services) { setLocalImageFailed(true); return; }
 
     let disposed = false;
     services.fileService
@@ -198,7 +200,7 @@ export function MarkdownImage({
     return () => {
       disposed = true;
     };
-  }, [localImageLink, services]);
+  }, [localImageLink, services, retryVersion]);
 
   useEffect(
     () => () => {
@@ -246,7 +248,7 @@ export function MarkdownImage({
       disposed = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifactRef, readAttachment, sessionId]);
+  }, [artifactRef, readAttachment, sessionId, retryVersion]);
 
   const displaySrc = artifactRef
     ? artifactImageUrl
@@ -264,11 +266,11 @@ export function MarkdownImage({
           className,
         )}
         data-markdown-local-image={failed ? "error" : "loading"}
-        role={failed ? "img" : "status"}
+        role={failed ? undefined : "status"}
         title={localImageLink?.path}
       >
         {failed ? (
-          <ImageOffIcon aria-hidden="true" className="size-6" />
+          <div className="flex flex-col items-center gap-2"><ImageOffIcon aria-hidden="true" className="size-6" /><span role="status">{intl.formatMessage({ id: "codeViewer.imageUnavailable" })}</span><button type="button" className="min-h-11 rounded-md border border-border px-3 focus-visible:outline focus-visible:outline-2" onClick={() => { setRetryVersion(version => version + 1); setBrowserImageState({ source: displaySrc ?? "", status: "loading" }); }}>{intl.formatMessage({ id: "common.retry" })}</button></div>
         ) : (
           intl.formatMessage({ id: "common.loading" })
         )}
@@ -286,10 +288,9 @@ export function MarkdownImage({
           className,
         )}
         data-markdown-image-state="error"
-        role="img"
         title={localImageLink?.path}
       >
-        <ImageOffIcon aria-hidden="true" className="size-6" />
+        <div className="flex flex-col items-center gap-2"><ImageOffIcon aria-hidden="true" className="size-6" /><span role="status">{intl.formatMessage({ id: "codeViewer.imageUnavailable" })}</span><button type="button" className="min-h-11 rounded-md border border-border px-3 focus-visible:outline focus-visible:outline-2" onClick={() => { setRetryVersion(version => version + 1); setBrowserImageState({ source: displaySrc ?? "", status: "loading" }); }}>{intl.formatMessage({ id: "common.retry" })}</button></div>
       </div>
     );
   }
@@ -352,7 +353,7 @@ export function MarkdownImage({
         <img
           // React 复用同一 img 时，旧资源的异步事件可能命中新 src 的处理器。
           // 按资源重建节点，确保 load/error 只更新触发该事件的图片状态。
-          key={displaySrc}
+          key={`${displaySrc}:${retryVersion}`}
           alt={imageAlt}
           className={cn(
             imageThumbnailClassName,

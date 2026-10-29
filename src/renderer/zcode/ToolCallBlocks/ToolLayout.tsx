@@ -1,3 +1,4 @@
+import { useToolDetails } from "./ToolDetailsContext.js";
 import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible.js";
 import { Button } from "@/components/ui/button.js";
@@ -69,9 +70,9 @@ function ToolLayoutComponent({
   persistOpenKey,
   icon,
   showIcon = true,
-  canToggle = true,
-  forceOpen = false,
-  autoOpen = false,
+  canToggle: requestedCanToggle = true,
+  forceOpen: requestedForceOpen = false,
+  autoOpen: requestedAutoOpen = false,
   autoCollapseOnComplete = false,
   kindLabel,
   expandedKindLabel,
@@ -104,6 +105,10 @@ function ToolLayoutComponent({
   summaryAction,
 }: ToolLayoutProps) {
   const { intl } = useZCodeIntl();
+  const details = useToolDetails(toolId);
+  const canToggle = details ? true : requestedCanToggle;
+  const forceOpen = details ? false : requestedForceOpen;
+  const autoOpen = details ? false : requestedAutoOpen;
   const resolvedPersistOpenKey = persistOpenKey ?? toolId;
   const [isOpen, setIsOpen] = useState(
     () => toolLayoutOpenState.get(resolvedPersistOpenKey) ?? false,
@@ -119,7 +124,11 @@ function ToolLayoutComponent({
   const shouldShowStatusLabel = (showStatusLabel || showFailureStatus) && statusLabel != null;
   const shouldRenderResolvedContent = !hasSummaryAction && (isExpanded || shouldRenderContent);
   const resolvedContent = shouldRenderResolvedContent
-    ? (renderContent?.() ?? content ?? null)
+    ? (details && !details.ready
+      ? <div className="px-3 py-2 text-ui-sm" aria-live="polite">{details.error
+        ? <><span role="alert">工具详情加载失败：{details.error}</span><Button variant="ghost" onClick={details.load}>重试</Button></>
+        : "正在加载工具详情…"}</div>
+      : (renderContent?.() ?? content ?? null))
     : null;
   const summaryPrimaryText =
     isExpanded && expandedPrimaryText != null ? expandedPrimaryText : primaryText;
@@ -145,6 +154,10 @@ function ToolLayoutComponent({
     "font-medium whitespace-nowrap shrink-0",
     isRunning ? "animated-gradient-text" : "text-foreground-subtlest",
   );
+
+  useEffect(() => {
+    if (isExpanded && details && !details.ready && !details.loading && !details.error) details.load();
+  }, [isExpanded, details]);
 
   useEffect(() => {
     const persistedOpen = toolLayoutOpenState.get(resolvedPersistOpenKey);

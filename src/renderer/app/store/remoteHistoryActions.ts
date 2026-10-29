@@ -5,7 +5,7 @@ import { hcode, remoteBridge } from "../bridge";
 
 export async function loadRemoteHistory(viewId: string, get: () => AppState, patch: (id: string, update: Partial<Conversation>) => void, complete = false): Promise<void> {
   const initial = get().conversations[viewId];
-  if (!initial || initial.earlierRowsLoading || (!complete && !initial.earlierRows)) return;
+  if (!initial || initial.refreshing || initial.earlierRowsLoading || (!complete && !initial.earlierRows)) return;
   const ref = initial.earlierRows?.ref ?? (initial.sessionId ? { id: initial.sessionId, agent: initial.agent, projectPath: initial.projectPath } : undefined);
   if (!ref) return;
   const token = Symbol("remote-history");

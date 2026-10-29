@@ -194,8 +194,8 @@ export class ClaudeAgent implements AgentProvider {
     }
   }
 
-  listSessions(): Promise<SessionSummary[]> {
-    return this.history.all();
+  listSessions(refresh = false): Promise<SessionSummary[]> {
+    return this.history.all(refresh);
   }
 
   loadSession(id: string, projectPath: string): Promise<SessionLoadResult> {

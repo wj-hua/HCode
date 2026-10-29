@@ -36,6 +36,8 @@ import { useUiStore } from "../store/uiStore";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { PermissionCard } from "./PermissionCard";
 import { useFilePreview } from "./FilePreviewContext";
+import { ToolDetailsContext } from "@/ToolCallBlocks/ToolDetailsContext.js";
+import { useRemoteToolDetails } from "./useRemoteToolDetails";
 import { TurnChangeSummary } from "./TurnChangeSummary";
 
 interface Turn {
@@ -369,9 +371,10 @@ const ToolRow = memo(function ToolRow({ row, workspacePath }: { row: ToolCallRow
   const preview = useFilePreview();
   const theme = useUiStore((state) => state.theme);
   const codePreviewSettings = useUiStore((state) => state.codePreviewSettings);
-  const node = useMemo(() => toolCallRowToLegacyNode(row), [row]);
+  const detail = useRemoteToolDetails(row);
+  const node = useMemo(() => toolCallRowToLegacyNode(detail.row), [detail.row]);
   return (
-    <ToolCallBlock
+    <ToolDetailsContext.Provider value={detail.details}><ToolCallBlock
       toolCallNode={node}
       workspacePath={workspacePath}
       theme={theme}
@@ -380,6 +383,6 @@ const ToolRow = memo(function ToolRow({ row, workspacePath }: { row: ToolCallRow
       onOpenBrowserUrl={openExternal}
       onOpenFileLink={preview?.onOpenFileLink}
       onOpenCodeViewer={preview?.onOpenCodeViewer}
-    />
+    /></ToolDetailsContext.Provider>
   );
 });

@@ -262,7 +262,8 @@ export class AgyAgent implements AgentProvider {
 
   // ───────────────────────── 历史 ─────────────────────────
 
-  async listSessions(): Promise<SessionSummary[]> {
+  async listSessions(refresh = false): Promise<SessionSummary[]> {
+    if (refresh) { this.generation++; this.cache = null; this.loading = null; }
     if (this.cache) return this.cache;
     if (!this.loading) {
       const generation = this.generation;
@@ -271,9 +272,9 @@ export class AgyAgent implements AgentProvider {
           if (generation === this.generation) this.cache = list;
           return list;
         })
-        .catch(() => [] as SessionSummary[])
+        .catch((error: unknown) => { if (refresh) throw error; return [] as SessionSummary[]; })
         .finally(() => {
-          this.loading = null;
+          if (generation === this.generation) this.loading = null;
         });
     }
     return this.loading;

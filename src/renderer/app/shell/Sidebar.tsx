@@ -38,6 +38,7 @@ import { QuotaIndicator } from "./QuotaIndicator";
 import { RemoteIndicator } from "../remote/RemoteIndicator";
 import { isRemote } from "../bridge";
 import { RunningTasks } from "./RunningTasks";
+import { RefreshSessionListButton } from "./RefreshButtons";
 import { ConversationSection } from "./ConversationSection";
 
 const SECTION_CHEVRON_CLASS =
@@ -113,6 +114,7 @@ export function Sidebar({ onOpenSearch }: { onOpenSearch: () => void }) {
           </Button>
         </ControlHintTooltip>
         <div className="flex-1" />
+        <RefreshSessionListButton />
         <ControlHintTooltip title="新建会话" shortcut="⌘N" side="bottom">
           <Button
             variant="ghost"

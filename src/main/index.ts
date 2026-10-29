@@ -209,7 +209,7 @@ async function bootstrap() {
   handle("quota:list", (force) => quota!.list(force));
 
   handle("workspace:conversation", () => conversationWorkspace.ensure());
-  handle("projects:list", async () => buildProjects(await agents.allSessions(), store, conversationWorkspace.path));
+  handle("projects:list", async (refresh) => buildProjects(await agents.allSessions(refresh), store, conversationWorkspace.path));
   handle("projects:add", async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ["openDirectory", "createDirectory"],

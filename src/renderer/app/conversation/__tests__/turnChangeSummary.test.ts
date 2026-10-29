@@ -22,3 +22,8 @@ describe("本轮文件摘要", () => {
     ])).toEqual([]);
   });
 });
+
+it("远程摘要保留文件统计和差异引用，合并到同一路径", () => {
+  const summary = { kind: "toolCall", remoteDetails: { ref: "signed-ref", changes: [{ path: "a.ts", additions: 2, deletions: 1, hasPatch: true }] } } as unknown as ConversationRow;
+  expect(changesFromRows([summary, summary])).toEqual([{ path: "a.ts", additions: 4, deletions: 2, patches: [], detailRefs: ["signed-ref", "signed-ref"] }]);
+});

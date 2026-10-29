@@ -300,3 +300,27 @@ describe("慢速网络下的会话同步", () => {
     expect(resolved).toHaveBeenCalledWith({ sessionKey: "slow", interactionId: "approval" });
   });
 });
+
+it("手动刷新按快照序号合并期间事件，失败不清除待审批并继续接收增量", async () => {
+  const state = { sessionKey: "session" };
+  routeInvoke({ "chat:live": () => response([state]), "chat:snapshot": () => response({ seq: 1, rows: [], state, permissions: [] }) });
+  await bridge.connect();
+  const events = Events.instances[0]!;
+  events.send("hello", {}); await vi.advanceTimersByTimeAsync(0);
+  const rows = vi.fn(), resolved = vi.fn();
+  bridge.on("chat:rows", rows); bridge.on("permission:resolved", resolved);
+  events.send("permission:requested", { sessionKey: "session", interactionId: "approval" }, 2);
+  let complete!: (value: Response) => void;
+  routeInvoke({ "chat:snapshot": () => new Promise(resolve => { complete = resolve; }) });
+  const pending = bridge.refreshSession("session");
+  events.send("chat:rows", { sessionKey: "session", ops: [{ op: "old" }] }, 3);
+  events.send("chat:rows", { sessionKey: "session", ops: [{ op: "new" }] }, 4);
+  complete(response({ seq: 3, rows: [], state, permissions: [{ sessionKey: "session", interactionId: "approval" }] }));
+  await pending;
+  expect(rows.mock.calls.map(([event]) => event.ops[0].op)).toEqual(["reset", "new"]);
+  routeInvoke({ "chat:snapshot": () => { throw new Error("offline"); } });
+  await expect(bridge.refreshSession("session")).rejects.toThrow("offline");
+  expect(resolved).not.toHaveBeenCalled();
+  events.send("chat:rows", { sessionKey: "session", ops: [{ op: "after-failure" }] }, 5);
+  expect(rows).toHaveBeenLastCalledWith({ sessionKey: "session", ops: [{ op: "after-failure" }] });
+});

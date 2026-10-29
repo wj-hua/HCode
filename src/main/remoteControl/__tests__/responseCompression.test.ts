@@ -1,5 +1,5 @@
 import { request } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
@@ -65,6 +65,38 @@ async function login(): Promise<string> {
   const response = await raw("POST", "/api/login", HEADERS, JSON.stringify({ token: PASSWORD }));
   return String(response.headers["set-cookie"]).split(";")[0]!;
 }
+
+it("远程折叠工具只下发摘要，展开读取原文且签名和项目权限仍有效", async () => {
+  const tool = { kind: "toolCall", rowId: 1, turnId: "turn", toolCallId: "tool", toolName: "mcp__cua_repl__js", status: "success", inputText: "private-input".repeat(1000), input: { script: "private-input" }, output: { text: "private-output".repeat(1000) } } as ConversationRow;
+  liveRows = [tool];
+  const cookie = await login();
+  const invoke = async (channel: string, args: unknown[]) => JSON.parse((await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel, args }))).body.toString());
+  const page = await invoke("sessions:page", [{ agent: "codex", id: "history", projectPath: "/project" }]);
+  expect(JSON.stringify(page)).not.toContain("private-input");
+  expect(JSON.stringify(page)).not.toContain("private-output");
+  const reference = page.result.rows[0].remoteDetails.ref;
+  expect((await invoke("tools:detail", [reference])).result).toEqual(tool);
+  expect((await invoke("tools:detail", [reference + "x"])).ok).toBe(false);
+  projectPaths = [];
+  expect((await invoke("tools:detail", [reference])).ok).toBe(false);
+});
+
+it("正文里的本机产物图片映射为登录后可读的地址，不开放符号链接越界读取", async () => {
+  const picture = join(staticDir, "proof.png");
+  const body = Buffer.from("picture-bytes");
+  await writeFile(picture, body);
+  const escaped = join(staticDir, "escape.png");
+  await symlink("/etc/hosts", escaped);
+  liveRows = [{ kind: "assistantText", rowId: 1, turnId: "turn", state: "done", text: `![proof](${picture})\n\n![escape](${escaped})` }] as unknown as ConversationRow[];
+  const cookie = await login();
+  const response = await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel: "sessions:page", args: [{ agent: "codex", id: "history", projectPath: "/project" }] }));
+  const text = JSON.parse(response.body.toString()).result.rows[0].text;
+  const refs = [...text.matchAll(/\]\((api\/media\/[^)]+)\)/g)].map(match => match[1]);
+  expect(refs).toHaveLength(2);
+  expect((await raw("GET", `/${refs[0]}`, {})).status).toBe(401);
+  expect((await raw("GET", `/${refs[0]}`, { Cookie: cookie })).body).toEqual(body);
+  expect((await raw("GET", `/${refs[1]}`, { Cookie: cookie })).status).toBe(404);
+});
 
 it("界面脚本按浏览器支持的编码压缩，并允许长期缓存", async () => {
   const response = await raw("GET", "/assets/index-AbCd1234.js", { "Accept-Encoding": "gzip, deflate, br" });
@@ -180,4 +212,18 @@ it("手机只接收所查看会话的内容，仍接收其他会话的状态与�
   expect(received).toContain("chat:state");
   expect(received).toContain("approval");
   await reader.cancel();
+});
+
+it("手动刷新保留已加载范围，运行中工具和完整导出仍包含原始输入", async () => {
+  liveRows = [1, 2, 3, 4].map(rowId => ({ kind: "toolCall", rowId, turnId: `turn-${rowId}`, toolCallId: String(rowId), toolName: "Bash", status: rowId === 4 ? "pendingApproval" : "success", inputText: "command", input: { command: "echo command" } } as ConversationRow));
+  const cookie = await login();
+  const invoke = async (channel: string, args: unknown[]) => JSON.parse((await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel, args }))).body.toString());
+  const ref = { agent: "codex", id: "history", projectPath: "/project" };
+  const refreshed = await invoke("sessions:refresh", [ref, 2]);
+  expect(refreshed.result.rows.map((row: ConversationRow) => row.rowId)).toEqual([2, 3, 4]);
+  expect(refreshed.result.earlierRows.beforeRowId).toBe(2);
+  expect(refreshed.result.rows[2].input.command).toBe("echo command");
+  expect(refreshed.result.rows[2].remoteDetails).toBeUndefined();
+  expect((await invoke("sessions:load", [ref])).result.rows).toEqual(liveRows);
+  expect((await invoke("sessions:refresh", [ref, -1])).ok).toBe(false);
 });

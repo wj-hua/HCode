@@ -37,6 +37,7 @@ import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 import { selectConversationWorkspace } from "./conversationWorkspaceActions";
 import { SessionViewSync } from "./sessionViewSync";
+import { refreshConversation, refreshSessionList } from "./refreshActions";
 import { loadRemoteHistory, mergeHistoryRows } from "./remoteHistoryActions";
 import { restoreMessageAttachments } from "./messageAttachments";
 import { isNarrowRemote } from "../remote/useNarrowRemote";
@@ -61,6 +62,9 @@ export interface Conversation {
   rows: ConversationRow[];
   loading: boolean;
   loadError?: string;
+  refreshing?: boolean;
+  refreshError?: string;
+  refreshRequest?: symbol;
   earlierRows?: SessionLoadResult["earlierRows"];
   earlierRowsLoading?: boolean;
   earlierRowsError?: string;
@@ -99,6 +103,7 @@ export interface AppState {
   modelErrors: Partial<Record<AgentKind, string | undefined>>;
   projects: Project[];
   sessions: Record<string, SessionSummary[]>;
+  sessionListRefreshing: boolean;
   sessionErrors: Record<string, string | undefined>;
   conversationWorkspacePending: boolean;
   expanded: Record<string, boolean>;
@@ -117,6 +122,8 @@ export interface AppState {
 
   init(): Promise<void>;
   refreshProjects(): Promise<void>;
+  refreshSessionList(): Promise<void>;
+  refreshConversation(viewId: string): Promise<void>;
   loadSessions(projectPath: string): Promise<void>;
   toggleProject(projectPath: string, expanded?: boolean): void;
   setSearch(search: string): void;
@@ -462,6 +469,7 @@ export const useAppStore = create<AppState>((set, get) => {
     modelErrors: {},
     projects: [],
     sessions: {},
+    sessionListRefreshing: false,
     sessionErrors: {},
     conversationWorkspacePending: false,
     expanded: {},
@@ -495,6 +503,8 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ agentStatuses: await hcode.invoke("agent:status") });
     },
 
+    async refreshSessionList() { await refreshSessionList(get, set); },
+    async refreshConversation(viewId) { await refreshConversation(viewId, get, patchHistory); },
     async refreshProjects() {
       try {
         set({ projects: await hcode.invoke("projects:list") });

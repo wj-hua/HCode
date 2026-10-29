@@ -82,10 +82,10 @@ export class ClaudeHistory {
     private readonly getProjectPaths: () => readonly string[] = () => [],
   ) {}
 
-  async all(): Promise<SessionSummary[]> {
+  async all(refresh = false): Promise<SessionSummary[]> {
     const projectPaths = [...new Set(this.getProjectPaths())].sort();
     const projectPathsKey = JSON.stringify(projectPaths);
-    if (projectPathsKey !== this.projectPathsKey) {
+    if (refresh || projectPathsKey !== this.projectPathsKey) {
       this.generation++;
       this.cache = null;
       this.loading = null;

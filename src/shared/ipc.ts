@@ -115,7 +115,7 @@ export interface InvokeMap {
   "extensions:setSkillEnabled": [[agent: ExtensionAgent, projectPath: string, path: string, name: string, enabled: boolean], void];
   /** 各 CLI 的订阅额度；force 时忽略主进程缓存。 */
   "quota:list": [[force?: boolean], AgentQuota[]];
-  "projects:list": [[], Project[]];
+  "projects:list": [[refresh?: boolean], Project[]];
   "workspace:conversation": [[], string];
   "projects:add": [[], Project | null];
   "projects:addPath": [[path: string, create: boolean], Project];

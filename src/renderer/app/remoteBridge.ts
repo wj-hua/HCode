@@ -105,6 +105,9 @@ export function createRemoteBridge(): HCodeBridge & {
   loadEarlier(ref: SessionRef, beforeRowId: number): Promise<SessionLoadResult>;
   setViewedSessions(keys: string[]): void;
   stageAttachment: typeof stageAttachment;
+  loadToolDetails(ref: string, signal?: AbortSignal): Promise<import("@hcode/shared/types").ConversationRow & { kind: "toolCall" }>;
+  refreshSession(sessionKey: string): Promise<void>;
+  refreshHistory(ref: SessionRef, firstRowId?: number): Promise<SessionLoadResult>;
 } {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const latestStates = new Map<string, ChatStateEvent>();
@@ -215,26 +218,35 @@ export function createRemoteBridge(): HCodeBridge & {
    * 单个会话的快照失败只退避重试它自己，不断开事件流、不影响其他会话。
    * 每次请求前清空该会话的暂存事件：新快照在请求到达电脑后生成，已包含此前的所有事件。
    */
-  const syncSession = (events: EventSource, generation: number, state: ChatStateEvent, attempt = 0) => {
-    const current = () => source === events && generation === syncGeneration && viewedSessions.has(state.sessionKey);
+  const syncSession = async (events: EventSource, generation: number, state: ChatStateEvent, attempt = 0, manual = false): Promise<void> => {
     const controller = new AbortController();
+    const current = () => source === events && generation === syncGeneration && viewedSessions.has(state.sessionKey) && snapshotRequests.get(state.sessionKey) === controller;
+    snapshotRequests.get(state.sessionKey)?.abort();
     snapshotRequests.set(state.sessionKey, controller);
     awaiting.set(state.sessionKey, []);
-    (call("chat:snapshot", [state.sessionKey], controller.signal) as Promise<RemoteSessionSnapshot | null>).then(
-      (snapshot) => {
-        if (snapshotRequests.get(state.sessionKey) === controller) snapshotRequests.delete(state.sessionKey);
-        if (current()) applySnapshot(state, snapshot);
-      },
-      () => {
-        if (snapshotRequests.get(state.sessionKey) === controller) snapshotRequests.delete(state.sessionKey);
-        if (!current()) return;
-        const timer = setTimeout(() => {
-          snapshotTimers.delete(timer);
-          if (current()) syncSession(events, generation, state, attempt + 1);
-        }, Math.min(SNAPSHOT_RETRY_BASE_MS * 2 ** attempt, SNAPSHOT_RETRY_MAX_MS));
-        snapshotTimers.add(timer);
-      },
-    );
+    try {
+      const snapshot = await call("chat:snapshot", [state.sessionKey], controller.signal) as RemoteSessionSnapshot | null;
+      if (!current()) { if (manual) throw new Error("连接已变化，请重新刷新"); return; }
+      applySnapshot(state, snapshot);
+    } catch (error) {
+      if (manual) {
+        if (current()) {
+          const frames = awaiting.get(state.sessionKey) ?? [];
+          awaiting.delete(state.sessionKey);
+          for (const frame of frames) deliver(frame);
+          if (awaiting.size === 0) setConnection("connected");
+        }
+        throw error;
+      }
+      if (!current()) return;
+      const timer = setTimeout(() => {
+        snapshotTimers.delete(timer);
+        if (source === events && generation === syncGeneration && viewedSessions.has(state.sessionKey) && awaiting.has(state.sessionKey) && !snapshotRequests.has(state.sessionKey)) void syncSession(events, generation, state, attempt + 1);
+      }, Math.min(SNAPSHOT_RETRY_BASE_MS * 2 ** attempt, SNAPSHOT_RETRY_MAX_MS));
+      snapshotTimers.add(timer);
+    } finally {
+      if (snapshotRequests.get(state.sessionKey) === controller) snapshotRequests.delete(state.sessionKey);
+    }
   };
 
   /** 每次（重新）连上事件流：先取活动会话列表并立即更新运行状态，再按会话各自取快照补齐内容。 */
@@ -340,6 +352,13 @@ export function createRemoteBridge(): HCodeBridge & {
     async loadEarlier(ref, beforeRowId) {
       return await call("sessions:page", [ref, beforeRowId]) as SessionLoadResult;
     },
+    async loadToolDetails(ref, signal) { return await call("tools:detail", [ref], signal) as import("@hcode/shared/types").ConversationRow & { kind: "toolCall" }; },
+    async refreshSession(sessionKey) {
+      const state = latestStates.get(sessionKey);
+      if (!source || !state || !viewedSessions.has(sessionKey)) throw new Error("当前会话尚未连接，请重试");
+      await syncSession(source, syncGeneration, state, 0, true);
+    },
+    async refreshHistory(ref, firstRowId) { return await call("sessions:refresh", [ref, firstRowId]) as SessionLoadResult; },
     remote: true,
     stageAttachment,
     onConnectionChange(listener) {
