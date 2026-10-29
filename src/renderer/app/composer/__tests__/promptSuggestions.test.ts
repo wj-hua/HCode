@@ -2,6 +2,7 @@
 import { beforeEach, expect, it } from 'vitest';
 import type { ChatPromptSuggestionEvent } from '@hcode/shared/types';
 import { promptSuggestionRecord, usePromptSuggestionStore, visiblePromptSuggestion } from '../promptSuggestionStore';
+import { promptSuggestionKeyAction } from '../usePromptSuggestion';
 
 const identity = { agent: 'claude' as const, projectPath: '/project', sessionKey: 'source', sessionId: 'native' };
 const event = (patch: Partial<ChatPromptSuggestionEvent> = {}): ChatPromptSuggestionEvent => ({ agent: 'claude', projectPath: '/project', sessionKey: 'source', sessionId: 'native', turnId: 'turn-one', revision: 1, suggestion: '运行回归检查', ...patch });
@@ -44,4 +45,16 @@ it('新运行时接管同一原生会话后选用最新记录，不回退到旧�
   expect(visiblePromptSuggestion(current(), '', true)).toBeNull();
   store.accept(event({ sessionKey: 'new-source', turnId: 'turn-two', revision: 2, suggestion: '新的运行时建议' }));
   expect(visiblePromptSuggestion(current(), '', true)).toBe('新的运行时建议');
+});
+
+it('桌面用 Tab 或 → 接受，手机窄屏用回车填入；修饰键与输入法组字不接管', () => {
+  const key = (name: string, patch: Partial<Parameters<typeof promptSuggestionKeyAction>[0]> = {}) => ({ key: name, shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, isComposing: false, ...patch });
+  expect(promptSuggestionKeyAction(key('Tab'), false)).toBe('accept');
+  expect(promptSuggestionKeyAction(key('ArrowRight'), false)).toBe('accept');
+  expect(promptSuggestionKeyAction(key('Escape'), false)).toBe('dismiss');
+  expect(promptSuggestionKeyAction(key('Enter'), false)).toBeNull();
+  expect(promptSuggestionKeyAction(key('Enter'), true)).toBe('accept');
+  expect(promptSuggestionKeyAction(key('Enter', { shiftKey: true }), true)).toBeNull();
+  expect(promptSuggestionKeyAction(key('ArrowRight', { metaKey: true }), false)).toBeNull();
+  expect(promptSuggestionKeyAction(key('Enter', { isComposing: true }), true)).toBeNull();
 });
