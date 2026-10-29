@@ -231,9 +231,11 @@ HCode 只负责提供事件摘要；推送到手机（APNs、IM 机器人等）�
 - **事件**（`NotificationFeedEvent`，`src/shared/remoteControl.ts`）：
 
   ```json
-  {"id":"9f3a1c2b.7","type":"done","sessionKey":"…","sessionId":"…","agent":"claude","project":"HCode","title":"修复通知跳转","at":1793180000000}
+  {"id":"9f3a1c2b.7","type":"done","sessionKey":"…","sessionId":"…","agent":"claude","project":"HCode","projectPath":"/Users/me/Projects/HCode","title":"修复通知跳转","summary":"已修复：点按通知直接打开对应会话。","at":1793180000000}
   ```
 
   `type` 的取值：`done`（运行中或等待审批之后回到空闲）、`error`（运行中之后出错，不含错误详情）、`approval`（出现工具审批或提问，附带 `tool` 工具名，不含命令或参数）。`id` 可以直接作为去重键。
 - **会话标题**：可选 `title` 沿用所属 CLI 的会话列表标题；按 CLI、项目和原生会话 ID 精确匹配，新会话尚未进入历史时使用主进程已有的列表占位标题。标题可能来自首条消息的摘要，压成单行并限制为 120 个 Unicode 码点，不发送完整对话或审批参数。读取失败或超过 1.5 秒时记录诊断并省略标题，仍发送项目摘要；异步读取保持事件及补发顺序。旧订阅方可忽略此新增字段，旧 HCode 事件也仍然有效。
+- **回复摘要**：`done` 事件可选 `summary`，取本轮最后一条 AI 回复（最后一个用户输入之后），去掉代码块、表格和 Markdown 标记后按句子截取开头，单行、最多 100 个 Unicode 码点；本轮没有回复时省略，不回退到上一轮。`error`、`approval` 不带回复内容。摘要属于对话正文，订阅方应按自己的安全要求决定是否推送。
+- **直达会话**：`projectPath` 是项目绝对路径，也是 HCode 的项目唯一键。远程网页支持 `/?agent=<agent>&session=<sessionId>&project=<projectPath>`：初始化时按 CLI 与会话 ID 在该项目会话列表里定位并打开，随后从地址栏移除这些参数；会话不存在或项目不在远程范围内时提示并停在默认页面。项目是否允许访问仍由主进程远程 policy 校验。
 - **判断位置**：在主进程中根据 `chat:state` 的状态变化和 `permission:requested` 判断，不依赖窗口是否打开。排队连续发送的消息每结束一轮都会产生一次 `done`；委派、协作子会话的状态变化也会被计入。
