@@ -99,7 +99,7 @@ export class RemoteControlService {
   constructor(private readonly deps: RemoteControlDeps) {
     this.media = new RemoteMedia(source => this.mediaRows(source));
     this.tools = new RemoteToolDetails(source => this.mediaRows(source));
-    this.feed = new NotificationFeed(Date.now, deps.sessionTitle);
+    this.feed = new NotificationFeed(Date.now, deps.sessionTitle, deps.liveRows);
     this.tunnel = new ReverseTunnel(deps.env, (tunnel) => this.setStatus({ tunnel }));
   }
 
