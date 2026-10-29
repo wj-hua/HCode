@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button.js";
-import { App } from "../App";
+import { AppLoading } from "../AppLoading";
 import { remoteBridge } from "../bridge";
 import { RemoteUnauthorizedError, type RemoteConnectionState } from "../remoteBridge";
 import { RemoteConnectionBanner } from "./RemoteConnectionBanner";
 import { RemoteLogin } from "./RemoteLogin";
+
+const App = lazy(() => import("../App").then(module => ({ default: module.App })));
 
 /** 首次打开和断线恢复共用同一 bridge，不刷新已经打开的对话。 */
 export function RemoteApp() {
@@ -56,7 +58,7 @@ export function RemoteApp() {
 
   if (page === "login") return <RemoteLogin />;
   if (page === "ready") return <>
-    <App />
+    <Suspense fallback={<AppLoading />}><App /></Suspense>
     <RemoteConnectionBanner connection={connection} />
   </>;
   return <div className="flex h-dvh items-center justify-center bg-background p-6 text-foreground">

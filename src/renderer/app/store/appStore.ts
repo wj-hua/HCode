@@ -21,6 +21,7 @@ import type {
   PermissionRequestEvent,
   Project,
   SessionSummary,
+  SessionLoadResult,
   Settings,
   SettingsPatch,
 } from "@hcode/shared/types";
@@ -36,6 +37,8 @@ import { discardPersisted, loadQueue, saveQueue } from "../composer/persist";
 import { useUiStore } from "./uiStore";
 import { selectConversationWorkspace } from "./conversationWorkspaceActions";
 import { SessionViewSync } from "./sessionViewSync";
+import { loadRemoteHistory, mergeHistoryRows } from "./remoteHistoryActions";
+import { restoreMessageAttachments } from "./messageAttachments";
 import { isNarrowRemote } from "../remote/useNarrowRemote";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
@@ -58,6 +61,10 @@ export interface Conversation {
   rows: ConversationRow[];
   loading: boolean;
   loadError?: string;
+  earlierRows?: SessionLoadResult["earlierRows"];
+  earlierRowsLoading?: boolean;
+  earlierRowsError?: string;
+  historyRequest?: symbol;
   runState: ChatRunState;
   /** 回合结束后仍在运行的原生后台任务数。 */
   backgroundTasks?: number;
@@ -113,7 +120,8 @@ export interface AppState {
   loadSessions(projectPath: string): Promise<void>;
   toggleProject(projectPath: string, expanded?: boolean): void;
   setSearch(search: string): void;
-  openSession(summary: SessionSummary): Promise<void>;
+  openSession(summary: SessionSummary, complete?: boolean): Promise<void>;
+  loadEarlierHistory(viewId: string): Promise<void>;
   newChat(projectPath: string, agent?: AgentKind): void;
   /** 选择非项目目录；newDraft 为 true 时从独立入口新建，而不迁移当前草稿。 */
   workOutsideProject(newDraft?: boolean): Promise<void>;
@@ -229,19 +237,6 @@ function withLiveSessions(
   return live.length ? [...live, ...list].sort((a, b) => b.updatedAt - a.updatedAt) : list;
 }
 
-/** 用户消息的附件转回输入框格式：内联图片 → ImageInput，本地路径 → FileInput。 */
-function rowAttachments(row: Extract<ConversationRow, { kind: "userInput" }>): { images: ImageInput[]; files: FileInput[] } {
-  const attachments = row.attachments ?? [];
-  const images = attachments.flatMap((item) => {
-    const match = /^data:([^;,]+);base64,(.*)$/.exec(item.ref);
-    return match ? [{ mimeType: match[1]!, data: match[2]!, name: item.fileName }] : [];
-  });
-  const files = attachments
-    .filter((item) => item.ref.startsWith("/"))
-    .map((item) => ({ path: item.ref, name: item.fileName, mimeType: item.mime, size: item.bytes }));
-  return { images, files };
-}
-
 let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -254,6 +249,12 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!current) return state;
       return { conversations: { ...state.conversations, [viewId]: { ...current, ...patch } } };
     });
+
+  const patchHistory = (viewId: string, patch: Partial<Conversation>) => {
+    const key = get().conversations[viewId]?.sessionKey;
+    if (key && patch.rows) sessionViews.rememberHistory(key, patch.rows, patch.earlierRows);
+    patchConversation(viewId, patch);
+  };
 
   const findBySessionKey = (sessionKey: string): Conversation | undefined =>
     Object.values(get().conversations).find((conv) => conv.sessionKey === sessionKey);
@@ -378,11 +379,12 @@ export const useAppStore = create<AppState>((set, get) => {
 
   const subscribeEvents = () => {
     hcode.on('chat:promptSuggestion', event => usePromptSuggestionStore.getState().accept(event));
-    hcode.on("chat:rows", ({ sessionKey, ops }) => {
-      const rows = sessionViews.captureRows({ sessionKey, ops });
+    hcode.on("chat:rows", (event) => {
+      const { sessionKey } = event;
+      const history = sessionViews.captureRows(event);
       const conv = findBySessionKey(sessionKey);
       if (!conv) return;
-      patchConversation(conv.viewId, { rows, loading: false, loadError: undefined });
+      patchConversation(conv.viewId, { ...history, loading: false, loadError: undefined });
     });
     hcode.on("chat:state", (event) => {
       const liveState = sessionViews.captureState(event);
@@ -525,7 +527,9 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ search });
     },
 
-    async openSession(summary) {
+    async loadEarlierHistory(viewId) { await loadRemoteHistory(viewId, get, patchHistory); },
+
+    async openSession(summary, complete = false) {
       const existing = Object.values(get().conversations).find(
         (conv) => conv.agent === summary.agent && conv.projectPath === summary.projectPath && conv.sessionId === summary.id,
       );
@@ -533,6 +537,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set({ activeViewId: existing.viewId });
         const live = sessionViews.viewPatch(summary);
         if (live) patchConversation(existing.viewId, live);
+        if (complete && isRemote && existing.earlierRows) await loadRemoteHistory(existing.viewId, get, patchHistory, true);
         return;
       }
       const { settings } = get();
@@ -561,15 +566,19 @@ export const useAppStore = create<AppState>((set, get) => {
       }));
       const live = sessionViews.viewPatch(summary);
       if (live) patchConversation(viewId, live);
-      if (live?.rows) return;
+      if (live?.rows) {
+        if (complete && isRemote && live.earlierRows) await loadRemoteHistory(viewId, get, patchHistory, true);
+        return;
+      }
       const currentLoad = sessionViews.beginHistoryLoad(viewId);
       try {
         const result = await hcode.invoke("sessions:load", {
           agent: summary.agent,
           id: summary.id,
           projectPath: summary.projectPath,
-        });
-        if (currentLoad()) patchConversation(viewId, { rows: result.rows, ...sessionViews.viewPatch(summary), loading: false, loadError: undefined });
+        }, ...(complete ? [{ complete: true } as const] : []));
+        const latest = sessionViews.viewPatch(summary);
+        if (currentLoad()) patchHistory(viewId, { ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
       } catch (error) {
         if (!currentLoad()) return;
         const latest = sessionViews.viewPatch(summary);
@@ -810,14 +819,21 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     async forkFromMessage(rowId, mode) {
-      const conv = activeConversation();
+      let conv = activeConversation();
       if (!conv?.sessionId || !AGENTS[conv.agent].fork) return;
+      if (conv.earlierRows) {
+        await loadRemoteHistory(conv.viewId, get, patchHistory, true);
+        conv = get().conversations[conv.viewId];
+        if (!conv?.sessionId || conv.earlierRows) return;
+      }
       const users = conv.rows.filter((row) => row.kind === "userInput");
       const turnIndex = users.findIndex((row) => row.rowId === rowId);
       const row = users[turnIndex];
       if (!row) return;
       let summary: SessionSummary | null;
+      let attachments: Awaited<ReturnType<typeof restoreMessageAttachments>> | undefined;
       try {
+        if (mode === "rewind") attachments = await restoreMessageAttachments(row);
         summary = await hcode.invoke("sessions:fork", {
           ref: { agent: conv.agent, id: conv.sessionId, projectPath: conv.projectPath },
           turnIndex,
@@ -833,10 +849,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const viewId = summary?.id ?? get().activeViewId;
       if (mode === "rewind" && viewId) {
         // 在新视图的输入框挂载前写入草稿
-        const { images, files } = rowAttachments(row);
         drafts.set(viewId, row.text);
-        imageDrafts.set(viewId, images);
-        fileDrafts.set(viewId, files);
+        imageDrafts.set(viewId, attachments!.images);
+        fileDrafts.set(viewId, attachments!.files);
       }
       if (summary) {
         await get().openSession(summary);
@@ -848,16 +863,20 @@ export const useAppStore = create<AppState>((set, get) => {
       const conv = activeConversation();
       const row = conv?.rows.find((item) => item.rowId === rowId);
       if (!conv || row?.kind !== "userInput" || conv.runState === "running" || conv.runState === "awaitingApproval") return;
-      const { images, files } = rowAttachments(row);
-      await sendConversation(conv.viewId, row.text, images, files);
+      try {
+        const { images, files } = await restoreMessageAttachments(row);
+        await sendConversation(conv.viewId, row.text, images, files);
+      } catch (error) { toast(`重发失败：${errorMessage(error)}`, { variant: "warning" }); }
     },
 
-    editMessage(rowId) {
+    async editMessage(rowId) {
       const conv = activeConversation();
       const row = conv?.rows.find((item) => item.rowId === rowId);
       if (!conv || row?.kind !== "userInput") return;
-      const { images, files } = rowAttachments(row);
-      set({ composerPrefill: { viewId: conv.viewId, text: row.text, images, files } });
+      try {
+        const { images, files } = await restoreMessageAttachments(row);
+        if (get().activeViewId === conv.viewId) set({ composerPrefill: { viewId: conv.viewId, text: row.text, images, files } });
+      } catch (error) { toast(`读取消息附件失败：${errorMessage(error)}`, { variant: "warning" }); }
     },
 
     async updateSettings(patch) {

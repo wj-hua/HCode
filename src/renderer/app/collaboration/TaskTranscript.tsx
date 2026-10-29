@@ -14,7 +14,7 @@ export function TaskTranscript({ task, projectPath }: { task: CollaborationTask;
     setHistory(undefined); setError("");
     if (!task.nativeSessionId || task.status === "running") return;
     let active = true;
-    void hcode.invoke("sessions:load", { agent: task.agent, id: task.nativeSessionId, projectPath }).then(
+    void hcode.invoke("sessions:load", { agent: task.agent, id: task.nativeSessionId, projectPath }, { complete: true }).then(
       (result) => { if (active) setHistory(result.rows); },
       (reason) => { if (active) setError(String(reason)); },
     );

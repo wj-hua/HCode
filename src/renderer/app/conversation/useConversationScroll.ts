@@ -9,6 +9,7 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
   const revealedResult = useRef<string | undefined>(undefined);
   const stickRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const prependPosition = useRef<{ top: number; height: number } | null>(null);
   const [showJump, setShowJump] = useState(false);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
@@ -33,6 +34,21 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
   useLayoutEffect(() => {
     if (!conversation.loading) scrollToBottom();
   }, [conversation.loading, scrollToBottom]);
+
+  const beforeHistoryLoad = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    stickRef.current = false;
+    prependPosition.current = { top: element.scrollTop, height: element.scrollHeight };
+  };
+  useLayoutEffect(() => {
+    const position = prependPosition.current;
+    const element = scrollRef.current;
+    if (!position || !element || conversation.earlierRowsLoading) return;
+    element.scrollTop = position.top + element.scrollHeight - position.height;
+    lastScrollTopRef.current = element.scrollTop;
+    prependPosition.current = null;
+  }, [conversation.rows, conversation.earlierRowsLoading]);
 
   // 完整结果一次性到达时先展示结论开头；用户正在向上阅读时只更新内容，不抢位置。
   useLayoutEffect(() => {
@@ -68,5 +84,5 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
   };
 
   const followLatest = (behavior: ScrollBehavior = 'auto') => { stickRef.current = true; scrollToBottom(behavior); };
-  return { scrollRef, contentRef, onScroll, showJump, followLatest };
+  return { scrollRef, contentRef, onScroll, showJump, followLatest, beforeHistoryLoad };
 }

@@ -2,7 +2,7 @@
 // 断线重连后先取活动会话列表，再逐个会话取快照覆盖本地内容；快照 seq 之前的事件丢弃，避免流式文字重复。
 import { EVENT_CHANNELS, type EventChannel, type HCodeBridge, type InvokeChannel } from "@hcode/shared/ipc";
 import type { RemoteOnlyInvokeMap, RemoteSessionSnapshot } from "@hcode/shared/remoteControl";
-import type { ChatStateEvent, PermissionRequestEvent, Settings, SettingsPatch } from "@hcode/shared/types";
+import type { ChatStateEvent, PermissionRequestEvent, SessionRef, SessionLoadResult, Settings, SettingsPatch } from "@hcode/shared/types";
 
 const HEADERS = { "Content-Type": "application/json", "X-HCode-Remote": "1" };
 const REMOTE_THEME_KEY = "hcode-remote-theme";
@@ -75,6 +75,8 @@ export function createRemoteBridge(): HCodeBridge & {
   connect(signal?: AbortSignal): Promise<void>;
   disconnect(): void;
   onConnectionChange(listener: (state: RemoteConnectionState) => void): () => void;
+  loadEarlier(ref: SessionRef, beforeRowId: number): Promise<SessionLoadResult>;
+  setViewedSessions(keys: string[]): void;
 } {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const latestStates = new Map<string, ChatStateEvent>();
@@ -87,7 +89,10 @@ export function createRemoteBridge(): HCodeBridge & {
   };
   // 设置改动只在本页面生效：主题、模型选择不影响电脑上的 HCode。
   let settings: Settings | null = null;
-  const pendingPermissions = new Map<string, string>();
+  const pendingPermissions = new Map<string, PermissionRequestEvent>();
+  const viewedSessions = new Set<string>();
+  const snapshotRequests = new Map<string, AbortController>();
+  const clientId = crypto.randomUUID();
   const floors = new Map<string, number>();
   /** 事件流刚连上、活动会话列表返回前收到的全部事件。 */
   let buffer: Frame[] | null = null;
@@ -104,10 +109,11 @@ export function createRemoteBridge(): HCodeBridge & {
     for (const listener of connectionListeners) listener(state);
   };
 
-  const call = async (channel: string, args: unknown[]) => {
+  const call = async (channel: string, args: unknown[], signal?: AbortSignal) => {
     const timeout = CALL_TIMEOUTS[channel];
+    const signals = [signal, timeout ? AbortSignal.timeout(timeout) : undefined].filter((item): item is AbortSignal => item !== undefined);
     try {
-      return await post("api/invoke", { channel, args }, timeout ? AbortSignal.timeout(timeout) : undefined);
+      return await post("api/invoke", { channel, args }, signals.length ? AbortSignal.any(signals) : undefined);
     } catch (error) {
       // 口令被重新生成或电脑上关闭了远程操控：回到登录页。
       if (error instanceof RemoteUnauthorizedError) location.reload();
@@ -118,6 +124,7 @@ export function createRemoteBridge(): HCodeBridge & {
   const deliver = (frame: Frame) => {
     const { channel, payload, id } = frame;
     const sessionKey = (payload as { sessionKey?: unknown } | null)?.sessionKey;
+    if (channel === "chat:rows" && typeof sessionKey === "string" && !viewedSessions.has(sessionKey)) return;
     if (typeof sessionKey === "string") {
       const waiting = awaiting.get(sessionKey);
       if (waiting) {
@@ -128,7 +135,7 @@ export function createRemoteBridge(): HCodeBridge & {
     }
     if (channel === "permission:requested") {
       const event = payload as PermissionRequestEvent;
-      pendingPermissions.set(event.interactionId, event.sessionKey);
+      pendingPermissions.set(event.interactionId, event);
     } else if (channel === "permission:resolved") {
       pendingPermissions.delete((payload as { interactionId: string }).interactionId);
     }
@@ -140,6 +147,8 @@ export function createRemoteBridge(): HCodeBridge & {
     syncGeneration++;
     buffer = null;
     awaiting.clear();
+    for (const controller of snapshotRequests.values()) controller.abort();
+    snapshotRequests.clear();
     for (const timer of snapshotTimers) clearTimeout(timer);
     snapshotTimers.clear();
   };
@@ -147,7 +156,8 @@ export function createRemoteBridge(): HCodeBridge & {
   /** 断线期间已在电脑上处理掉的审批不会再出现在快照里，补发 resolved 让界面关闭审批卡片。 */
   const resolveMissingPermissions = (inScope: (sessionKey: string) => boolean, current: PermissionRequestEvent[]) => {
     const kept = new Set(current.map((permission) => permission.interactionId));
-    for (const [interactionId, sessionKey] of pendingPermissions) {
+    for (const [interactionId, permission] of pendingPermissions) {
+      const sessionKey = permission.sessionKey;
       if (!inScope(sessionKey) || kept.has(interactionId)) continue;
       pendingPermissions.delete(interactionId);
       emit("permission:resolved", { sessionKey, interactionId });
@@ -163,9 +173,9 @@ export function createRemoteBridge(): HCodeBridge & {
     if (snapshot) {
       floors.set(sessionKey, snapshot.seq);
       emit("chat:state", snapshot.state ?? state);
-      emit("chat:rows", { sessionKey, ops: [{ op: "reset", rows: snapshot.rows }] });
+      emit("chat:rows", { sessionKey, ops: [{ op: "reset", rows: snapshot.rows }], ...(snapshot.earlierRows ? { earlierRows: snapshot.earlierRows } : {}) });
       for (const permission of snapshot.permissions) {
-        pendingPermissions.set(permission.interactionId, permission.sessionKey);
+        pendingPermissions.set(permission.interactionId, permission);
         emit("permission:requested", permission);
       }
     }
@@ -178,11 +188,17 @@ export function createRemoteBridge(): HCodeBridge & {
    * 每次请求前清空该会话的暂存事件：新快照在请求到达电脑后生成，已包含此前的所有事件。
    */
   const syncSession = (events: EventSource, generation: number, state: ChatStateEvent, attempt = 0) => {
-    const current = () => source === events && generation === syncGeneration;
+    const current = () => source === events && generation === syncGeneration && viewedSessions.has(state.sessionKey);
+    const controller = new AbortController();
+    snapshotRequests.set(state.sessionKey, controller);
     awaiting.set(state.sessionKey, []);
-    (call("chat:snapshot", [state.sessionKey]) as Promise<RemoteSessionSnapshot | null>).then(
-      (snapshot) => { if (current()) applySnapshot(state, snapshot); },
+    (call("chat:snapshot", [state.sessionKey], controller.signal) as Promise<RemoteSessionSnapshot | null>).then(
+      (snapshot) => {
+        if (snapshotRequests.get(state.sessionKey) === controller) snapshotRequests.delete(state.sessionKey);
+        if (current()) applySnapshot(state, snapshot);
+      },
       () => {
+        if (snapshotRequests.get(state.sessionKey) === controller) snapshotRequests.delete(state.sessionKey);
         if (!current()) return;
         const timer = setTimeout(() => {
           snapshotTimers.delete(timer);
@@ -220,7 +236,7 @@ export function createRemoteBridge(): HCodeBridge & {
     resolveMissingPermissions((key) => !liveKeys.has(key), []);
     for (const state of live) {
       emit("chat:state", state);
-      syncSession(events, generation, state);
+      if (viewedSessions.has(state.sessionKey)) syncSession(events, generation, state);
     }
     emit("sessions:indexChanged", { projectPaths: [] });
     const frames = buffer ?? [];
@@ -235,13 +251,23 @@ export function createRemoteBridge(): HCodeBridge & {
     source?.close();
     cancelSync();
     setConnection("connecting");
-    const events = new EventSource("api/events");
+    const query = new URLSearchParams({ clientId });
+    for (const key of viewedSessions) query.append("sessionKey", key);
+    const events = new EventSource(`api/events?${query}`);
     source = events;
     // 每次（重新）连上都会先收到 hello，在此对齐断线期间错过的内容。
-    events.addEventListener("hello", () => {
+    events.addEventListener("hello", (message) => {
       if (source !== events) return;
       if (eventRetryTimer) clearTimeout(eventRetryTimer);
       eventRetryTimer = null;
+      const hello = JSON.parse((message as MessageEvent<string>).data) as { permissions?: PermissionRequestEvent[] };
+      if (hello.permissions) {
+        resolveMissingPermissions(() => true, hello.permissions);
+        for (const permission of hello.permissions) {
+          pendingPermissions.set(permission.interactionId, permission);
+          emit("permission:requested", permission);
+        }
+      }
       void resync(events);
     });
     for (const channel of EVENT_CHANNELS) {
@@ -275,6 +301,17 @@ export function createRemoteBridge(): HCodeBridge & {
   };
 
   return {
+    /** 只订阅当前查看的内容；切换时重建事件流并取消旧下载，hello 会补齐状态和审批。 */
+    setViewedSessions(keys) {
+      const next = new Set(keys);
+      if (next.size === viewedSessions.size && [...next].every(key => viewedSessions.has(key))) return;
+      viewedSessions.clear();
+      for (const key of next) viewedSessions.add(key);
+      if (source) openEvents();
+    },
+    async loadEarlier(ref, beforeRowId) {
+      return await call("sessions:page", [ref, beforeRowId]) as SessionLoadResult;
+    },
     remote: true,
     onConnectionChange(listener) {
       connectionListeners.add(listener);
@@ -296,11 +333,14 @@ export function createRemoteBridge(): HCodeBridge & {
       listeners.set(channel, set);
       set.add(listener as (payload: unknown) => void);
       if (channel === "chat:state") for (const state of latestStates.values()) (listener as (payload: unknown) => void)(state);
+      if (channel === "permission:requested") for (const permission of pendingPermissions.values()) (listener as (payload: unknown) => void)(permission);
       return () => set.delete(listener as (payload: unknown) => void);
     },
     async invoke(channel, ...args) {
       if (channel in EMPTY_RESULTS) return EMPTY_RESULTS[channel] as never;
       switch (channel) {
+        case "sessions:load":
+          return await call((args[1] as { complete?: boolean } | undefined)?.complete ? "sessions:load" : "sessions:page", [args[0]]) as never;
         case "settings:get":
           settings ??= { ...await call(channel, args) as Settings, theme: readRemoteTheme() };
           return settings as never;

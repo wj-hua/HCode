@@ -124,7 +124,7 @@ export interface InvokeMap {
   "projects:reorder": [[paths: string[]], void];
   "projects:remove": [[path: string], void];
   "sessions:list": [[projectPath: string], SessionSummary[]];
-  "sessions:load": [[ref: SessionRef], SessionLoadResult];
+  "sessions:load": [[ref: SessionRef, options?: { complete: boolean }], SessionLoadResult];
   "claude:subagents": [[sessionId: string, projectPath: string], string[]];
   "claude:subagentMessages": [[sessionId: string, projectPath: string, agentId: string], import("@zcode/shared/zcode-protocol-v4").ConversationRow[]];
   "codex:subagents": [[sessionId: string, projectPath: string], import("./types.js").NativeSubagent[]];

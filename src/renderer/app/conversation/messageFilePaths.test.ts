@@ -1,7 +1,10 @@
 // 从实际消息渲染入口验证路径可点击，避免只测试正则而遗漏 Markdown 安全处理。
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { loadLocaleMessages } from "@/i18n/localeMessages.js";
+
+beforeAll(() => loadLocaleMessages("zh-CN"));
 import { MessageResponse } from "@/components/ai-elements/message.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import { TooltipProvider } from "@/components/ui/tooltip.js";

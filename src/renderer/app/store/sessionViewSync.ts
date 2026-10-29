@@ -1,5 +1,5 @@
 // 保存本进程收到的原生会话快照；独立历史视图通过 CLI、项目和原生 ID 绑定真实执行身份。
-import type { ChatRowsEvent, ChatStateEvent, ConversationRow, SessionSummary } from "@hcode/shared/types";
+import type { ChatRowsEvent, ChatStateEvent, ConversationRow, SessionLoadResult, SessionSummary } from "@hcode/shared/types";
 import { applyRowOps } from "../rows";
 import type { Conversation } from "./appStore";
 
@@ -15,6 +15,7 @@ export class SessionViewSync {
   private readonly nativeKeys = new Map<string, string>();
   private readonly startedAt = new Map<string, number>();
   private readonly historyLoads = new Map<string, symbol>();
+  private readonly historyCursors = new Map<string, SessionLoadResult["earlierRows"]>();
 
   /** 同一页面关闭后重开会复用 viewId；只有最新一次读取能回写，不能仅靠 viewId 判断。 */
   beginHistoryLoad(viewId: string): () => boolean {
@@ -28,10 +29,26 @@ export class SessionViewSync {
   }
 
   /** 未打开的子会话也接收行，避免打开时从一份滞后的磁盘快照开始追加。 */
-  captureRows(event: ChatRowsEvent): ConversationRow[] {
-    const rows = applyRowOps(this.rows.get(event.sessionKey) ?? [], event.ops);
+  captureRows(event: ChatRowsEvent): Pick<Conversation, "rows" | "earlierRows"> {
+    const previous = this.rows.get(event.sessionKey) ?? [];
+    const reset = event.ops.find(op => op.op === "reset");
+    let ops = event.ops;
+    if (reset?.op === "reset") {
+      const first = reset.rows[0]?.rowId;
+      const overlaps = first !== undefined && previous.some(row => row.rowId === first);
+      const prefix = event.earlierRows && overlaps ? previous.filter(row => row.rowId < first!) : [];
+      if (prefix.length) ops = event.ops.map(op => op === reset ? { ...reset, rows: [...prefix, ...reset.rows] } : op);
+      else this.historyCursors.set(event.sessionKey, event.earlierRows);
+    }
+    const rows = applyRowOps(previous, ops);
     this.rows.set(event.sessionKey, rows);
-    return rows;
+    return { rows, earlierRows: this.historyCursors.get(event.sessionKey) };
+  }
+
+  /** 补入磁盘历史后也更新实时缓存，后续增量和重连不能把已展开的历史丢掉。 */
+  rememberHistory(sessionKey: string, rows: ConversationRow[], cursor: SessionLoadResult["earlierRows"]): void {
+    this.rows.set(sessionKey, rows);
+    this.historyCursors.set(sessionKey, cursor);
   }
 
   /** init 前后的状态共用执行 key；后续省略原生 ID 的通知仍保留已确认的关联。 */
@@ -82,7 +99,7 @@ export class SessionViewSync {
       runStartedAt: this.startedAt.get(state.sessionKey),
       error: state.error,
       permissionMode: state.permissionMode,
-      ...(rows ? { rows, loading: false, loadError: undefined } : {}),
+      ...(rows ? { rows, earlierRows: this.historyCursors.get(state.sessionKey), loading: false, loadError: undefined } : {}),
       ...(state.model ? { activeModel: state.model } : {}),
       ...(state.usage ? { usage: state.usage } : {}),
     };
@@ -96,6 +113,7 @@ export class SessionViewSync {
       if (this.nativeKeys.get(key) === sessionKey) this.nativeKeys.delete(key);
     }
     this.rows.delete(sessionKey);
+    this.historyCursors.delete(sessionKey);
     this.states.delete(sessionKey);
     this.startedAt.delete(sessionKey);
   }

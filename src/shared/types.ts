@@ -170,6 +170,8 @@ export interface ForkParams {
 }
 
 export interface SessionLoadResult {
+  /** 仅远程历史使用；桌面继续一次读取完整历史。 */
+  earlierRows?: { ref: SessionRef; beforeRowId: number };
   summary: SessionSummary | null;
   rows: ConversationRow[];
 }
@@ -193,6 +195,7 @@ export type RowOp =
 export type ChatRunState = "idle" | "running" | "awaitingApproval" | "error";
 
 export interface ChatRowsEvent {
+  earlierRows?: SessionLoadResult["earlierRows"];
   sessionKey: string;
   ops: RowOp[];
 }

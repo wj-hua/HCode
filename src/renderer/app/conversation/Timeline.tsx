@@ -27,6 +27,7 @@ import { ConversationUserInputBody } from "@/v4/ConversationUserInputBody.js";
 import { ConversationUserInputContent } from "@/v4/ConversationUserInputContent.js";
 import { toolCallRowToLegacyNode } from "@/v4/toolCallRowAdapter.js";
 import { hcode, isRemote } from "../bridge";
+import { REMOTE_MEDIA_PATH } from "@hcode/shared/remoteControl";
 import { formatDuration } from "../format";
 import { ImageAttachments } from "../ImageAttachments";
 import { FileAttachments } from "../FileAttachments";
@@ -291,8 +292,9 @@ function MessageActions({ row, canFork, canResend, isLastUser }: {
 
 function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow; canFork: boolean; canResend: boolean; isLastUser: boolean }) {
   const preview = useFilePreview();
-  const images = (row.attachments ?? []).filter((attachment) => attachment.ref.startsWith("data:image/")).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
-  const files = (row.attachments ?? []).filter((attachment) => !attachment.ref.startsWith("data:image/")).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
+  const imageAttachment = (ref: string) => ref.startsWith("data:image/") || ref.startsWith(REMOTE_MEDIA_PATH);
+  const images = (row.attachments ?? []).filter((attachment) => imageAttachment(attachment.ref)).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
+  const files = (row.attachments ?? []).filter((attachment) => !imageAttachment(attachment.ref)).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
   return (
     <div className="group/user flex flex-col items-end gap-2">
       <ImageAttachments images={images} className="justify-end" />

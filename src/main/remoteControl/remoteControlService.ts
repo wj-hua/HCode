@@ -7,7 +7,11 @@ import type { AddressInfo } from "node:net";
 import { extname, join, normalize, sep } from "node:path";
 import type { EventChannel, EventMap, InvokeChannel } from "../../shared/ipc.js";
 import type { RemoteControlStatus, RemoteSessionSnapshot } from "../../shared/remoteControl.js";
-import type { ChatStateEvent, ConversationRow, PermissionRequestEvent, RemoteControlSettings, Settings } from "../../shared/types.js";
+import type { ChatStateEvent, ChatRowsEvent, ConversationRow, PermissionRequestEvent, RemoteControlSettings, SessionLoadResult, Settings } from "../../shared/types.js";
+import { REMOTE_MEDIA_PATH } from "../../shared/remoteControl.js";
+import { RemoteMedia, RemoteMediaNotFound, REMOTE_IMAGE_HEADERS, type RemoteImage, type RemoteMediaSource } from "./remoteMedia.js";
+import { remoteHistoryPage } from "./historyPage.js";
+import { RemoteEventClients } from "./eventClients.js";
 import { compress, isCompressible, negotiateEncoding, type ContentEncoding } from "./httpCompression.js";
 import { NotificationFeed } from "./notificationFeed.js";
 import { checkRemoteInvoke, remoteSettings, REMOTE_EVENTS, type RemotePolicyContext } from "./policy.js";
@@ -21,8 +25,6 @@ const MAX_LOGIN_FAILURES = 5;
 /** fs:stageAttachment 的 base64 上限为 28 MB，再留出 JSON 外壳。 */
 const MAX_INVOKE_BYTES = 30 * 1024 * 1024;
 const HEARTBEAT_MS = 15_000;
-/** 客户端读取太慢时断开，由它重连后重新取快照。 */
-const MAX_PENDING_EVENT_BYTES = 8 * 1024 * 1024;
 /** 构建产物目录：文件名带内容哈希，内容变化必然换名，可让浏览器永久缓存。 */
 const HASHED_ASSET_DIR = "assets";
 const HASHED_ASSET_CACHE = "public, max-age=31536000, immutable";
@@ -64,6 +66,7 @@ export interface RemoteControlDeps {
   /** ssh 进程的环境变量。 */
   env(): Record<string, string>;
   onStatus(status: RemoteControlStatus): void;
+  thumbnail?(image: RemoteImage): RemoteImage;
 }
 
 class HttpError extends Error {
@@ -78,7 +81,7 @@ export class RemoteControlService {
   private status: RemoteControlStatus = { state: "off", clients: 0, notificationSubscribers: 0, tunnel: { state: "off" } };
   private readonly tunnel: ReverseTunnel;
   private seq = 0;
-  private readonly clients = new Set<ServerResponse>();
+  private readonly clients = new RemoteEventClients(() => this.updateClients());
   private loginFailures: number[] = [];
   private heartbeat: NodeJS.Timeout | null = null;
   private applying: Promise<void> = Promise.resolve();
@@ -86,10 +89,12 @@ export class RemoteControlService {
   private readonly states = new Map<string, ChatStateEvent>();
   private readonly permissions = new Map<string, PermissionRequestEvent>();
   private readonly feed: NotificationFeed;
+  private readonly media: RemoteMedia;
   /** 带哈希构建产物的压缩结果，键为“路径 + 编码”；内容不变，进程内缓存即可。 */
   private readonly compressedAssets = new Map<string, Promise<Buffer>>();
 
   constructor(private readonly deps: RemoteControlDeps) {
+    this.media = new RemoteMedia(source => this.mediaRows(source));
     this.feed = new NotificationFeed(Date.now, deps.sessionTitle);
     this.tunnel = new ReverseTunnel(deps.env, (tunnel) => this.setStatus({ tunnel }));
   }
@@ -135,11 +140,8 @@ export class RemoteControlService {
     }
     this.feed.observe(channel, payload);
     if (!this.server || this.clients.size === 0 || !REMOTE_EVENTS.has(channel)) return;
-    const frame = `id: ${++this.seq}\nevent: ${channel}\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const client of this.clients) {
-      if (client.writableLength > MAX_PENDING_EVENT_BYTES) client.destroy();
-      else client.write(frame);
-    }
+    const outgoing = channel === "chat:rows" ? this.mediaEvent(payload as ChatRowsEvent) : payload;
+    this.clients.publish(channel, outgoing as EventMap[C], ++this.seq);
   }
 
   dispose() {
@@ -202,7 +204,7 @@ export class RemoteControlService {
     this.server = server;
     this.port = (server.address() as AddressInfo).port;
     this.heartbeat = setInterval(() => {
-      for (const client of this.clients) client.write(": ping\n\n");
+      this.clients.ping();
       this.feed.ping();
     }, HEARTBEAT_MS);
     this.setStatus({ state: "listening", port: this.port, error: undefined });
@@ -225,9 +227,7 @@ export class RemoteControlService {
   }
 
   private disconnectClients() {
-    for (const client of this.clients) client.end();
-    this.clients.clear();
-    this.updateClients();
+    this.clients.disconnect();
   }
 
   private setStatus(patch: Partial<RemoteControlStatus>) {
@@ -260,6 +260,7 @@ export class RemoteControlService {
       return sendJson(res, 200, { ok: true });
     }
     if (!this.authorized(req)) throw new HttpError(401, "需要登录");
+    if (pathname.startsWith(`/${REMOTE_MEDIA_PATH}`)) return this.serveMedia(req, res, pathname);
     if (req.method === "GET" && pathname === "/api/events") return this.openEvents(req, res);
     if (req.method === "POST" && pathname === "/api/invoke") return this.invoke(req, res);
     throw new HttpError(404, "Not found");
@@ -300,18 +301,7 @@ export class RemoteControlService {
   }
 
   private openEvents(req: IncomingMessage, res: ServerResponse) {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Accel-Buffering": "no",
-    });
-    res.write(`retry: 3000\nevent: hello\ndata: ${JSON.stringify({ seq: this.seq })}\n\n`);
-    this.clients.add(res);
-    this.updateClients();
-    req.on("close", () => {
-      this.clients.delete(res);
-      this.updateClients();
-    });
+    this.clients.open(req, res, { seq: this.seq, permissions: [...this.permissions.values()] });
   }
 
   private async invoke(req: IncomingMessage, res: ServerResponse) {
@@ -328,12 +318,23 @@ export class RemoteControlService {
   }
 
   private async dispatch(channel: string, args: unknown[]): Promise<unknown> {
+    if (channel === "sessions:page") {
+      if (!checkRemoteInvoke(this.deps.policy, "sessions:load", [args[0]])) throw new HttpError(403, "远程不能读取该会话");
+      const ref = args[0] as import("../../shared/types.js").SessionRef;
+      const result = await this.deps.invoke("sessions:load", [ref]) as SessionLoadResult;
+      const page = remoteHistoryPage(result, ref, args[1] == null ? undefined : args[1] as number);
+      return { ...page, rows: this.media.mapRows(page.rows, { ref }) };
+    }
     if (channel === "chat:live") {
       return [...this.states.values()].filter((event) => this.deps.hasSession(event.sessionKey));
     }
     if (channel === "chat:snapshot") return this.snapshot(String(args[0] ?? ""));
     if (!checkRemoteInvoke(this.deps.policy, channel, args)) throw new HttpError(403, `远程不能调用：${channel}`);
     const result = await this.deps.invoke(channel, args);
+    if (channel === "sessions:load") {
+      const history = result as SessionLoadResult;
+      return { ...history, rows: this.media.mapRows(history.rows, { ref: args[0] as import("../../shared/types.js").SessionRef }) };
+    }
     return channel === "settings:get" ? remoteSettings(result as Settings) : result;
   }
 
@@ -341,12 +342,52 @@ export class RemoteControlService {
     // liveRows 会同步发出缓冲中的增量，因此取完行再读 seq。
     const rows = this.deps.liveRows(sessionKey);
     if (!rows) return null;
+    const page = this.livePage(sessionKey, rows);
     return {
       seq: this.seq,
-      rows,
+      ...page,
+      rows: this.media.mapRows(page.rows, { sessionKey }),
       state: this.states.get(sessionKey) ?? null,
       permissions: [...this.permissions.values()].filter((event) => event.sessionKey === sessionKey),
     };
+  }
+
+  private mediaEvent(event: ChatRowsEvent): ChatRowsEvent {
+    const source = { sessionKey: event.sessionKey };
+    const reset = event.ops.find(op => op.op === "reset");
+    const page = reset?.op === "reset" ? this.livePage(event.sessionKey, reset.rows) : undefined;
+    return { ...event, ...(page?.earlierRows ? { earlierRows: page.earlierRows } : {}), ops: event.ops.map(op => op.op === "reset" ? { ...op, rows: this.media.mapRows(page!.rows, source) }
+      : op.op === "upsert" ? { ...op, row: this.media.mapRow(op.row, source) } : op) };
+  }
+
+  private livePage(sessionKey: string, rows: ConversationRow[]): Pick<SessionLoadResult, "rows" | "earlierRows"> {
+    const state = this.states.get(sessionKey);
+    if (!state?.sessionId) return { rows };
+    const ref = { agent: state.agent, id: state.sessionId, projectPath: state.projectPath };
+    const page = remoteHistoryPage({ summary: null, rows }, ref);
+    return { rows: page.rows, ...(page.earlierRows ? { earlierRows: page.earlierRows } : {}) };
+  }
+
+  private async mediaRows(source: RemoteMediaSource): Promise<readonly ConversationRow[]> {
+    if ("sessionKey" in source) return this.deps.liveRows(source.sessionKey) ?? [];
+    // 项目移除后，已签发的图片地址也必须失效；不向客户端透露原路径。
+    if (!this.deps.policy.projectPaths().includes(source.ref.projectPath)) throw new RemoteMediaNotFound();
+    if (!checkRemoteInvoke(this.deps.policy, "sessions:load", [source.ref])) throw new RemoteMediaNotFound();
+    return (await this.deps.invoke("sessions:load", [source.ref]) as SessionLoadResult).rows;
+  }
+
+  private async serveMedia(req: IncomingMessage, res: ServerResponse, pathname: string) {
+    if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "Method not allowed");
+    let image: RemoteImage;
+    try { image = await this.media.read(pathname.slice(REMOTE_MEDIA_PATH.length + 1)); }
+    catch (error) {
+      if (error instanceof RemoteMediaNotFound) throw new HttpError(error.status, error.message);
+      throw error;
+    }
+    const thumbnail = new URL(req.url!, "http://localhost").searchParams.has("thumbnail");
+    if (thumbnail && this.deps.thumbnail) image = this.deps.thumbnail(image);
+    res.writeHead(200, { ...REMOTE_IMAGE_HEADERS, "Content-Type": image.type, "Content-Length": image.body.length });
+    res.end(req.method === "HEAD" ? undefined : image.body);
   }
 
   private async serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string) {

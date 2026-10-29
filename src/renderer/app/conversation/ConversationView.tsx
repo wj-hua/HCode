@@ -20,6 +20,7 @@ import { useNarrowRemote } from "../remote/useNarrowRemote";
 import { useEffect, useState } from "react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { isRemote } from "../bridge";
+import { EarlierHistory } from "./EarlierHistory";
 
 function DraftGreeting({ narrow }: { narrow: boolean }) {
   const { intl } = useZCodeIntl();
@@ -65,7 +66,7 @@ export function ConversationView({
     const owned = presentationTaskForTurn(presentations, identity, row.turnId);
     return owned && presentationContent(owned.entry, owned.task).summary ? [owned.entry.id] : [];
   }));
-  const { scrollRef, contentRef, onScroll, showJump, followLatest } = useConversationScroll(conversation, latest, searchTarget);
+  const { scrollRef, contentRef, onScroll, showJump, followLatest, beforeHistoryLoad } = useConversationScroll(conversation, latest, searchTarget);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
   const draftEmpty = !column && !conversation.compareId && !conversation.sessionKey && !conversation.sessionId && !conversation.loading && !conversation.loadError && conversation.rows.length === 0;
 
@@ -75,6 +76,7 @@ export function ConversationView({
         <div className={cn("relative min-h-0", draftEmpty ? "w-full shrink-0" : "flex-1")}>
           <div ref={scrollRef} onScroll={onScroll} aria-label="会话消息" tabIndex={0} className={cn(draftEmpty ? "w-full" : "absolute inset-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]")}>
             <div ref={contentRef} className={cn("mx-auto flex w-full flex-col", draftEmpty ? "max-w-2xl items-center" : "max-w-3xl pt-6 pb-10", column || narrow ? "px-3" : "px-6")}>
+              <EarlierHistory conversation={conversation} beforeLoad={beforeHistoryLoad} />
               {!column && !outsideProject && !draftEmpty ? <div className="mb-4 w-full max-w-64 self-end 2xl:absolute 2xl:right-5 2xl:top-4 2xl:z-10"><GitTools workspacePath={conversation.projectPath} running={running} /></div> : null}
               {conversation.loading ? (
                 <div className="flex items-center justify-center gap-2 py-16 text-ui-base text-foreground-subtle">

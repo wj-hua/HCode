@@ -17,8 +17,12 @@ const ROWS = Array.from({ length: 200 }, (_, index) => ({ id: `row-${index}`, ki
 let staticDir: string;
 let service: RemoteControlService;
 let port: number;
+let liveRows: ConversationRow[];
+let projectPaths: string[];
 
 beforeEach(async () => {
+  liveRows = ROWS;
+  projectPaths = ["/project"];
   staticDir = await mkdtemp(join(tmpdir(), "hcode-remote-static-"));
   await mkdir(join(staticDir, "assets"));
   await writeFile(join(staticDir, "assets", "index-AbCd1234.js"), SCRIPT);
@@ -29,9 +33,10 @@ beforeEach(async () => {
     tokens: { matches: (value: string) => value === PASSWORD } as unknown as RemoteTokenStore,
     notificationTokens: { matches: () => false } as unknown as RemoteTokenStore,
     sessions: new RemoteSessionStore(staticDir),
-    policy: { projectPaths: () => [], attachmentsDir: join(staticDir, "attachments"), sessionState: () => undefined },
-    invoke: async () => ({}),
-    liveRows: (sessionKey) => sessionKey === "session" ? ROWS : undefined,
+    policy: { projectPaths: () => projectPaths, attachmentsDir: join(staticDir, "attachments"), sessionState: () => undefined },
+    thumbnail: (image) => ({ ...image, body: Buffer.from("small-preview") }),
+    invoke: async (channel) => channel === "sessions:load" ? { summary: null, rows: liveRows } : {},
+    liveRows: (sessionKey) => sessionKey === "session" ? liveRows : undefined,
     hasSession: () => true, staticDir, env: () => ({}), onStatus: () => {},
   });
   await service.apply();
@@ -95,4 +100,84 @@ it("会话快照压缩传输，内容与原始数据一致", async () => {
   const plain = JSON.stringify({ ok: true, result: { seq: 0, rows: ROWS, state: null, permissions: [] } });
   expect(response.body.length).toBeLessThan(Buffer.byteLength(plain) / 10);
   expect(JSON.parse(brotliDecompressSync(response.body).toString())).toEqual(JSON.parse(plain));
+});
+
+it("会话先返回图片地址，原图仍需登录且内容变化后不误取另一张图", async () => {
+  const image = Buffer.from("private-image-content");
+  const imageRow = { rowId: 501, turnId: "turn", kind: "userInput", attachments: [{ ref: `data:image/png;base64,${image.toString("base64")}`, mime: "image/png", fileName: "image.png", bytes: image.length }] } as ConversationRow;
+  liveRows = [...ROWS, imageRow];
+  const cookie = await login();
+  const response = await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel: "chat:snapshot", args: ["session"] }));
+  const result = JSON.parse(response.body.toString());
+  const ref: string = result.result.rows.at(-1).attachments[0].ref;
+  expect(ref).toMatch(/^api\/media\//);
+  expect(response.body.toString()).not.toContain(image.toString("base64"));
+  expect((await raw("GET", `/${ref}`, {})).status).toBe(401);
+  const original = await raw("GET", `/${ref}`, { Cookie: cookie });
+  expect(original.status).toBe(200);
+  expect(original.body).toEqual(image);
+  expect(original.headers["cache-control"]).toContain("private");
+  const invalid = `${ref.slice(0, -1)}${ref.endsWith("a") ? "b" : "a"}`;
+  expect((await raw("GET", `/${invalid}`, { Cookie: cookie })).status).toBe(404);
+  liveRows = [];
+  expect((await raw("GET", `/${ref}`, { Cookie: cookie })).status).toBe(404);
+});
+
+it("历史优先返回最近三个完整回合，向前翻页没有遗漏且不扩大项目访问权限", async () => {
+  liveRows = Array.from({ length: 10 }, (_, turn) => [
+    { rowId: turn * 3 + 1, turnId: `turn-${turn}`, kind: "turnHeader" },
+    { rowId: turn * 3 + 2, turnId: `turn-${turn}`, kind: "userInput", text: "question" },
+    { rowId: turn * 3 + 3, turnId: `turn-${turn}`, kind: "assistantText", text: "answer" },
+  ]).flat() as ConversationRow[];
+  const cookie = await login();
+  const ref = { agent: "claude", id: "history", projectPath: "/project" };
+  const page = async (before?: number, projectPath = ref.projectPath) => {
+    const response = await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel: "sessions:page", args: [{ ...ref, projectPath }, before] }));
+    return JSON.parse(response.body.toString());
+  };
+  let current = await page();
+  expect(current.ok).toBe(true);
+  expect(current.result.rows).toEqual(liveRows.slice(-9));
+  service.publish("chat:state", { sessionKey: "session", sessionId: "history", state: "idle", agent: "claude", projectPath: "/project", permissionMode: "default" });
+  const snapshot = await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel: "chat:snapshot", args: ["session"] }));
+  expect(JSON.parse(snapshot.body.toString()).result.rows).toEqual(current.result.rows);
+  expect((await page(-1)).ok).toBe(false);
+  const loaded = [...current.result.rows];
+  while (current.result.earlierRows) {
+    current = await page(current.result.earlierRows.beforeRowId);
+    loaded.unshift(...current.result.rows);
+  }
+  expect(loaded).toEqual(liveRows);
+  expect((await page(undefined, "/not-authorized")).ok).toBe(false);
+});
+
+it("历史图片的预览独立传输，原图保留；移除项目后旧地址失效", async () => {
+  const image = Buffer.from("original-image");
+  liveRows = [{ rowId: 1, turnId: "turn", kind: "userInput", text: "image", attachments: [{ fileName: "shot.png", mime: "image/png", bytes: image.length, ref: `data:image/png;base64,${image.toString("base64")}` }] }] as ConversationRow[];
+  const cookie = await login();
+  const response = await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel: "sessions:page", args: [{ agent: "claude", id: "history", projectPath: "/project" }] }));
+  const ref = JSON.parse(response.body.toString()).result.rows[0].attachments[0].ref;
+  const thumbnail = await raw("GET", `/${ref}?thumbnail=1`, { Cookie: cookie });
+  expect(thumbnail.status).toBe(200);
+  expect(thumbnail.body.toString()).toBe("small-preview");
+  expect((await raw("GET", `/${ref}`, { Cookie: cookie })).body).toEqual(image);
+  projectPaths = [];
+  expect((await raw("GET", `/${ref}`, { Cookie: cookie })).status).toBe(404);
+});
+
+it("手机只接收所查看会话的内容，仍接收其他会话的状态与审批", async () => {
+  const cookie = await login();
+  const response = await fetch(`http://127.0.0.1:${port}/api/events?clientId=phone&sessionKey=watched`, { headers: { Cookie: cookie } });
+  const reader = response.body!.getReader();
+  await reader.read();
+  service.publish("chat:rows", { sessionKey: "other", ops: [{ op: "append", rowId: 1, field: "text", text: "unwatched-secret" }] });
+  service.publish("chat:state", { sessionKey: "other", state: "running", agent: "claude", projectPath: "/project", permissionMode: "default" });
+  service.publish("permission:requested", { sessionKey: "other", interactionId: "approval" } as never);
+  service.publish("chat:rows", { sessionKey: "watched", ops: [{ op: "append", rowId: 1, field: "text", text: "watched-message" }] });
+  let received = "";
+  while (!received.includes("watched-message")) received += new TextDecoder().decode((await reader.read()).value);
+  expect(received).not.toContain("unwatched-secret");
+  expect(received).toContain("chat:state");
+  expect(received).toContain("approval");
+  await reader.cancel();
 });

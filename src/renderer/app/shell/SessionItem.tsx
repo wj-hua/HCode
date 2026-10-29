@@ -54,12 +54,12 @@ export function SessionItem({ session }: { session: SessionSummary }) {
   const deleteLabel = session.agent === "codex" ? "归档" : "删除";
   const deleteDisabled = indicator !== null || session.activeInTerminal === true;
 
-  // 已打开的会话直接用界面上的行，否则从 CLI 的会话文件读取
+  // 远程视图可能只缓存最近几回合；导出必须显式获取完整历史。
   const exportMarkdown = async (mode: "save" | "copy") => {
     try {
-      const rows = conversation?.rows.length
+      const rows = conversation?.rows.length && !conversation.earlierRows
         ? conversation.rows
-        : (await hcode.invoke("sessions:load", { agent: session.agent, id: session.id, projectPath: session.projectPath })).rows;
+        : (await hcode.invoke("sessions:load", { agent: session.agent, id: session.id, projectPath: session.projectPath }, { complete: true })).rows;
       const markdown = conversationToMarkdown(session, rows);
       if (mode === "copy") {
         await hcode.invoke("app:copyText", markdown);

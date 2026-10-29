@@ -21,7 +21,7 @@ function InvocationTranscript({ call }: { call: AgentInvocation }) {
   useEffect(() => {
     if (running || live || !call.nativeSessionId) return;
     let current = true;
-    void hcode.invoke('sessions:load', { agent: call.input.agent, id: call.nativeSessionId, projectPath: call.source.projectPath }).then(result => { if (current) setHistory(result.rows); }, reason => { if (current) setError(String(reason)); });
+    void hcode.invoke('sessions:load', { agent: call.input.agent, id: call.nativeSessionId, projectPath: call.source.projectPath }, { complete: true }).then(result => { if (current) setHistory(result.rows); }, reason => { if (current) setError(String(reason)); });
     return () => { current = false; };
   }, [call.id, call.nativeSessionId, running, live]);
   const pending = Object.values(permissions).filter(request => request.sessionKey === call.sessionKey);

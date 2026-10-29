@@ -27,6 +27,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("EventSource", Events);
   bridge = createRemoteBridge();
+  bridge.setViewedSessions(["session", "slow", "quick"]);
 });
 
 afterEach(() => {
@@ -37,6 +38,25 @@ afterEach(() => {
 });
 
 describe("远程网页连接恢复", () => {
+  it("普通打开走分页，搜索等完整读取保留全量接口", async () => {
+    const ref = { agent: "codex" as const, id: "history", projectPath: "/project" };
+    await bridge.invoke("sessions:load", ref);
+    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body).channel).toBe("sessions:page");
+    await bridge.invoke("sessions:load", ref, { complete: true });
+    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body).channel).toBe("sessions:load");
+  });
+
+  it("未查看会话的审批在页面晚订阅时仍可恢复", async () => {
+    bridge.setViewedSessions([]);
+    routeInvoke({ "chat:live": () => response([{ sessionKey: "other" }]) });
+    await bridge.connect();
+    const permission = { sessionKey: "other", interactionId: "approval" };
+    Events.instances[0]!.send("hello", { permissions: [permission] });
+    await vi.advanceTimersByTimeAsync(0);
+    const listener = vi.fn();
+    bridge.on("permission:requested", listener);
+    expect(listener).toHaveBeenCalledWith(permission);
+  });
   it("通过宿主浏览项目目录", async () => {
     const listing = { path: "/home", parent: "/", directories: [] };
     fetchMock.mockResolvedValueOnce(response(listing));
@@ -171,6 +191,37 @@ function routeInvoke(routes: Record<string, (args: unknown[]) => Response | Prom
 describe("慢速网络下的会话同步", () => {
   const slow = { sessionKey: "slow" };
   const quick = { sessionKey: "quick" };
+
+  it("只下载正在查看的会话快照，其他会话保留运行状态", async () => {
+    bridge.setViewedSessions(["slow"]);
+    const snapshot = vi.fn(([key]) => response({ seq: 3, rows: [], state: { sessionKey: key }, permissions: [] }));
+    routeInvoke({ "chat:live": () => response([slow, quick]), "chat:snapshot": snapshot });
+    const states = vi.fn();
+    bridge.on("chat:state", states);
+    await bridge.connect();
+    Events.instances[0]!.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(snapshot).toHaveBeenCalledWith(["slow"]);
+    expect(states).toHaveBeenCalledWith(quick);
+  });
+
+  it("切换查看的会话会真正取消旧快照下载", async () => {
+    bridge.setViewedSessions(["slow"]);
+    let oldSignal!: AbortSignal;
+    fetchMock.mockImplementation(async (_path, init: RequestInit) => {
+      const request = JSON.parse(String(init.body));
+      if (request.channel === "chat:live") return response([slow, quick]);
+      if (request.args[0] === "slow") { oldSignal = init.signal!; return new Promise<Response>(() => {}); }
+      return response({ seq: 4, rows: [], state: quick, permissions: [] });
+    });
+    await bridge.connect();
+    Events.instances[0]!.send("hello", {});
+    await vi.advanceTimersByTimeAsync(0);
+    bridge.setViewedSessions(["quick"]);
+    expect(oldSignal.aborted).toBe(true);
+    expect(Events.instances[0]!.close).toHaveBeenCalled();
+  });
 
   it("单个会话快照失败时保持事件流，只退避重试该会话", async () => {
     let slowFailures = 1;

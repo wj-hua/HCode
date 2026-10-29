@@ -16,14 +16,7 @@ import {
   readSafeLocalStorage,
   writeSafeLocalStorage,
 } from "@/lib/browserEnvironment.js";
-import zhCN from "./locales/zh-CN.js";
-import enUS from "./locales/en-US.js";
-
-/** 语言 → 翻译消息映射 */
-const MESSAGES: Record<Locale, Record<string, string>> = {
-  "zh-CN": zhCN,
-  "en-US": enUS,
-};
+import { readLocaleMessages } from "./localeMessages.js";
 
 /** 简易 intl 工具：根据 id 查找翻译，支持 {key} 占位符替换 */
 export interface IntlInstance {
@@ -111,8 +104,7 @@ function shouldApplyLocaleBroadcastMessage(
 }
 
 function createIntl(locale: Locale): IntlInstance {
-  // noUncheckedIndexedAccess：用 ?? 回退到默认语言的翻译
-  const messages = MESSAGES[locale] ?? MESSAGES[DEFAULT_LOCALE]!;
+  const messages = readLocaleMessages(locale);
   return {
     formatMessage({ id }, values) {
       let msg = messages[id] ?? id;

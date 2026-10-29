@@ -46,6 +46,7 @@ import { ResearchDraftService } from "./collaboration/drafts/researchDraftServic
 import { CollaborationRepository } from "./collaboration/collaborationRepository.js";
 import { TerminalService } from "./terminalService.js";
 import { RemoteControlService } from "./remoteControl/remoteControlService.js";
+import { remoteImageThumbnail } from "./remoteControl/imageThumbnail.js";
 import { RemoteTokenStore } from "./remoteControl/tokenStore.js";
 import { RemoteSessionStore } from "./remoteControl/sessionStore.js";
 import { browseProjectDirectories, prepareProjectDirectory } from "./remoteControl/projectDirectory.js";
@@ -544,6 +545,7 @@ async function bootstrap() {
     hasSession: (sessionKey) => agents.bySessionKey(sessionKey) !== undefined,
     sessionTitle: (state) => agents.sessionTitle(state),
     staticDir: join(app.getAppPath(), "out", "renderer"),
+    thumbnail: remoteImageThumbnail,
     env: buildAgentEnv,
     onStatus: (status) => send("remote:status", status),
   });

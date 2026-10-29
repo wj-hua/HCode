@@ -1,24 +1,21 @@
 // 应用外壳：结构与样式参照 ZCode WorkspaceShellLayout（侧栏 + 带 4px 留白的圆角主面板）。
 import { usePanelWidthPreference } from "../conversation/PanelResizeHandle";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/components/lib/utils.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { CompareView } from "../conversation/CompareView";
 import { ConversationView } from "../conversation/ConversationView";
-import { hcode, isRemote } from "../bridge";
+import { hcode, isRemote, remoteBridge } from "../bridge";
 import { FilePreviewProvider } from "../conversation/FilePreviewContext";
 import { FilePreviewPanel } from "../conversation/FilePreviewPanel";
 import { FilePreviewLayout } from "../conversation/FilePreviewLayout";
 import { useUiStore } from "../store/uiStore";
-import { SettingsDialog } from "../settings/SettingsDialog";
 import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 import { RemoteProjectDialog } from "./RemoteProjectDialog";
 import { Header } from "./Header";
-import { TerminalPanel } from "./TerminalPanel";
 import { TerminalResizeHandle } from "../terminal/TerminalResizeHandle";
-import { SideTerminalPanel } from "../terminal/SideTerminalPanel";
 import { AppBackground } from "./AppBackground";
 import { Sidebar } from "./Sidebar";
 import { useNarrowRemote } from "../remote/useNarrowRemote";
@@ -29,9 +26,13 @@ import type { SessionSearchResult } from "@hcode/shared/types";
 import { APP_SHORTCUTS, shortcutFromEvent, type AppCommand } from "@hcode/shared/shortcuts";
 
 const SIDEBAR_WIDTH = 272;
+const SettingsDialog = lazy(() => import("../settings/SettingsDialog").then(module => ({ default: module.SettingsDialog })));
+const TerminalPanel = lazy(() => import("./TerminalPanel").then(module => ({ default: module.TerminalPanel })));
+const SideTerminalPanel = lazy(() => import("../terminal/SideTerminalPanel").then(module => ({ default: module.SideTerminalPanel })));
 
 export function AppShell() {
   const panelWidth = usePanelWidthPreference();
+  const settingsOpen = useAppStore(state => state.settingsOpen);
   const hasBackground = useAppStore((state) => !!state.settings.background.path);
   const collapsed = useAppStore((state) => state.sidebarCollapsed);
   const conversation = useActiveConversation();
@@ -47,6 +48,9 @@ export function AppShell() {
       return id ? Object.values(state.conversations).filter((conv) => conv.compareId === id) : [];
     }),
   );
+  useEffect(() => {
+    remoteBridge?.setViewedSessions((compareMembers.length ? compareMembers : conversation ? [conversation] : []).flatMap(member => member.sessionKey ? [member.sessionKey] : []));
+  }, [conversation?.sessionKey, conversation?.compareId, compareMembers]);
   const sidePanel = useUiStore((state) => state.sidePanel);
   const setSidePanel = useUiStore((state) => state.setSidePanel);
   const panelOwnerExists = useAppStore((state) => !sidePanel || !!state.conversations[sidePanel.viewId]);
@@ -133,7 +137,7 @@ export function AppShell() {
                   {filePreview ? <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
                     <FilePreviewPanel key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`} source={filePreview.source} onClose={() => setSidePanel(null)} />
                   </FilePreviewProvider> : null}
-                  {sideTerminalProjects.map(path => <SideTerminalPanel key={path} cwd={path} visible={!!sideTerminalVisible && path === conversation.projectPath} onHide={() => setSidePanel(null)} onEmpty={sideTerminalEmpty} />)}
+                  <Suspense fallback={<span role="status">正在加载终端…</span>}>{sideTerminalProjects.map(path => <SideTerminalPanel key={path} cwd={path} visible={!!sideTerminalVisible && path === conversation.projectPath} onHide={() => setSidePanel(null)} onEmpty={sideTerminalEmpty} />)}</Suspense>
                 </>}>
                   {compareMembers.length > 1 ? (
                     <CompareView members={compareMembers} active={conversation} />
@@ -146,11 +150,11 @@ export function AppShell() {
               <EmptyState />
             )}
             {terminalVisible && conversation ? <TerminalResizeHandle height={terminalHeight} setHeight={setTerminalHeight} /> : null}
-            {terminalProjects.map(path => <TerminalPanel key={path} cwd={path} height={terminalHeight} visible={terminalVisible && conversation?.projectPath === path} onHide={() => setTerminalVisible(false)} onEmpty={terminalEmpty} />)}
+            <Suspense fallback={<span role="status">正在加载终端…</span>}>{terminalProjects.map(path => <TerminalPanel key={path} cwd={path} height={terminalHeight} visible={terminalVisible && conversation?.projectPath === path} onHide={() => setTerminalVisible(false)} onEmpty={terminalEmpty} />)}</Suspense>
           </section>
         </div>
       </div>
-      <SettingsDialog />
+      {settingsOpen ? <Suspense fallback={<span role="status" className="fixed right-4 bottom-4">正在加载设置…</span>}><SettingsDialog /></Suspense> : null}
       {isRemote ? <RemoteProjectDialog /> : null}
       <QuickSwitchDialog open={quickSwitchOpen} onOpenChange={setQuickSwitchOpen} />
       <SessionSearchDialog
@@ -158,7 +162,7 @@ export function AppShell() {
         onOpenChange={setSearchOpen}
         onSelect={(result: SessionSearchResult) => {
           setSearchTarget((previous) => ({ id: result.session.id, rowId: result.rowId, key: (previous?.key ?? 0) + 1 }));
-          void useAppStore.getState().openSession(result.session);
+          void useAppStore.getState().openSession(result.session, true);
         }}
       />
     </DesktopWindowFrame>

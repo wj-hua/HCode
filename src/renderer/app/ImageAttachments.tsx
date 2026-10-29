@@ -3,6 +3,7 @@ import { XIcon } from "lucide-react";
 import { useState } from "react";
 import { ImagePreviewDialog } from "@/components/ai-elements/image-preview-dialog.js";
 import { cn } from "@/components/lib/utils.js";
+import { REMOTE_MEDIA_PATH } from "@hcode/shared/remoteControl";
 
 export interface ImageThumb {
   src: string;
@@ -29,7 +30,7 @@ export function ImageAttachments({
             onClick={() => setPreviewIndex(index)}
             className="block size-16 cursor-zoom-in overflow-hidden rounded-lg border border-border bg-background"
           >
-            <img src={image.src} alt={image.name} className="size-full object-cover" />
+            <img src={image.src.startsWith(REMOTE_MEDIA_PATH) ? `${image.src}?thumbnail=1` : image.src} alt={image.name} loading="lazy" decoding="async" className="size-full object-cover" />
           </button>
           {onRemove ? (
             <button

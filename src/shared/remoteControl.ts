@@ -1,6 +1,9 @@
 // 远程操控：本机界面查询的状态，以及只对远程客户端开放的快照接口。
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent } from "./types.js";
 
+/** 相对地址兼容根路径与反向代理子路径，图片内容始终经过远程登录鉴权。 */
+export const REMOTE_MEDIA_PATH = "api/media/";
+
 export type RemoteControlState = "off" | "starting" | "listening" | "error";
 
 export interface TunnelStatus {
@@ -43,6 +46,7 @@ export interface NotificationFeedEvent {
 
 /** 远程客户端打开活动会话时获取的完整状态；seq 之前（含）的事件已包含在快照里。 */
 export interface RemoteSessionSnapshot {
+  earlierRows?: import("./types.js").SessionLoadResult["earlierRows"];
   seq: number;
   rows: ConversationRow[];
   state: ChatStateEvent | null;
@@ -51,6 +55,7 @@ export interface RemoteSessionSnapshot {
 
 /** 只对远程客户端开放的 invoke 通道（本机窗口不需要，因此不在 ipc.ts 中）。 */
 export interface RemoteOnlyInvokeMap {
+  "sessions:page": [[ref: import("./types.js").SessionRef, beforeRowId?: number], import("./types.js").SessionLoadResult];
   /** 当前活动会话的最新状态。 */
   "chat:live": [[], ChatStateEvent[]];
   "chat:snapshot": [[sessionKey: string], RemoteSessionSnapshot | null];
