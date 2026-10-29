@@ -1,5 +1,5 @@
 // Ship the small macOS compatibility shim; runtime never compiles code or requires Xcode.
-import { mkdir } from 'node:fs/promises';
+import { chmod, copyFile, mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -7,6 +7,8 @@ import { existsSync } from 'node:fs';
 if (process.platform === 'darwin') {
   const root = fileURLToPath(new URL('..', import.meta.url));
   await mkdir(`${root}/out/native`, {recursive:true});
+  await copyFile(`${root}/native/validation-shell.sh`, `${root}/out/native/validation-shell.sh`);
+  await chmod(`${root}/out/native/validation-shell.sh`, 0o755);
 
   const candidateSdks = [
     '/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk',

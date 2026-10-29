@@ -11,19 +11,19 @@ import type { WorkspaceService } from './workspaceService.js';
 const SYSTEM_READS = ['/System', '/usr', '/bin', '/sbin', '/Library', '/opt/homebrew', '/private/etc', '/etc', '/private/var/db', '/private/var/run', '/dev'];
 // Darwin syscall numbers from XNU sys/syscall.h. Blocking posix_spawn also closes its SETSID flag bypass.
 const DARWIN_PROCESS_CONTROL_SYSCALLS = { setpgid: 82, setsid: 147, posixSpawn: 244 } as const;
-async function validationShim() {
-  const bundled = join(dirname(fileURLToPath(import.meta.url)), '../native/validation-fork-only.dylib').replace('app.asar/', 'app.asar.unpacked/');
-  const path = import.meta.url.includes('/src/main/') ? resolve('out/native/validation-fork-only.dylib') : bundled;
+async function validationResource(name: string) {
+  const bundled = join(dirname(fileURLToPath(import.meta.url)), `../native/${name}`).replace('app.asar/', 'app.asar.unpacked/');
+  const path = import.meta.url.includes('/src/main/') ? resolve(`out/native/${name}`) : bundled;
   await access(path);
   return await realpath(path);
 }
 function sandboxPath(value: string) { return JSON.stringify(value); }
 /** SBPL 只给候选和独立临时区写入；显式 deny 原目录优先于运行时读取白名单。 */
-export async function validationSandbox(workspace: CodeWorkspace, scratch: string, executable: string, shim?: string, args: string[] = []) {
+export async function validationSandbox(workspace: CodeWorkspace, scratch: string, executable: string, shim?: string, args: string[] = [], shell?: string) {
   const canonicalScratch = await realpath(scratch);
   const runtimes = await validationRuntimeReads(executable);
   if (args[0]?.endsWith('/pnpm/bin/pnpm.mjs') || args[0]?.endsWith('/pnpm/bin/pnpm.cjs')) runtimes.push(resolve(dirname(args[0]!), '..'));
-  const reads = [...SYSTEM_READS, ...runtimes, ...(shim ? [shim] : []), workspace.path, canonicalScratch];
+  const reads = [...SYSTEM_READS, ...runtimes, ...(shim ? [shim] : []), ...(shell ? [shell] : []), workspace.path, canonicalScratch];
   return `(version 1) (deny default) (allow process-exec) (allow process-fork) (allow process-info* (target same-sandbox)) (allow signal (target same-sandbox)) (allow sysctl-read) (allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo") (global-name "com.apple.system.DirectoryService.libinfo_v1") (global-name "com.apple.system.logger") (global-name "com.apple.logd") (global-name "com.apple.logd.events")) (allow file-read-metadata) (allow file-read* (literal "/"))\n(allow file-read* ${reads.map((path) => `(subpath ${sandboxPath(path)})`).join(' ')})\n(allow file-write* (subpath ${sandboxPath(workspace.path)}) (subpath ${sandboxPath(canonicalScratch)}) (literal "/dev/null"))\n(deny file-read* file-write* (subpath ${sandboxPath(workspace.originalPath)}))\n(deny syscall-unix ${Object.values(DARWIN_PROCESS_CONTROL_SYSCALLS).map((number) => `(syscall-number ${number})`).join(" ")})`;
 }
 export class ValidationRunner {
@@ -58,9 +58,10 @@ export class ValidationRunner {
     const scratch = join(this.workspaces.directory(workspace.id,workspace.runId), 'scratch', version.id, check.id);
     await mkdir(scratch, { recursive: true, mode: 0o700 });
     const command = await normalizeValidationCommand(check.executable, check.args);
-    const shim = await validationShim();
-    const profile = await validationSandbox(workspace, scratch, command.executable, shim, command.args);
-    const env = { PATH: `${dirname(check.executable)}:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: scratch, TMPDIR: scratch, CI: '1', LANG: 'en_US.UTF-8', npm_config_cache: scratch, COREPACK_ENABLE_NETWORK: '0', pnpm_config_verify_deps_before_run: 'false', pnpm_config_pm_on_fail: 'error', npm_config_verify_deps_before_run: 'false', npm_config_manage_package_manager_versions: 'false' };
+    const shim = await validationResource('validation-fork-only.dylib');
+    const shell = await validationResource('validation-shell.sh');
+    const profile = await validationSandbox(workspace, scratch, command.executable, shim, command.args, shell);
+    const env = { PATH: `${dirname(command.executable)}:${dirname(check.executable)}:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: scratch, TMPDIR: scratch, HCODE_VALIDATION_SHIM: shim, npm_config_script_shell: shell, CI: '1', LANG: 'en_US.UTF-8', npm_config_cache: scratch, COREPACK_ENABLE_NETWORK: '0', pnpm_config_verify_deps_before_run: 'false', pnpm_config_pm_on_fail: 'error', npm_config_verify_deps_before_run: 'false', npm_config_manage_package_manager_versions: 'false' };
     return new Promise((resolve, reject) => {
       const child = spawn('/usr/bin/sandbox-exec', ['-p', profile, '/usr/bin/env', `DYLD_INSERT_LIBRARIES=${shim}`, command.executable, ...command.args], { cwd: workspace.path, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
       const buffers = { stdout: '', stderr: '' };

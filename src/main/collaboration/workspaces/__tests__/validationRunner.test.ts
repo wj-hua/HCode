@@ -7,6 +7,8 @@ import { WorkspaceService } from '../workspaceService.js';
 import { ValidationRunner } from '../validationRunner.js';
 import { findExecutable } from '../../../util/locateCli.js';
 const roots: string[] = [];
+const PROCESS_START_TIMEOUT_MS = 5_000;
+const CANCELLATION_TEST_TIMEOUT_MS = 10_000;
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 async function fixture(code: string, setup?: (original: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), 'hcode-check-')); roots.push(root);
@@ -34,19 +36,22 @@ it.skipIf(process.platform !== 'darwin')('失败不假通过；检查更改文�
   await expect(runner.run(data.workspace, version, checks, new AbortController().signal)).rejects.toThrow(/变化/);
   expect(data.service.isLeased(data.workspace.id)).toBe(false);
 });
-it.skipIf(process.platform !== 'darwin')('取消后检查及其子进程停止，租约释放后不再落盘', async () => {
-  const data = await fixture(`import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nconst child = spawn(process.execPath, ['-e', "setInterval(() => require('node:fs').appendFileSync('ticks.txt', 'x'), 30)"], {stdio:'ignore'});\nsetInterval(() => writeFileSync('parent.txt', 'running'), 30);`);
+it.skipIf(process.platform !== 'darwin').each(['node', 'pnpm'] as const)('%s 取消后检查及其子进程停止，租约释放后不再落盘', async executable => {
+  const data = await fixture(`import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\nconst child = spawn(process.execPath, ['-e', "setInterval(() => require('node:fs').appendFileSync('ticks.txt', 'x'), 30)"], {stdio:'ignore'});\nsetInterval(() => writeFileSync('parent.txt', 'running'), 30);`, async original => { await writeFile(join(original, 'package.json'), JSON.stringify({ scripts: { test: 'node check.mjs' } })); });
   const runner = new ValidationRunner(data.service), abort = new AbortController();
-  const running = runner.run(data.workspace, data.version, [{id:'node-test',executable:findExecutable('node',process.env)!,args:['check.mjs'],description:'cancel'}], abort.signal);
-  const failure = expect(running).rejects.toThrow(/变化/);
-  await vi.waitFor(async () => expect((await readFile(join(data.workspace.path, "ticks.txt"), "utf8")).length).toBeGreaterThan(0));
-  abort.abort();
-  await failure;
+  const running = runner.run(data.workspace, data.version, [{id:'test',executable:findExecutable(executable,process.env)!,args:executable === 'pnpm' ? ['run','test'] : ['check.mjs'],description:'cancel'}], abort.signal);
+  // pnpm 冷启动包含两级进程；并行跑全量测试时不能假定一秒内已开始落盘。
+  // 预先接住结果，等待失败也必须取消并收尾，避免后台写入污染后续测试。
+  const settled = running.then(() => undefined, error => error as unknown);
+  try {
+    await vi.waitFor(async () => expect((await readFile(join(data.workspace.path, "ticks.txt"), "utf8")).length).toBeGreaterThan(0), { timeout: PROCESS_START_TIMEOUT_MS });
+  } finally { abort.abort(); await settled; }
+  expect(String(await settled)).toMatch(/变化/);
   expect(data.service.isLeased(data.workspace.id)).toBe(false);
   const ticks = await readFile(join(data.workspace.path, 'ticks.txt'), 'utf8');
   await new Promise((resolve) => setTimeout(resolve, 150));
   expect(await readFile(join(data.workspace.path, 'ticks.txt'), 'utf8')).toBe(ticks);
-});
+}, CANCELLATION_TEST_TIMEOUT_MS);
 it.skipIf(process.platform !== 'darwin')('完整复制 ignored 依赖与内部链接，真实 pnpm 脚本能在副本运行', async () => {
   const data = await fixture(`import {answer} from 'local-dependency'; if(answer!==42) process.exitCode=1;`, async (original) => {
   await mkdir(join(original, 'node_modules', '.store', 'local-dependency'), { recursive: true });
@@ -79,4 +84,23 @@ it.skipIf(process.platform !== 'darwin')('候选改写已授权脚本时拒绝�
   const version = await data.service.freeze(data.workspace, 2);
   await expect(new ValidationRunner(data.service).run(data.workspace, version, [{ id: 'test', executable: findExecutable('pnpm', process.env)!, args: ['run', 'test'], scripts: { test: 'node check.mjs' }, description: 'approved' }], new AbortController().signal)).rejects.toThrow(/授权的验证脚本已变化/);
   expect(data.service.isLeased(data.workspace.id)).toBe(false);
+});
+it.skipIf(process.platform !== 'darwin')('pnpm 生命周期中的 Node 脚本保持隔离且支持普通子进程', async () => {
+  const data = await fixture(`import {spawnSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+assert.throws(() => readFileSync('ORIGINAL/check.mjs'));
+assert.deepEqual(process.argv.slice(2), ['space value', '$(not executed)']);
+const child = spawnSync(process.execPath, ['-e', 'console.log("child verified")'], {encoding:'utf8'});
+assert.equal(child.error, undefined);
+assert.equal(child.status, 0);
+assert.match(child.stdout, /child verified/);
+assert.equal(await fetch('https://example.com').then(()=>true,()=>false), false);`, async original => {
+    await writeFile(join(original, 'package.json'), JSON.stringify({ scripts: { test: `node check.mjs "space value" '$(not executed)'` } }));
+  });
+  const path = join(data.workspace.path, 'check.mjs');
+  await writeFile(path, (await readFile(path, 'utf8')).replace('ORIGINAL', data.original));
+  const version = await data.service.freeze(data.workspace, 2);
+  const result = await new ValidationRunner(data.service).run(data.workspace, version, [{ id: 'test', executable: findExecutable('pnpm', process.env)!, args: ['run', 'test'], description: 'nested node' }], new AbortController().signal);
+  expect(result[0]!.status, result[0]!.stderr).toBe('passed');
 });
