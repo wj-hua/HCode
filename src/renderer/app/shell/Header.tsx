@@ -55,7 +55,7 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
         </ControlHintTooltip>
       ) : null}
       {conversation ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-ui-base">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-ui-base">
           <span className="flex shrink-0 items-center gap-1.5 rounded-md bg-surface px-1.5 py-0.5 text-ui-sm text-foreground-subtle">
             <AgentBadge agent={conversation.agent} />
             {AGENTS[conversation.agent].name}
@@ -65,10 +65,11 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
           </span>
           <span className="shrink-0 text-foreground-subtlest">/</span>
           <span className="min-w-0 truncate text-foreground">{title}</span>
+          {/* 分支与标题共享可收缩区域，长分支不能越过右侧刷新等固定操作。 */}
           {summary?.gitBranch && summary.gitBranch !== "HEAD" ? (
-            <span className="ml-1 flex shrink-0 items-center gap-1 rounded-md bg-surface px-1.5 py-0.5 text-ui-sm text-foreground-subtle">
-              <GitBranchIcon className="size-3" />
-              {summary.gitBranch}
+            <span title={summary.gitBranch} className="ml-1 flex min-w-0 max-w-[40%] items-center gap-1 rounded-md bg-surface px-1.5 py-0.5 text-ui-sm text-foreground-subtle">
+              <GitBranchIcon className="size-3 shrink-0" />
+              <span className="truncate">{summary.gitBranch}</span>
             </span>
           ) : null}
         </div>
