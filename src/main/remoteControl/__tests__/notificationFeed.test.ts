@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import type { ChatStateEvent, PermissionRequestEvent } from "../../../shared/types.js";
+import type { ChatStateEvent, ConversationRow, PermissionRequestEvent } from "../../../shared/types.js";
 import { NotificationFeed } from "../notificationFeed.js";
 
 const state = (sessionKey: string, value: ChatStateEvent["state"], extra: Partial<ChatStateEvent> = {}): ChatStateEvent => ({
@@ -75,6 +75,23 @@ it("忙碌后回到空闲记为完成，忙碌后出错记为出错；只有空�
   const events = feed.since(undefined, true);
   expect(events.map((event) => [event.type, event.sessionKey])).toEqual([["done", "s1"], ["error", "s2"]]);
   expect(events[0]).toMatchObject({ agent: "claude", project: "GTools", sessionId: "abc", at: 1000 });
+});
+
+it("完成事件带项目路径与本轮回复摘要，出错和审批不带回复内容", () => {
+  const rows = [
+    { rowId: 1, turnId: "t", createdAt: 1, createdAtSeq: 1, kind: "userInput", text: "查查看" },
+    { rowId: 2, turnId: "t", createdAt: 1, createdAtSeq: 2, kind: "assistantText", text: "已修复：通知可直达会话。", state: "complete" },
+  ] as ConversationRow[];
+  const feed = new NotificationFeed(() => 1000, undefined, () => rows);
+  feed.observe("chat:state", state("s1", "running"));
+  feed.observe("permission:requested", permission("s1"));
+  feed.observe("chat:state", state("s1", "idle", { sessionId: "abc" }));
+  feed.observe("chat:state", state("s2", "running"));
+  feed.observe("chat:state", state("s2", "error"));
+  const [approval, done, error] = feed.since(undefined, true);
+  expect(done).toMatchObject({ type: "done", sessionId: "abc", projectPath: "/Users/me/Projects/GTools", summary: "已修复：通知可直达会话。" });
+  expect(approval).not.toHaveProperty("summary");
+  expect(error).not.toHaveProperty("summary");
 });
 
 it("等待审批只带工具名，不带命令、标题等对话内容", () => {

@@ -1,11 +1,13 @@
 // 通知事件流（通用能力）：把主进程事件归纳为「完成 / 出错 / 等待审批」摘要，供对接方服务器订阅后自行推送。
-// 摘要只含类型、会话标识与标题、CLI、项目名与工具名，不含对话正文、命令或错误详情；保留最近 50 条供补发。
+// 摘要含类型、会话标识与标题、CLI、项目路径与名称、工具名；完成事件另带最后一条回复的开头几句，
+// 供订阅方区分同一会话的多次完成。不含命令或错误详情；保留最近 50 条供补发。
 import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import type { ServerResponse } from "node:http";
 import type { EventChannel, EventMap } from "../../shared/ipc.js";
 import type { NotificationFeedEvent } from "../../shared/remoteControl.js";
-import type { ChatStateEvent, PermissionRequestEvent } from "../../shared/types.js";
+import type { ChatStateEvent, ConversationRow, PermissionRequestEvent } from "../../shared/types.js";
+import { replySummary } from "./notificationSummary.js";
 
 const MAX_EVENTS = 50;
 const TITLE_MAX_LENGTH = 120;
@@ -26,6 +28,7 @@ export class NotificationFeed {
   constructor(
     private readonly now: () => number = Date.now,
     private readonly sessionTitle?: (state: ChatStateEvent) => Promise<string | undefined>,
+    private readonly liveRows?: (sessionKey: string) => ConversationRow[] | undefined,
   ) {}
 
   get subscriberCount(): number {
@@ -86,6 +89,8 @@ export class NotificationFeed {
   }
 
   private emit(type: NotificationFeedEvent["type"], state: ChatStateEvent, tool?: string) {
+    // 回到空闲的同一时刻读取实时行，之后用户再发消息也不会把下一轮内容混进本条摘要。
+    const summary = type === "done" ? this.summary(state.sessionKey) : undefined;
     const event: NotificationFeedEvent = {
       id: `${this.boot}.${++this.seq}`,
       type,
@@ -93,7 +98,9 @@ export class NotificationFeed {
       ...(state.sessionId ? { sessionId: state.sessionId } : {}),
       agent: state.agent,
       project: basename(state.projectPath),
+      projectPath: state.projectPath,
       ...(tool ? { tool } : {}),
+      ...(summary ? { summary } : {}),
       at: this.now(),
     };
     if (!this.sessionTitle) return this.publish(event);
@@ -123,6 +130,11 @@ export class NotificationFeed {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private summary(sessionKey: string): string | undefined {
+    const rows = this.liveRows?.(sessionKey);
+    return rows ? replySummary(rows) : undefined;
   }
 
   private publish(event: NotificationFeedEvent) {

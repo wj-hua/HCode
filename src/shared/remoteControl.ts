@@ -46,10 +46,14 @@ export interface NotificationFeedEvent {
   agent: import("./types.js").AgentKind;
   /** 项目目录名。 */
   project: string;
+  /** 项目绝对路径，即 HCode 项目的唯一键；远程网页按它与 sessionId 定位会话。 */
+  projectPath: string;
   /** 会话列表标题，单行、最多 120 个 Unicode 码点；历史尚不可用时省略。 */
   title?: string;
   /** 等待审批时的工具名。 */
   tool?: string;
+  /** 完成事件中本轮最后一条回复的开头几句，单行纯文本、最多 100 个 Unicode 码点；本轮没有回复时省略。 */
+  summary?: string;
   /** 毫秒时间戳。 */
   at: number;
 }

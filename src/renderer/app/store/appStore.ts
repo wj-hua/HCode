@@ -39,6 +39,7 @@ import { selectConversationWorkspace } from "./conversationWorkspaceActions";
 import { SessionViewSync } from "./sessionViewSync";
 import { refreshConversation, refreshSessionList } from "./refreshActions";
 import { loadRemoteHistory, mergeHistoryRows } from "./remoteHistoryActions";
+import { openSessionLink, takeSessionLink } from "./sessionLinkActions";
 import { restoreMessageAttachments } from "./messageAttachments";
 import { isNarrowRemote } from "../remote/useNarrowRemote";
 
@@ -498,6 +499,8 @@ export const useAppStore = create<AppState>((set, get) => {
       if (conversation && conversation !== first) get().toggleProject(conversation.path, true);
       // 首帧前建好非项目草稿并收起窄屏侧栏，避免刷新后先闪出项目列表
       if (isNarrowRemote()) set({ sidebarCollapsed: true });
+      const link = isRemote ? takeSessionLink() : null;
+      if (link) await openSessionLink(get, link).catch((error) => toast(`打开通知对应的会话失败：${errorMessage(error)}`, { variant: "warning" }));
       if (!get().activeViewId) await get().workOutsideProject(true);
       set({ ready: true });
       set({ agentStatuses: await hcode.invoke("agent:status") });
