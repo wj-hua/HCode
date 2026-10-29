@@ -74,6 +74,7 @@ export interface AgentProvider {
   /** 当前原生线程能否发起协作；返回明确限制，不偷偷创建替代线程。 */
   collaborationSourceReason?(sessionId: string): Promise<string | undefined>;
   interrupt(sessionKey: string): Promise<void>;
+  stopBackgroundTask?(sessionKey: string, taskId: string): Promise<void>;
   setPermissionMode(sessionKey: string, mode: PermissionMode): Promise<void>;
   setModel(sessionKey: string, model: string): Promise<void>;
   closeSession(sessionKey: string): void;

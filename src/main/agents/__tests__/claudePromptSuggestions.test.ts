@@ -15,7 +15,7 @@ function nativeStream() {
     push(message: SDKMessage) { if (waiting) { const receive = waiting; waiting = undefined; receive({ value: message, done: false }); } else queued.push(message); },
     close() { ended = true; waiting?.({ value: undefined, done: true }); },
     getContextUsage: async () => ({ totalTokens: 1, maxTokens: 100 }),
-    interrupt: async () => {}, setPermissionMode: async () => {},
+    interrupt: async () => {}, stopTask: vi.fn(async (_id: string) => {}), setPermissionMode: async () => {},
     [Symbol.asyncIterator]() { return { next: async (): Promise<IteratorResult<SDKMessage>> => queued.length ? { value: queued.shift()!, done: false } : ended ? { value: undefined, done: true } : new Promise(resolve => { waiting = resolve; }) }; },
   };
   return stream;
@@ -51,6 +51,22 @@ it('原生后台事件在回合结束后仍发布详情，进度和完成结果�
   expect(data.states.at(-1)?.backgroundTasks).toBeUndefined();
   expect(data.session.hasBackgroundTasks).toBe(false);
   expect(sdk.query).toHaveBeenCalledTimes(1);
+});
+
+it('单独停止活动后台任务并等待原生终态，拒绝未知或已结束任务', async () => {
+  const data = fixture(); await data.start();
+  const base = { type: 'system' as const, uuid: randomUUID(), session_id: 'native' };
+  data.stream.push({ ...base, subtype: 'background_tasks_changed' as const, tasks: [{ task_id: 'monitor', task_type: 'local_bash', description: '监视进度' }, { task_id: 'other', task_type: 'local_bash', description: '测试' }] });
+  await vi.waitFor(() => expect(data.session.hasBackgroundTasks).toBe(true));
+  await data.session.stopBackgroundTask('monitor');
+  expect(data.stream.stopTask).toHaveBeenCalledWith('monitor');
+  expect(data.states.at(-1)?.backgroundTaskDetails?.find(task => task.id === 'monitor')?.status).toBe('running');
+  await expect(data.session.stopBackgroundTask('unknown')).rejects.toThrow('不存在或已结束');
+  data.stream.push({ ...base, subtype: 'background_tasks_changed' as const, tasks: [{ task_id: 'other', task_type: 'local_bash', description: '测试' }] });
+  data.stream.push({ ...base, subtype: 'task_notification' as const, task_id: 'monitor', status: 'stopped' as const, output_file: '', summary: '已停止' });
+  await vi.waitFor(() => expect(data.states.at(-1)?.backgroundTaskDetails?.find(task => task.id === 'monitor')?.status).toBe('stopped'));
+  expect(data.states.at(-1)?.backgroundTasks).toBe(1);
+  await expect(data.session.stopBackgroundTask('monitor')).rejects.toThrow('不存在或已结束');
 });
 
 it('普通会话启用原生建议，result 后继续接收建议并关联原回合，不再次运行或改动终态', async () => {

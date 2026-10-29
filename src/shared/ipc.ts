@@ -139,6 +139,7 @@ export interface InvokeMap {
   "sessions:fork": [[params: ForkParams], SessionSummary | null];
   "chat:send": [[params: ChatSendParams], { sessionKey: string }];
   "chat:interrupt": [[sessionKey: string], void];
+  "chat:stopBackgroundTask": [[sessionKey: string, taskId: string], void];
   "chat:setPermissionMode": [[sessionKey: string, mode: PermissionMode], void];
   "chat:setModel": [[sessionKey: string, model: string], void];
   "chat:close": [[sessionKey: string], void];
@@ -263,6 +264,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "sessions:fork",
   "chat:send",
   "chat:interrupt",
+  "chat:stopBackgroundTask",
   "chat:setPermissionMode",
   "chat:setModel",
   "chat:close",

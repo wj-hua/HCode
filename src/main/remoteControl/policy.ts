@@ -52,6 +52,7 @@ const GUARDS: { [C in InvokeChannel]?: Guard<C> } = {
     if (params.files?.some((file) => !resolve(file.path).startsWith(root))) throw new Error("远程附件需要先上传");
   },
   "chat:interrupt": allow,
+  "chat:stopBackgroundTask": allow,
   "chat:setPermissionMode": (context, sessionKey, mode) => {
     const current = context.sessionState(sessionKey);
     if (!current) throw new Error("会话不存在或已关闭");

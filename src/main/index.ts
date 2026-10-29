@@ -404,6 +404,11 @@ async function bootstrap() {
     if (runId) return collaboration.cancel(runId);
     await agents.bySessionKey(sessionKey)?.interrupt(sessionKey);
   });
+  handle("chat:stopBackgroundTask", async (sessionKey, taskId) => {
+    const agent = requireSession(sessionKey);
+    if (!agent.stopBackgroundTask) throw new Error("当前智能体不支持停止单个后台任务");
+    await agent.stopBackgroundTask(sessionKey, taskId);
+  });
   handle("chat:setPermissionMode", async (sessionKey, mode) => { if (execution!.isReserved(sessionKey) || invocations.hasActiveSource(sessionKey)) throw new Error("请先暂停协作或停止 AI 调用再修改权限"); await requireSession(sessionKey).setPermissionMode(sessionKey, mode); execution!.updateSourcePermission(sessionKey, mode); });
   handle("chat:setModel", (sessionKey, model) => { if (execution!.isReserved(sessionKey)) throw new Error("请先暂停协作再修改模型"); return requireSession(sessionKey).setModel(sessionKey, model); });
   handle("chat:close", (sessionKey) => {

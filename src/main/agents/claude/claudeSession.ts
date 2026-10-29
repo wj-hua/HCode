@@ -480,6 +480,11 @@ export class ClaudeSession {
     }
   }
 
+  async stopBackgroundTask(taskId: string) {
+    if (!this.activeQuery || !this.backgroundTasks.canStop(taskId)) throw new Error('后台任务不存在或已结束');
+    await this.activeQuery.stopTask(taskId);
+  }
+
   async interrupt() {
     if (!this.isBusy) return;
     this.promptSuggestions.clear();

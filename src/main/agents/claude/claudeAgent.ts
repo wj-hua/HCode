@@ -303,6 +303,10 @@ export class ClaudeAgent implements AgentProvider {
     await this.sessions.get(sessionKey)?.interrupt();
   }
 
+  async stopBackgroundTask(sessionKey: string, taskId: string) {
+    await this.require(sessionKey).stopBackgroundTask(taskId);
+  }
+
   setPermissionMode(sessionKey: string, mode: PermissionMode) {
     return this.require(sessionKey).setPermissionMode(mode);
   }

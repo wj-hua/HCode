@@ -20,6 +20,11 @@ export class ClaudeBackgroundTasks {
 
   get count(): number { return this.activeIds.size; }
 
+  canStop(id: string): boolean {
+    const record = this.records.get(id);
+    return this.activeIds.has(id) && record?.visible === true && record.task.status === 'running';
+  }
+
   /** 返回独立快照，已发出的 IPC 状态不会随后续事件被原地修改。 */
   snapshot(): BackgroundTask[] {
     return [...this.records.values()].filter(record => record.visible)
