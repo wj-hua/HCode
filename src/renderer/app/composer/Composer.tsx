@@ -27,8 +27,8 @@ import { usePromptSuggestion } from './usePromptSuggestion';
 import { drafts, fileDrafts, imageDrafts } from "./drafts";
 import { draftKey, loadDraft, saveDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
-import { FileAttachments } from "../FileAttachments";
-import { hcode, isRemote } from "../bridge";
+import { FileAttachments, type FileUploadItem } from "../FileAttachments";
+import { hcode, isRemote, remoteBridge } from "../bridge";
 import { useNarrowRemote } from "../remote/useNarrowRemote";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -71,6 +71,7 @@ const DEFAULT_MODEL_VALUE = "__default__";
 // 三个 CLI 的模型都支持的图片格式；5MB 是 Claude API 的单图上限
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_STAGED_BYTES = 20 * 1024 * 1024;
 
 function readImage(file: File): Promise<ImageInput> {
   return new Promise((resolve, reject) => {
@@ -146,6 +147,10 @@ export function Composer({
   const [images, setImages] = useState<ImageInput[]>(() => imageDrafts.get(conversation.viewId) ?? []);
   const [files, setFiles] = useState<FileInput[]>(() => fileDrafts.get(conversation.viewId) ?? loadDraft(persistedKey).files);
   const [adding, setAdding] = useState(0);
+  // 正在暂存或暂存失败的附件；File 留着用于重试，控制器用于取消
+  const [uploads, setUploads] = useState<(FileUploadItem & { file: File })[]>([]);
+  const uploadControllers = useRef(new Map<string, AbortController>());
+  const nextUploadId = useRef(0);
   const [submitting, setSubmitting] = useState(false);
   const [caret, setCaret] = useState(() => text.length);
   const [dismissedMention, setDismissedMention] = useState("");
@@ -164,7 +169,7 @@ export function Composer({
   const historyIndexRef = useRef<number | null>(null);
   const caretToEndRef = useRef(false);
   const running = conversation.runState === "running" || conversation.runState === "awaitingApproval";
-  const prediction = usePromptSuggestion(conversation, text, conversation.runState === 'idle' && !conversation.loading && !conversation.compareId && workMode === 'chat' && !activeCollaboration && conversation.queue.length === 0 && !images.length && !files.length && !adding && !submitting);
+  const prediction = usePromptSuggestion(conversation, text, conversation.runState === 'idle' && !conversation.loading && !conversation.compareId && workMode === 'chat' && !activeCollaboration && conversation.queue.length === 0 && !images.length && !files.length && !uploads.length && !adding && !submitting);
   const acceptPrediction = () => {
     if (!prediction.suggestion) return;
     const suggestion = prediction.suggestion;
@@ -301,7 +306,51 @@ export function Composer({
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [prefill, conversation.viewId]);
 
-  /** 本地文件只传路径；剪贴板文件没有路径时暂存到 HCode 数据目录。 */
+  const patchUpload = (id: string, patch: Partial<FileUploadItem>) =>
+    setUploads((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+
+  /**
+   * 没有本机路径的文件（网页端选择、剪贴板）暂存到 HCode 数据目录；网页端显示上传进度。
+   * 网页端可能经 HTTP 打开，crypto.randomUUID 不可用，编号用自增值。
+   */
+  const stageFile = (file: File, id = `upload-${++nextUploadId.current}`) => {
+    const controller = new AbortController();
+    uploadControllers.current.get(id)?.abort();
+    uploadControllers.current.set(id, controller);
+    const pending = { id, file, name: file.name || "附件", mimeType: file.type || "application/octet-stream", progress: remoteBridge ? 0 : null };
+    setUploads((current) => current.some((item) => item.id === id) ? current.map((item) => item.id === id ? pending : item) : [...current, pending]);
+    void (async () => {
+      try {
+        const payload = { name: file.name, data: await readBase64(file) };
+        controller.signal.throwIfAborted();
+        // 请求体发完后电脑还要写盘，返回前停在 99%
+        const path = remoteBridge
+          ? await remoteBridge.stageAttachment(payload, (ratio) => patchUpload(id, { progress: Math.min(99, Math.floor(ratio * 100)) }), controller.signal)
+          : await hcode.invoke("fs:stageAttachment", payload);
+        if (controller.signal.aborted) return;
+        setUploads((current) => current.filter((item) => item.id !== id));
+        setFiles((current) => [...current, { path, name: pending.name, mimeType: pending.mimeType, size: file.size }]);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        patchUpload(id, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (uploadControllers.current.get(id) === controller) uploadControllers.current.delete(id);
+      }
+    })();
+  };
+
+  const cancelUpload = (id: string) => {
+    uploadControllers.current.get(id)?.abort();
+    uploadControllers.current.delete(id);
+    setUploads((current) => current.filter((item) => item.id !== id));
+  };
+
+  // 切换会话会卸载输入框，未完成的上传一并取消
+  useEffect(() => () => {
+    for (const controller of uploadControllers.current.values()) controller.abort();
+  }, []);
+
+  /** 本地文件只传路径；没有路径的文件逐个暂存并显示进度。 */
   const addFiles = async (selected: readonly File[]) => {
     if (selected.length === 0) return;
     prediction.dismiss();
@@ -313,9 +362,10 @@ export function Composer({
           return { image: await readImage(file) };
         }
         const localPath = hcode.getPathForFile(file);
-        if (!localPath && file.size > 20 * 1024 * 1024) throw new Error(`剪贴板附件超过 20MB：${file.name}`);
-        const path = localPath ?? await hcode.invoke("fs:stageAttachment", { name: file.name, data: await readBase64(file) });
-        return { file: { path, name: file.name || "附件", mimeType: file.type || "application/octet-stream", size: file.size } satisfies FileInput };
+        if (localPath) return { file: { path: localPath, name: file.name || "附件", mimeType: file.type || "application/octet-stream", size: file.size } satisfies FileInput };
+        if (file.size > MAX_STAGED_BYTES) throw new Error(`附件超过 20MB：${file.name}`);
+        stageFile(file);
+        return {};
       }));
       const nextImages: ImageInput[] = [];
       const nextFiles: FileInput[] = [];
@@ -372,8 +422,10 @@ export function Composer({
     historyIndexRef.current = null;
   };
 
+  const uploadBlocked = uploads.length > 0;
+
   const submit = () => {
-    if (!canSend || conversation.loading || adding || submitting || submission.reason) return;
+    if (!canSend || conversation.loading || adding || uploadBlocked || submitting || submission.reason) return;
     if (submission.action === "plan") {
       setSidePanel({ type: "collaboration", viewId: conversation.viewId, intent: "plan" });
       return;
@@ -494,7 +546,16 @@ export function Composer({
         images={images.map((image) => ({ src: `data:${image.mimeType};base64,${image.data}`, name: image.name ?? "图片" }))}
         onRemove={(index) => setImages((current) => current.filter((_, i) => i !== index))}
       />
-      <FileAttachments files={files} onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))} />
+      <FileAttachments
+        files={files}
+        uploads={uploads}
+        onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
+        onCancelUpload={cancelUpload}
+        onRetryUpload={(id) => {
+          const item = uploads.find((upload) => upload.id === id);
+          if (item) stageFile(item.file, id);
+        }}
+      />
       <textarea
         ref={textareaRef}
         value={text}
@@ -757,11 +818,11 @@ export function Composer({
                 </Button>
               </ControlHintTooltip>
             ) : (
-              <ControlHintTooltip title={WORK_MODES[workMode].action} shortcut="Enter">
+              <ControlHintTooltip title={uploadBlocked ? (uploads.some((item) => item.error) ? "有附件上传失败，请重试或移除" : "附件上传完成后才能发送") : WORK_MODES[workMode].action} shortcut="Enter">
                 <Button
                   type="submit"
                   size={submission.action === "plan" ? "sm" : "icon-md"}
-                  disabled={!canSend || conversation.loading || adding > 0 || submitting || Boolean(submission.reason)}
+                  disabled={!canSend || conversation.loading || adding > 0 || uploadBlocked || submitting || Boolean(submission.reason)}
                   aria-label={WORK_MODES[workMode].action}
                   className="cursor-pointer gap-1 rounded-lg bg-brand text-ui-base text-foreground-inverse hover:bg-brand/80"
                 >

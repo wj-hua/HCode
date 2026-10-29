@@ -72,9 +72,9 @@ export function ConversationView({
 
   return (
     <FilePreviewProvider viewId={conversation.viewId} workspacePath={conversation.projectPath}>
-      <div className={cn("conversation-content relative flex min-h-0 min-w-0 flex-1 flex-col", draftEmpty ? "overflow-y-auto before:block before:min-h-[52px] before:content-[''] after:block after:min-h-4 after:flex-1 after:content-['']" : "overflow-hidden", draftEmpty && (narrow ? "before:flex-1" : "before:shrink before:basis-[29dvh]"), collaborationOpen && "collaboration-content")}>
+      <div className={cn("conversation-content relative flex min-h-0 min-w-0 flex-1 flex-col", draftEmpty ? "overflow-y-auto overflow-x-hidden before:block before:min-h-[52px] before:content-[''] after:block after:min-h-4 after:flex-1 after:content-['']" : "overflow-hidden", draftEmpty && (narrow ? "before:flex-1" : "before:shrink before:basis-[29dvh]"), collaborationOpen && "collaboration-content")}>
         <div className={cn("relative min-h-0", draftEmpty ? "w-full shrink-0" : "flex-1")}>
-          <div ref={scrollRef} onScroll={onScroll} aria-label="会话消息" tabIndex={0} className={cn(draftEmpty ? "w-full" : "absolute inset-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]")}>
+          <div ref={scrollRef} onScroll={onScroll} aria-label="会话消息" tabIndex={0} className={cn(draftEmpty ? "w-full" : "absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable]")}>
             <div ref={contentRef} className={cn("mx-auto flex w-full flex-col", draftEmpty ? "max-w-2xl items-center" : "max-w-3xl pt-6 pb-10", column || narrow ? "px-3" : "px-6")}>
               <EarlierHistory conversation={conversation} beforeLoad={beforeHistoryLoad} />
               {!column && !outsideProject && !draftEmpty ? <div className="mb-4 w-full max-w-64 self-end 2xl:absolute 2xl:right-5 2xl:top-4 2xl:z-10"><GitTools workspacePath={conversation.projectPath} running={running} /></div> : null}

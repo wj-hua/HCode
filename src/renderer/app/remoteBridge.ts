@@ -41,6 +41,33 @@ async function post(path: string, body: unknown, signal?: AbortSignal): Promise<
   return data.result;
 }
 
+/** 附件暂存走同一个 invoke 接口；fetch 拿不到上传进度，这里改用 XHR。 */
+function stageAttachment(file: { name: string; data: string }, onProgress: (ratio: number) => void, signal?: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "api/invoke");
+    for (const [name, value] of Object.entries(HEADERS)) xhr.setRequestHeader(name, value);
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(event.loaded / event.total); };
+    xhr.onload = () => {
+      const data = (xhr.response ?? {}) as { ok?: boolean; result?: unknown; error?: string };
+      if (xhr.status === 401) {
+        location.reload();
+        reject(new RemoteUnauthorizedError(data.error ?? "需要登录"));
+      } else if (xhr.status < 200 || xhr.status >= 300 || !data.ok) {
+        reject(new Error(data.error ?? `请求失败（${xhr.status}）`));
+      } else {
+        resolve(data.result as string);
+      }
+    };
+    xhr.onerror = () => reject(new Error("网络连接中断"));
+    xhr.onabort = () => reject(signal?.reason ?? new DOMException("已取消上传", "AbortError"));
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(JSON.stringify({ channel: "fs:stageAttachment", args: [file] }));
+  });
+}
+
 export function remoteLogin(token: string): Promise<unknown> {
   return post("api/login", { token }, AbortSignal.timeout(15_000));
 }
@@ -77,6 +104,7 @@ export function createRemoteBridge(): HCodeBridge & {
   onConnectionChange(listener: (state: RemoteConnectionState) => void): () => void;
   loadEarlier(ref: SessionRef, beforeRowId: number): Promise<SessionLoadResult>;
   setViewedSessions(keys: string[]): void;
+  stageAttachment: typeof stageAttachment;
 } {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
   const latestStates = new Map<string, ChatStateEvent>();
@@ -313,6 +341,7 @@ export function createRemoteBridge(): HCodeBridge & {
       return await call("sessions:page", [ref, beforeRowId]) as SessionLoadResult;
     },
     remote: true,
+    stageAttachment,
     onConnectionChange(listener) {
       connectionListeners.add(listener);
       listener(connection);

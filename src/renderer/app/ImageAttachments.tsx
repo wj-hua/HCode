@@ -33,13 +33,17 @@ export function ImageAttachments({
             <img src={image.src.startsWith(REMOTE_MEDIA_PATH) ? `${image.src}?thumbnail=1` : image.src} alt={image.name} loading="lazy" decoding="async" className="size-full object-cover" />
           </button>
           {onRemove ? (
+            // 触屏没有悬停，移除按钮常显（照 ZCode 附件的 [@media(hover:none)]）；外层留出更大的点击区域。
             <button
               type="button"
               title="移除"
+              aria-label={`移除 ${image.name}`}
               onClick={() => onRemove(index)}
-              className="absolute -top-1.5 -right-1.5 hidden size-5 items-center justify-center rounded-full bg-foreground text-background group-hover:flex"
+              className="absolute -top-2.5 -right-2.5 hidden size-7 items-center justify-center group-hover:flex focus-visible:flex [@media(hover:none)]:flex"
             >
-              <XIcon className="size-3" />
+              <span className="flex size-5 items-center justify-center rounded-full bg-foreground text-background">
+                <XIcon className="size-3" />
+              </span>
             </button>
           ) : null}
         </div>
