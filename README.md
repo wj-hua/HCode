@@ -62,7 +62,7 @@ pnpm dist         # 打包 release/HCode-<版本>-arm64.dmg（本地未签名）
 
 常用快捷键：⌘K 快速切换项目或会话，⌘F 搜索会话全文，⌘1–9 切换已打开的会话，⌘W 关闭当前会话视图，⌘L 聚焦输入框，⌘⇧C 复制最后一条回复；⌘N 新建会话，⌘B 切换侧边栏，⌘, 打开设置。
 
-Claude 普通对话在成功结束后接收原生 `prompt_suggestion`，空闲且没有草稿、附件或排队消息时显示为输入框灰字。按 Tab 或点击「接受下一步建议为草稿」后可编辑，再自行发送；Esc 或忽略按钮取消建议，直接输入也会移除本轮建议。建议不自动发送、不写入聊天记录，也不额外发起生成请求。原生首轮、计划模式、失败或取消回合可能没有建议；尊重 Claude 的原生建议设置和额度限制。Codex 稳定版 0.163.0 已声明 `thread/prediction/request` 和 `thread/prediction/updated`，但真实 app-server 在成功回合后调用仍返回 `-32601: thread/prediction/request is not implemented yet`，因此暂不接入。
+Claude 普通对话在成功结束后接收原生 `prompt_suggestion`，空闲且没有草稿、附件或排队消息时显示为输入框灰字。桌面按 Tab 或 →，手机远程网页按回车或点按提示，即可把建议填入输入框编辑，再自行发送；Esc 或忽略按钮取消建议，直接输入也会移除本轮建议。建议不自动发送、不写入聊天记录，也不额外发起生成请求。原生首轮、计划模式、失败或取消回合可能没有建议；尊重 Claude 的原生建议设置和额度限制。Codex 稳定版 0.165.0 已声明 `thread/prediction/request` 和 `thread/prediction/updated`，但真实 app-server 在成功回合后调用仍返回 `-32601: thread/prediction/request is not implemented yet`，因此暂不接入。
 
 ## 协作、专家评审与对比
 

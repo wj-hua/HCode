@@ -23,7 +23,7 @@ import { DraftContextBar } from "./DraftContextBar";
 import { UsageIndicator } from "./UsageIndicator";
 import { QueuedMessages } from "./QueuedMessages";
 import { PromptSuggestionHint } from './PromptSuggestionHint';
-import { usePromptSuggestion } from './usePromptSuggestion';
+import { promptSuggestionKeyAction, usePromptSuggestion } from './usePromptSuggestion';
 import { drafts, fileDrafts, imageDrafts } from "./drafts";
 import { draftKey, loadDraft, saveDraft } from "./persist";
 import { ImageAttachments } from "../ImageAttachments";
@@ -618,9 +618,10 @@ export function Composer({
               }
             }
           }
-          if (prediction.suggestion && !event.nativeEvent.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && (event.key === 'Tab' || event.key === 'Escape')) {
+          const predictionAction = prediction.suggestion ? promptSuggestionKeyAction({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, isComposing: event.nativeEvent.isComposing }, narrow) : null;
+          if (predictionAction) {
             event.preventDefault();
-            if (event.key === 'Tab') acceptPrediction();
+            if (predictionAction === 'accept') acceptPrediction();
             else prediction.dismiss();
             return;
           }
@@ -654,7 +655,7 @@ export function Composer({
         placeholder={prediction.suggestion ?? (narrow ? (running ? "输入消息以排队发送…" : `给 ${agent.name} 发消息…`) : conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`)}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
-      {prediction.suggestion ? <PromptSuggestionHint onAccept={acceptPrediction} onDismiss={prediction.dismiss} /> : null}
+      {prediction.suggestion ? <PromptSuggestionHint narrow={narrow} onAccept={acceptPrediction} onDismiss={prediction.dismiss} /> : null}
       {showSlashResults ? (
         <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="斜杠命令">
           {slashResults.key !== slashContext || slashResults.loading ? (
