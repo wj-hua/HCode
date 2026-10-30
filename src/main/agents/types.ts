@@ -4,6 +4,8 @@ import type {
   AgentQuota,
   AgentStatus,
   ChatSendParams,
+  ChatSteerParams,
+  ChatSteerResult,
   ConversationRow,
   ChatStateEvent,
   ChatPromptSuggestionEvent,
@@ -74,6 +76,8 @@ export interface AgentProvider {
   /** 当前原生线程能否发起协作；返回明确限制，不偷偷创建替代线程。 */
   collaborationSourceReason?(sessionId: string): Promise<string | undefined>;
   interrupt(sessionKey: string): Promise<void>;
+  /** 回合进行中插话；不实现的 CLI 由调用方退回待发送队列。 */
+  steer?(sessionKey: string, params: ChatSteerParams): Promise<ChatSteerResult>;
   stopBackgroundTask?(sessionKey: string, taskId: string): Promise<void>;
   setPermissionMode(sessionKey: string, mode: PermissionMode): Promise<void>;
   setModel(sessionKey: string, model: string): Promise<void>;

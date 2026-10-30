@@ -2,7 +2,7 @@
 import { resolve, sep } from "node:path";
 import type { EventChannel, InvokeChannel, InvokeMap } from "../../shared/ipc.js";
 import { AGENTS } from "../../shared/agents.js";
-import { DEFAULT_SETTINGS, type AgentKind, type PermissionMode, type Settings } from "../../shared/types.js";
+import { DEFAULT_SETTINGS, type AgentKind, type FileInput, type PermissionMode, type Settings } from "../../shared/types.js";
 
 export interface RemotePolicyContext {
   /** 已添加的项目和非项目对话目录。 */
@@ -17,6 +17,12 @@ type Guard<C extends InvokeChannel> = (context: RemotePolicyContext, ...args: In
 
 function requireProject(context: RemotePolicyContext, path: string) {
   if (!context.projectPaths().includes(path)) throw new Error("远程只能访问已添加的项目");
+}
+
+/** 远程只能引用经 fs:stageAttachment 上传到保存目录的附件，不能指向本机任意文件。 */
+function requireStagedFiles(context: RemotePolicyContext, files: readonly FileInput[] | undefined) {
+  const root = resolve(context.attachmentsDir) + sep;
+  if (files?.some((file) => !resolve(file.path).startsWith(root))) throw new Error("远程附件需要先上传");
 }
 
 const allow = () => {};
@@ -48,10 +54,13 @@ const GUARDS: { [C in InvokeChannel]?: Guard<C> } = {
   "agy:subagentMessages": (context, _id, projectPath) => requireProject(context, projectPath),
   "chat:send": (context, params) => {
     requireProject(context, params.projectPath);
-    const root = resolve(context.attachmentsDir) + sep;
-    if (params.files?.some((file) => !resolve(file.path).startsWith(root))) throw new Error("远程附件需要先上传");
+    requireStagedFiles(context, params.files);
   },
   "chat:interrupt": allow,
+  "chat:steer": (context, params) => {
+    if (!context.sessionState(params.sessionKey)) throw new Error("会话不存在或已关闭");
+    requireStagedFiles(context, params.files);
+  },
   "chat:stopBackgroundTask": allow,
   "chat:setPermissionMode": (context, sessionKey, mode) => {
     const current = context.sessionState(sessionKey);

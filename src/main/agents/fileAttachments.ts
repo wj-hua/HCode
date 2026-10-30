@@ -1,3 +1,5 @@
+import { realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute } from "node:path";
 import type { FileInput } from "../../shared/types.js";
 
 const FILES_HEADER = "附件文件（本机绝对路径，请按需读取或分析）：\n";
@@ -32,4 +34,15 @@ export function extractFileReferences(text: string): { text: string; files: File
     return { text, files: [] };
   }
   return { text: prefix.trimEnd(), files };
+}
+
+/** 渲染进程给出的附件 → 真实路径与实际大小；路径非绝对、不存在或不是普通文件时拒绝整条消息。 */
+export async function resolveFileInputs(files: readonly FileInput[]): Promise<FileInput[]> {
+  return Promise.all(files.map(async (file) => {
+    if (!isAbsolute(file.path)) throw new Error(`附件路径无效：${file.name}`);
+    const path = await realpath(file.path);
+    const info = await stat(path);
+    if (!info.isFile()) throw new Error(`附件不是文件：${file.name}`);
+    return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
+  }));
 }

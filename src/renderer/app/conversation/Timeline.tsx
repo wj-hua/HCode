@@ -17,6 +17,7 @@ import type {
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { ForkMode, PermissionRequestEvent } from "@hcode/shared/types";
+import { isTurnStartInput } from "@hcode/shared/conversationTurns";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -87,7 +88,7 @@ export function Timeline({
 }) {
   const entries = usePresentationStore(state => state.entries);
   const turns = useMemo(() => groupTurns(rows), [rows]);
-  const lastUserRowId = useMemo(() => rows.findLast((row) => row.kind === "userInput")?.rowId ?? null, [rows]);
+  const lastUserRowId = useMemo(() => rows.findLast(isTurnStartInput)?.rowId ?? null, [rows]);
   return (
     <div className="flex flex-col gap-6">
       {turns.map((turn, index) => {
@@ -204,7 +205,8 @@ const RowView = memo(function RowView({
 }) {
   switch (row.kind) {
     case "userInput":
-      return <UserBubble row={row} canFork={canFork} canResend={canResend} isLastUser={isLastUser} />;
+      // 回合中途的插话不是回合起点：不能作为分叉 / 回退锚点
+      return <UserBubble row={row} canFork={canFork && !row.guided} canResend={canResend} isLastUser={isLastUser} />;
     case "assistantText":
       return <AssistantText row={row} />;
     case "reasoning":
@@ -299,6 +301,7 @@ function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow
   const files = (row.attachments ?? []).filter((attachment) => !imageAttachment(attachment.ref)).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
   return (
     <div className="group/user flex flex-col items-end gap-2">
+      {row.guided ? <span className="text-ui-xs text-foreground-subtlest">已插话</span> : null}
       <ImageAttachments images={images} className="justify-end" />
       <FileAttachments files={files} className="justify-end" onPreview={preview?.onOpenFilePath} />
       {row.text.trim() ? (

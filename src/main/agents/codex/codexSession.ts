@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
   ChatRunState,
+  ChatSteerResult,
   CodexSpeed,
   PermissionDecision,
   PermissionMode,
@@ -35,6 +36,16 @@ const memoryHashes = new Map<string, string>();
 interface InvokedSkill {
   name: string;
   path: string;
+}
+
+/** turn/start 与 turn/steer 共用的 UserInput 列表；只有图片时省略空文本，避免空输入。 */
+function turnInput(text: string, images: readonly ImageInput[], files: readonly FileInput[], skill?: InvokedSkill) {
+  const prompt = withFileReferences(text, files);
+  return [
+    ...(prompt.trim() || images.length === 0 ? [{ type: "text", text: prompt, text_elements: [] }] : []),
+    ...(skill ? [{ type: "skill", name: skill.name, path: skill.path }] : []),
+    ...images.map((image) => ({ type: "image", url: `data:${image.mimeType};base64,${image.data}` })),
+  ];
 }
 
 /** HCode 权限模式 → codex 的审批策略 + 沙箱。 */
@@ -209,14 +220,9 @@ export class CodexSession {
       }
       const policy = codexPolicy(this.permissionMode);
       const skillPrompt = skill ? text.replace(/^\s*\/[^\s]+/, `$${skill.name}`) : text;
-      const prompt = withFileReferences(skillPrompt, files);
       const result = await this.host.client.request<{ turn: { id: string } }>("turn/start", {
         threadId: this.threadId,
-        input: [
-          ...(prompt.trim() || images.length === 0 ? [{ type: "text", text: prompt, text_elements: [] }] : []),
-          ...(skill ? [{ type: "skill", name: skill.name, path: skill.path }] : []),
-          ...images.map((image) => ({ type: "image", url: `data:${image.mimeType};base64,${image.data}` })),
-        ],
+        input: turnInput(skillPrompt, images, files, skill),
         approvalPolicy: this.research ? "never" : policy.approvalPolicy,
         ...(this.research ? { permissions: RESEARCH_PERMISSION_PROFILE } : { sandboxPolicy: sandboxPolicyObject(policy.sandbox) }),
         ...(this.model ? { model: this.model } : {}),
@@ -638,6 +644,28 @@ export class CodexSession {
   }
 
   // ───────────────────────── 控制 ─────────────────────────
+
+  /**
+   * 回合进行中插话：turn/steer 把输入追加进当前原生轮，服务端随后回显一条 userMessage，
+   * 由投影器作为 guided 行写入当前轮。轮次恰好结束（-32600 no active turn）等拒绝不会丢内容，
+   * 原因随结果退回，由渲染进程放回待发送队列。
+   */
+  async steer(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []): Promise<ChatSteerResult> {
+    if (this.closed || !this.isBusy || !this.threadId || !this.currentTurnId || this.toolsCancelled) {
+      return { delivered: false, reason: "当前没有进行中的回合" };
+    }
+    if (this.research) return { delivered: false, reason: "协作研究回合不接受插话" };
+    try {
+      await this.host.client.request("turn/steer", {
+        threadId: this.threadId,
+        expectedTurnId: this.currentTurnId,
+        input: turnInput(text, images, files),
+      });
+      return { delivered: true };
+    } catch (error) {
+      return { delivered: false, reason: `Codex 拒绝插话：${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
 
   async interrupt() {
     if (!this.isBusy || !this.threadId) return;

@@ -9,6 +9,8 @@ import type {
   ModelOption,
   ChatRowsEvent,
   ChatSendParams,
+  ChatSteerParams,
+  ChatSteerResult,
   ChatStateEvent,
   GitBranches,
   GitBranchSwitchPreview,
@@ -139,6 +141,8 @@ export interface InvokeMap {
   "sessions:fork": [[params: ForkParams], SessionSummary | null];
   "chat:send": [[params: ChatSendParams], { sessionKey: string }];
   "chat:interrupt": [[sessionKey: string], void];
+  /** 投递到当前回合或确定无法投递后才返回；Claude 要等到下一个工具间隙。 */
+  "chat:steer": [[params: ChatSteerParams], ChatSteerResult];
   "chat:stopBackgroundTask": [[sessionKey: string, taskId: string], void];
   "chat:setPermissionMode": [[sessionKey: string, mode: PermissionMode], void];
   "chat:setModel": [[sessionKey: string, model: string], void];
@@ -264,6 +268,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "sessions:fork",
   "chat:send",
   "chat:interrupt",
+  "chat:steer",
   "chat:stopBackgroundTask",
   "chat:setPermissionMode",
   "chat:setModel",

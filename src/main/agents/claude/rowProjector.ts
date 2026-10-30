@@ -29,6 +29,7 @@ export interface ClaudeRecord {
   timestamp?: string;
   isMeta?: boolean;
   isReplay?: boolean;
+  isQueuedCommand?: boolean;
   isCompletedLocalCommand?: boolean;
   parent_tool_use_id?: string | null;
   message?: unknown;
@@ -173,7 +174,9 @@ export class ClaudeRowProjector extends RowProjectorBase {
       return;
     }
     if (!text.trim() && images.length === 0) return;
-    this.beginUserTurn(text, at, record.uuid, images);
+    // getSessionMessages 把回合中途投递的排队消息（queued_command）还原为带 isQueuedCommand 的 user 记录
+    if (record.isQueuedCommand === true && this.turn) this.appendGuidedInput(text, at, record.uuid, images);
+    else this.beginUserTurn(text, at, record.uuid, images);
   }
 
   private consumeToolResult(block: JsonRecord, at: number) {

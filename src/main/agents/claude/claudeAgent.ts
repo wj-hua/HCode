@@ -14,6 +14,8 @@ import type {
   SessionLoadResult,
   SessionSummary,
   SlashCommandOption,
+  ChatSteerParams,
+  ChatSteerResult,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { claudeQuota, quotaError } from "../quota.js";
@@ -301,6 +303,10 @@ export class ClaudeAgent implements AgentProvider {
 
   async interrupt(sessionKey: string) {
     await this.sessions.get(sessionKey)?.interrupt();
+  }
+
+  steer(sessionKey: string, params: ChatSteerParams): Promise<ChatSteerResult> {
+    return this.require(sessionKey).steer(params.text, params.images, params.files);
   }
 
   async stopBackgroundTask(sessionKey: string, taskId: string) {

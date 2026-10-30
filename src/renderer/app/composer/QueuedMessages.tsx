@@ -1,8 +1,9 @@
-// 输入框上方的待发送队列：文案照 ZCode chat.queue.*。
-import { PaperclipIcon, PencilIcon, PlayIcon, XIcon } from "lucide-react";
+// 输入框上方的待发送队列与等待投递的插话：文案照 ZCode chat.queue.*。
+import { CornerDownLeftIcon, LoaderIcon, PaperclipIcon, PencilIcon, PlayIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useAppStore, type Conversation, type QueuedMessage } from "../store/appStore";
+import { canSteer } from "../store/turnSteerActions";
 
 const PAUSED_TEXT = {
   stopped: "由于你中断了当前响应，队列已暂停",
@@ -16,13 +17,25 @@ export function QueuedMessages({
   conversation: Conversation;
   onEdit: (item: QueuedMessage) => void;
 }) {
-  const removeQueued = useAppStore((state) => state.removeQueued);
-  const resumeQueue = useAppStore((state) => state.resumeQueue);
-  const { queue, queuePaused } = conversation;
-  if (queue.length === 0) return null;
+  const { queue, steering = [] } = conversation;
+  if (queue.length === 0 && steering.length === 0) return null;
 
   return (
-    <div className="mb-2 rounded-xl border border-border bg-background px-3 py-2 text-ui-sm">
+    <div className="mb-2 flex flex-col gap-2">
+      {steering.length > 0 ? <SteeringMessages steering={steering} /> : null}
+      {queue.length > 0 ? <QueueList conversation={conversation} onEdit={onEdit} /> : null}
+    </div>
+  );
+}
+
+function QueueList({ conversation, onEdit }: { conversation: Conversation; onEdit: (item: QueuedMessage) => void }) {
+  const removeQueued = useAppStore((state) => state.removeQueued);
+  const resumeQueue = useAppStore((state) => state.resumeQueue);
+  const steerQueued = useAppStore((state) => state.steerQueued);
+  const { queue, queuePaused } = conversation;
+
+  return (
+    <div className="rounded-xl border border-border bg-background px-3 py-2 text-ui-sm">
       <div className="flex items-center gap-2 text-foreground-subtle">
         <span className="flex-1">待发送消息（{queue.length}）</span>
         {queuePaused ? (
@@ -51,6 +64,13 @@ export function QueuedMessages({
                   {attachments}
                 </span>
               ) : null}
+              {canSteer(conversation, item.text) ? (
+                <ControlHintTooltip title="立即插话" description="不等本轮结束，直接插入当前回合">
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label="立即插话" onClick={() => steerQueued(item.id)}>
+                    <CornerDownLeftIcon />
+                  </Button>
+                </ControlHintTooltip>
+              ) : null}
               <ControlHintTooltip title="编辑">
                 <Button type="button" variant="ghost" size="icon-sm" aria-label="编辑" onClick={() => onEdit(item)}>
                   <PencilIcon />
@@ -72,5 +92,22 @@ export function QueuedMessages({
         })}
       </ul>
     </div>
+  );
+}
+
+/** 已提交、等待 CLI 并入当前回合的插话；Claude 要到下一个工具间隙才投递。 */
+function SteeringMessages({ steering }: { steering: QueuedMessage[] }) {
+  return (
+    <ul className="flex flex-col rounded-xl border border-border bg-background px-3 py-2 text-ui-sm" aria-live="polite">
+      {steering.map((item) => (
+        <li key={item.id} className="flex items-center gap-2 py-0.5 text-foreground-subtle">
+          <LoaderIcon className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+          <span className="shrink-0">正在插话</span>
+          <span className="min-w-0 flex-1 truncate text-foreground" title={item.text}>
+            {item.text.trim().split("\n")[0] || "（仅附件）"}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

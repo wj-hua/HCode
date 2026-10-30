@@ -123,6 +123,7 @@ export function Composer({
   const sendGroup = useAppStore((state) => state.sendGroup);
   const interrupt = useAppStore((state) => state.interrupt);
   const enqueue = useAppStore((state) => state.enqueue);
+  const steer = useAppStore((state) => state.steer);
   const removeQueued = useAppStore((state) => state.removeQueued);
   const setPermissionMode = useAppStore((state) => state.setPermissionMode);
   const setModel = useAppStore((state) => state.setModel);
@@ -424,6 +425,16 @@ export function Composer({
 
   const uploadBlocked = uploads.length > 0;
 
+  /** 运行中的草稿：Enter 插话进当前回合（不支持时由 store 排队），Tab 明确排到本轮结束后。 */
+  const handOffRunningDraft = (mode: "steer" | "queue") => {
+    if (mode === "steer") steer(text, images, files);
+    else enqueue(text, images, files);
+    rememberPrompt(text);
+    setText("");
+    setImages([]);
+    setFiles([]);
+  };
+
   const submit = () => {
     if (!canSend || conversation.loading || adding || uploadBlocked || submitting || submission.reason) return;
     if (submission.action === "plan") {
@@ -431,12 +442,7 @@ export function Composer({
       return;
     }
     if (running && !conversation.compareId) {
-      // 运行中先排队，本轮结束后自动发送
-      enqueue(text, images, files);
-      rememberPrompt(text);
-      setText("");
-      setImages([]);
-      setFiles([]);
+      handOffRunningDraft("steer");
       return;
     }
     setSubmitting(true);
@@ -466,6 +472,7 @@ export function Composer({
   };
 
   const agent = AGENTS[conversation.agent];
+  const steerable = agent.steer === true && !conversation.compareId;
   const modeInfo =
     agent.permissionModes.find((item) => item.mode === conversation.permissionMode) ?? agent.permissionModes[0]!;
   const modelLabel = models.find((item) => item.value === conversation.model)?.label ?? conversation.model;
@@ -628,6 +635,9 @@ export function Composer({
           if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
             event.preventDefault();
             submit();
+          } else if (event.key === "Tab" && !event.shiftKey && running && steerable && canSend && !uploadBlocked && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            handOffRunningDraft("queue");
           } else if (event.key === "Escape" && running) {
             event.preventDefault();
             void interrupt();
@@ -652,7 +662,7 @@ export function Composer({
             }
           }
         }}
-        placeholder={prediction.suggestion ?? (narrow ? (running ? "输入消息以排队发送…" : `给 ${agent.name} 发消息…`) : conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）` : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`)}
+        placeholder={prediction.suggestion ?? (narrow ? (running ? (steerable ? "输入消息以插话…" : "输入消息以排队发送…") : `给 ${agent.name} 发消息…`) : conversation.compareId ? "同时发给对比组里的每个 CLI，Enter 发送，Shift+Enter 换行" : running ? (steerable ? `${agent.name} 正在工作…Enter 插话，Tab 排队（Esc 停止）` : `${agent.name} 正在工作…继续输入可排队发送（Esc 停止）`) : `给 ${agent.name} 发消息，Enter 发送，Shift+Enter 换行`)}
         className="max-h-40 min-h-10 w-full resize-none overflow-y-auto bg-transparent text-ui-base leading-5 text-foreground outline-none placeholder:text-foreground-subtlest"
       />
       {prediction.suggestion ? <PromptSuggestionHint narrow={narrow} onAccept={acceptPrediction} onDismiss={prediction.dismiss} /> : null}

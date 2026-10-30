@@ -1,7 +1,7 @@
 import { presentationForRun, presentationForDraft } from "../shared/collaborationPresentation.js";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AgentInvocationService } from './invocations/agentInvocationService.js';
 import { InvocationRepository } from './invocations/invocationRepository.js';
@@ -20,6 +20,7 @@ import { ClaudeAgent } from "./agents/claude/claudeAgent.js";
 import { listSubagents, getSubagentMessages } from "@anthropic-ai/claude-agent-sdk";
 import { projectSubagentHistory, type ClaudeRecord } from "./agents/claude/rowProjector.js";
 import { CodexAgent } from "./agents/codex/codexAgent.js";
+import { resolveFileInputs } from "./agents/fileAttachments.js";
 import { AgyAgent } from "./agents/agy/agyAgent.js";
 import { AgentRegistry } from "./agents/registry.js";
 import type { AgentEvents } from "./agents/types.js";
@@ -307,13 +308,7 @@ async function bootstrap() {
     finishedSending: (key) => startingGitSessions.delete(key),
     prepare: async (params) => {
       if (params.projectPath === conversationWorkspace.path) await conversationWorkspace.ensure();
-      const files = await Promise.all((params.files ?? []).map(async (file) => {
-        if (!isAbsolute(file.path)) throw new Error(`附件路径无效：${file.name}`);
-        const path = await realpath(file.path);
-        const info = await stat(path);
-        if (!info.isFile()) throw new Error(`附件不是文件：${file.name}`);
-        return { path, name: file.name || basename(path), mimeType: file.mimeType || "application/octet-stream", size: info.size };
-      }));
+      const files = await resolveFileInputs(params.files ?? []);
       const root = await repositoryRoot(params.projectPath, buildAgentEnv()).catch(() => null);
       if (root && gitOperationRoots.has(root)) throw new Error("该仓库正在处理 Git 操作，请完成后再发送消息");
       if (root) sessionGitRoots.set(params.sessionKey, root);
@@ -322,6 +317,13 @@ async function bootstrap() {
     },
   });
   handle("chat:send", (params) => execution!.send(params));
+  // 插话只进入用户自己的普通回合；协作占用的会话由协作流程驱动，退回队列等其结束
+  handle("chat:steer", async (params) => {
+    if (execution!.isReserved(params.sessionKey)) return { delivered: false, reason: "该会话正在协作" };
+    const agent = requireSession(params.sessionKey);
+    if (!agent.steer) return { delivered: false, reason: `${AGENTS[agent.kind].name} 不支持回合中插话` };
+    return agent.steer(params.sessionKey, { ...params, files: await resolveFileInputs(params.files ?? []) });
+  });
   const invocations = new AgentInvocationService(new InvocationRepository(join(app.getPath('userData'), 'agent-invocations')), execution, call => send('agentInvocation:updated', call), agent => getDefaultModel(store.settings, agent), agents);
   handle('agentInvocation:list', (key, nativeId) => invocations.list(key, nativeId));
   handle('agentInvocation:cancel', id => invocations.cancel(id));

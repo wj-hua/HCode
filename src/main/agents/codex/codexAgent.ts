@@ -3,6 +3,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AGENTS } from "../../../shared/agents.js";
+import { isTurnStartInput } from "../../../shared/conversationTurns.js";
 import type {
   AgentQuota,
   AgentStatus,
@@ -16,6 +17,8 @@ import type {
   SlashCommandOption,
   SkillEntry,
   McpEntry,
+  ChatSteerParams,
+  ChatSteerResult,
 } from "../../../shared/types.js";
 import { probeCli } from "../../util/locateCli.js";
 import { codexQuota, quotaError, quotaUnavailable } from "../quota.js";
@@ -345,7 +348,7 @@ export class CodexAgent implements AgentProvider {
     const turns = await this.loadTurns(ref.id);
     // 历史投影里用户消息的 turnId 就是 codex 的 turn id
     const starts = projectCodexTurns(turns).snapshot()
-      .filter((row) => row.kind === "userInput")
+      .filter(isTurnStartInput)
       .map((row) => turns.findIndex((turn) => turn.id === row.turnId));
     const start = starts[turnIndex];
     if (starts.length !== turnCount || start === undefined || start < 0) {
@@ -528,6 +531,10 @@ export class CodexAgent implements AgentProvider {
 
   async interrupt(sessionKey: string) {
     await this.sessions.get(sessionKey)?.interrupt();
+  }
+
+  steer(sessionKey: string, params: ChatSteerParams): Promise<ChatSteerResult> {
+    return this.require(sessionKey).steer(params.text, params.images, params.files);
   }
 
   setPermissionMode(sessionKey: string, mode: PermissionMode) {

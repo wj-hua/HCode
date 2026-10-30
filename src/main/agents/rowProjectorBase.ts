@@ -162,6 +162,27 @@ export class RowProjectorBase {
     this.put(input);
   }
 
+  /**
+   * 回合进行中插入的用户消息（turn steer）：写入当前轮，不关闭也不新开回合。
+   * 带 guided 标记，渲染层据此显示为“已引导”，分叉 / 回退计数不把它当作回合起点。
+   */
+  appendGuidedInput(text: string, at: number, sourceCommandId?: string, attachments: readonly UserAttachment[] = []) {
+    const restored = extractFileReferences(text);
+    this.ensureTurn(at);
+    const input: UserInputRow = {
+      ...this.base(at),
+      kind: "userInput",
+      origin: "realUser",
+      guided: true,
+      text: restored.text,
+      ...(sourceCommandId ? { sourceCommandId } : {}),
+      ...(attachments.length > 0 || restored.files.length > 0
+        ? { attachments: [...attachments, ...inputAttachments(undefined, restored.files)] }
+        : {}),
+    };
+    this.put(input);
+  }
+
   protected ensureTurn(at: number) {
     if (!this.turn) this.beginSyntheticTurn(at);
     else this.turn.lastAt = Math.max(this.turn.lastAt, at);

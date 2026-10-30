@@ -41,6 +41,8 @@ import { refreshConversation, refreshSessionList } from "./refreshActions";
 import { loadRemoteHistory, mergeHistoryRows } from "./remoteHistoryActions";
 import { openSessionLink, takeSessionLink } from "./sessionLinkActions";
 import { restoreMessageAttachments } from "./messageAttachments";
+import { canSteer, steerConversation } from "./turnSteerActions";
+import { isTurnStartInput } from "@hcode/shared/conversationTurns";
 import { isNarrowRemote } from "../remote/useNarrowRemote";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
@@ -89,6 +91,8 @@ export interface Conversation {
   effort: string;
   codexSpeed: CodexSpeed;
   queue: QueuedMessage[];
+  /** 已提交插话、等待主进程确认投递的消息；未投递时回到 queue。 */
+  steering?: QueuedMessage[];
   /** 队列暂停原因：用户停止或本轮出错后不再自动发送，等用户点「继续」。 */
   queuePaused?: "stopped" | "error";
   /** 多 CLI 对比：同一组会话共用同一个 id，界面并排显示。 */
@@ -143,6 +147,10 @@ export interface AppState {
   sendGroup(text: string, images: ImageInput[], files: FileInput[]): Promise<boolean>;
   /** 运行中把消息加入当前会话的队列。 */
   enqueue(text: string, images: ImageInput[], files: FileInput[]): void;
+  /** 运行中插话进当前回合；当前会话不能插话时加入队列。 */
+  steer(text: string, images: ImageInput[], files: FileInput[]): void;
+  /** 把一条排队消息立即插话进当前回合。 */
+  steerQueued(id: string): void;
   removeQueued(id: string): void;
   /** 取消暂停，空闲时立即发送队首。 */
   resumeQueue(): void;
@@ -371,6 +379,14 @@ export const useAppStore = create<AppState>((set, get) => {
       toast(message, { variant: "warning" });
       return false;
     }
+  };
+
+  /** 未投递的插话追加回队列；会话已空闲且队列未暂停时立即补发。 */
+  const returnToQueue = (viewId: string, message: QueuedMessage) => {
+    const conv = get().conversations[viewId];
+    if (!conv) return;
+    patchConversation(viewId, { queue: [...conv.queue, message] });
+    drainQueue(viewId);
   };
 
   /** 会话空闲且队列未暂停时发送队首；发送失败则放回队首并暂停。 */
@@ -692,6 +708,24 @@ export const useAppStore = create<AppState>((set, get) => {
       if (conv) enqueueConversation(conv.viewId, text, images, files);
     },
 
+    steer(text, images, files) {
+      const conv = activeConversation();
+      if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return;
+      if (!canSteer(conv, text)) {
+        enqueueConversation(conv.viewId, text, images, files);
+        return;
+      }
+      void steerConversation(conv.viewId, { id: crypto.randomUUID(), text, images, files }, get, patchConversation, returnToQueue);
+    },
+
+    steerQueued(id) {
+      const conv = activeConversation();
+      const item = conv?.queue.find((queued) => queued.id === id);
+      if (!conv || !item || !canSteer(conv, item.text)) return;
+      patchConversation(conv.viewId, { queue: conv.queue.filter((queued) => queued.id !== id) });
+      void steerConversation(conv.viewId, item, get, patchConversation, returnToQueue);
+    },
+
     removeQueued(id) {
       const conv = activeConversation();
       if (conv) patchConversation(conv.viewId, { queue: conv.queue.filter((item) => item.id !== id) });
@@ -839,7 +873,7 @@ export const useAppStore = create<AppState>((set, get) => {
         conv = get().conversations[conv.viewId];
         if (!conv?.sessionId || conv.earlierRows) return;
       }
-      const users = conv.rows.filter((row) => row.kind === "userInput");
+      const users = conv.rows.filter(isTurnStartInput);
       const turnIndex = users.findIndex((row) => row.rowId === rowId);
       const row = users[turnIndex];
       if (!row) return;
