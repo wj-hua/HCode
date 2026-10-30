@@ -38,6 +38,24 @@ afterEach(() => {
 });
 
 describe("远程网页连接恢复", () => {
+  it("文件预览查询宿主的真实文件状态和文本，读取失败保留错误", async () => {
+    const info = { exists: true, isDirectory: false, size: 6 };
+    fetchMock.mockResolvedValueOnce(response(info)).mockResolvedValueOnce(response("你好"));
+    await expect(bridge.invoke("fs:stat", "/project/说明.md")).resolves.toEqual(info);
+    await expect(bridge.invoke("fs:readText", "/project/说明.md", 256 * 1024)).resolves.toBe("你好");
+    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).toEqual({ channel: "fs:readText", args: ["/project/说明.md", 256 * 1024] });
+    fetchMock.mockResolvedValueOnce(Response.json({ ok: false, error: "文件超出远程预览范围" }));
+    await expect(bridge.invoke("fs:stat", "/private/secret")).rejects.toThrow("文件超出远程预览范围");
+  });
+
+  it("图片字节经 JSON 传输后还原，文件不存在时保留 null", async () => {
+    const bytes = Uint8Array.from([0, 127, 128, 255]);
+    fetchMock.mockResolvedValueOnce(response(Buffer.from(bytes).toString("base64")));
+    await expect(bridge.invoke("fs:readMedia", "/project/截图.png")).resolves.toEqual(bytes);
+    fetchMock.mockResolvedValueOnce(response(null));
+    await expect(bridge.invoke("fs:readMedia", "/project/missing.png")).resolves.toBeNull();
+  });
+
   it("普通打开走分页，搜索等完整读取保留全量接口", async () => {
     const ref = { agent: "codex" as const, id: "history", projectPath: "/project" };
     await bridge.invoke("sessions:load", ref);

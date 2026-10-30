@@ -14,6 +14,7 @@ import { remoteHistoryPage } from "./historyPage.js";
 import { RemoteEventClients } from "./eventClients.js";
 import { RemoteToolDetails } from "./remoteToolDetails.js";
 import { RemoteReferenceNotFound } from "./signedReference.js";
+import { invokeRemoteFile, isRemoteFileChannel } from "./filePreview.js";
 import { compress, isCompressible, negotiateEncoding, type ContentEncoding } from "./httpCompression.js";
 import { NotificationFeed } from "./notificationFeed.js";
 import { checkRemoteInvoke, remoteSettings, REMOTE_EVENTS, type RemotePolicyContext } from "./policy.js";
@@ -322,6 +323,7 @@ export class RemoteControlService {
   }
 
   private async dispatch(channel: string, args: unknown[]): Promise<unknown> {
+    if (isRemoteFileChannel(channel)) return invokeRemoteFile(channel, args, this.deps.policy.projectPaths());
     if (channel === "tools:detail") return this.tools.read(args[0] as string);
     if (channel === "sessions:refresh") {
       if (!checkRemoteInvoke(this.deps.policy, "sessions:load", [args[0]])) throw new HttpError(403, "远程不能读取该会话");

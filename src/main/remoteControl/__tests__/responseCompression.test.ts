@@ -66,6 +66,27 @@ async function login(): Promise<string> {
   return String(response.headers["set-cookie"]).split(";")[0]!;
 }
 
+it("手机预览读取项目和临时目录的现存文本与图片，未登录不能读取", async () => {
+  projectPaths = [staticDir];
+  const textPath = join(staticDir, "说明.md");
+  const imagePath = join(staticDir, "截图.png");
+  const image = Buffer.from([0, 127, 128, 255]);
+  await writeFile(textPath, "你好");
+  await writeFile(imagePath, image);
+  const cookie = await login();
+  const invoke = async (channel: string, args: unknown[], authenticated = true) => {
+    const response = await raw("POST", "/api/invoke", { ...HEADERS, ...(authenticated ? { Cookie: cookie } : {}) }, JSON.stringify({ channel, args }));
+    return { status: response.status, ...JSON.parse(response.body.toString()) };
+  };
+  expect((await invoke("fs:stat", [textPath])).result).toEqual({ exists: true, isDirectory: false, size: 6 });
+  expect((await invoke("fs:readText", [textPath, 256 * 1024])).result).toBe("你好");
+  expect((await invoke("fs:readMedia", [imagePath])).result).toBe(image.toString("base64"));
+  expect((await invoke("fs:stat", [join(staticDir, "missing")])).result).toBeNull();
+  projectPaths = [];
+  expect((await invoke("fs:readMedia", [imagePath])).result).toBe(image.toString("base64"));
+  expect((await invoke("fs:readText", [textPath], false)).status).toBe(401);
+});
+
 it("远程折叠工具只下发摘要，展开读取原文且签名和项目权限仍有效", async () => {
   const tool = { kind: "toolCall", rowId: 1, turnId: "turn", toolCallId: "tool", toolName: "mcp__cua_repl__js", status: "success", inputText: "private-input".repeat(1000), input: { script: "private-input" }, output: { text: "private-output".repeat(1000) } } as ConversationRow;
   liveRows = [tool];
