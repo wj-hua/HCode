@@ -2,6 +2,8 @@
 
 参照 ZCode Web 远控（`ZCode/docs/web-remote-control/`），让手机浏览器经云服务器访问本机正在运行的 HCode，查看会话、发送消息和处理审批。Agent 仍在本机执行，手机只是另一个界面。v1 以走通流程为主，不追求 ZCode 的分片 ACK、多版本部署、账号配对等能力。
 
+> 部署入口：[服务器部署与验收指南](HCode-远程操控-服务器部署与验收指南.md)。本方案描述架构；首次安装、参数准备、证书、排错和撤销按部署指南执行。服务器只部署中转入口，不运行 HCode、AI CLI 或项目任务。2026-10-29 按仓库版本 `0.19.32` 核对并更新能力范围；实际交付时仍需记录安装版本。
+
 > 本仓库开源。文档、代码、默认设置中不出现真实域名、服务器 IP、端口、SSH 用户名与私钥路径、访问口令。下文 `<域名>`、`<网关地址>`、`<端口>`、`<SSH 别名>` 均为占位，真实值只存在于本机设置与服务器配置中。
 
 ## 1. 目标与范围
@@ -13,11 +15,12 @@ v1 做：
 - 浏览已添加项目与会话、打开历史会话、查看正在运行会话的实时输出。
 - 在已有会话续聊或新建会话、停止当前回合、处理工具审批与提问、上传附件。
 - 本机界面显示远程操控状态（关闭 / 连接中 / 已连接 / 出错）和在线客户端数。
+- 当前实现已增加远程浏览/添加/创建项目目录、Git 分支与提交切换，以及已添加项目和系统临时目录内的受限文件预览。这些能力不具备按登录用户隔离，不能把“已添加项目”视为不可扩大的授权范围。
 
 v1 不做：
 
-- 内置终端、Git 提交/推送/切换分支、协作与专家评审、扩展管理、修改设置。
-- 任意路径文件读取、HTML 预览、背景媒体（依赖 Electron 自定义协议）。
+- 内置终端、直接 Git 推送接口、协作与专家评审入口、扩展管理、修改本机设置。
+- 独立的任意路径读取接口、依赖 Electron 自定义协议的 HTML 页面预览及背景媒体。受限文件预览见 §3.3；Agent 仍可能按权限执行命令或读取其他文件，不能据此推断存在完整沙箱。
 - 专门的手机布局（v1 复用桌面界面，仅做最小适配，见 §6）。
 - 多设备配对、账号体系、断线逐条重放。
 
@@ -28,7 +31,7 @@ v1 不做：
    │ HTTPS（已有证书）
    ▼
 云服务器 nginx 容器  location /hcode/ ──proxy──> <网关地址>:<端口>
-                                                  │ 仅容器网关可达，不对公网开放
+                                                  │ 绑定宿主机网桥地址，另行限制访问；不对公网开放
                                                   ▼
                                    sshd 反向转发（受限隧道用户）
                                                   ▲ 本机主动发起 ssh -N -R
@@ -42,7 +45,7 @@ v1 不做：
 
 选择理由：
 
-- **服务器不写程序**。nginx 已为同机其他服务反代到 Docker 网关地址，沿用同一模式；sshd 负责隧道。
+- **服务器不写程序**。nginx 与 sshd 负责中转；nginx 在宿主机运行时使用回环监听，在 Docker 网桥中运行时使用宿主机网桥地址。网桥地址本身不提供“仅 nginx 可访问”的保证。
 - **本机无需公网入口**。隧道由本机主动连出；本地服务只监听 `127.0.0.1`。
 - **只用标准库/系统能力**。Node `http` 模块 + 浏览器原生 `fetch` / `EventSource`；隧道使用系统 OpenSSH；口令加密使用 Electron `safeStorage`（macOS 钥匙串）。不新增依赖。
 - **复用现有 IPC**。主进程所有请求经 `handle()` 注册、所有事件经 `send()` 发出（`src/main/index.ts`），渲染进程所有调用经 `src/renderer/app/bridge.ts` 的 `hcode`。远程只是这两个出入口的第二个传输层。
@@ -59,6 +62,7 @@ remoteControl: {
   sshHost: string;       // ~/.ssh/config 中的 Host 别名，默认 ""
   remoteBind: string;    // 服务器侧监听地址:端口，默认 ""
   localPort: number;     // 本地服务端口，默认 0 = 启动时随机分配
+  notificationFeed: boolean; // 默认 false，独立的通知订阅开关
 }
 ```
 
@@ -67,16 +71,16 @@ remoteControl: {
 - **访问口令不放进 `Settings`**（`settings:get` 的结果会发给渲染进程，也可能被远程读取）。首次开启时用 `crypto.randomBytes` 生成，经 `safeStorage` 加密后存到 userData 下单独文件（权限 600）。设置页提供「复制口令」「重新生成」；重新生成后所有已登录的远程会话立即失效。
 - 应用启动时仅当 `enabled` 为 true 才启动服务；关闭开关立即：断开所有 SSE、清空登录会话、结束 ssh 进程、关闭 HTTP 监听。
 
-### 3.2 RemoteControlService（新增 `src/main/remoteControl/`）
+### 3.2 RemoteControlService（`src/main/remoteControl/`）
 
 - `remoteControlService.ts`：`http.createServer`，监听 `127.0.0.1:<本地端口>`。
-  - 静态文件：从 `out/renderer` 读取，限制在该目录内，开发模式可代理到 Vite。
+  - 静态文件：从 `out/renderer` 读取，限制在该目录内；正式部署使用构建产物。
   - `POST /api/login`：常量时间比较口令（`crypto.timingSafeEqual`）；成功下发 `HttpOnly; SameSite=Strict` 的随机会话 Cookie，代理声明 HTTPS 时附加 `Secure`，路径由代理前缀决定。会话 7 天过期，应用重启或更新后保留：userData 下 `remote-control-sessions.json`（权限 600）只存会话标识的 SHA-256 摘要与过期时间，最多 50 条；重新生成口令、关闭远程操控、登出时清除，文件损坏时视为无已登录会话。登录失败共用限流：每分钟最多 5 次。
   - `POST /api/invoke`：校验 Cookie 和自定义头 `X-HCode-Remote: 1`（防 CSRF），请求体 `{ channel, args }`，返回 `{ ok, result }` 或 `{ ok: false, error }`。请求体上限为 30 MiB。
   - `GET /api/events`：SSE，`event: <channel>` + `data: <json>`；每 15 秒发注释心跳。
 - `tunnel.ts`：使用系统 `/usr/bin/ssh`，开启 `ExitOnForwardFailure=yes`、`BatchMode=yes`，以 `ServerAliveInterval=5` / `ServerAliveCountMax=2` 检测失联。禁用 SSH 主连接复用、持久化与后台运行，使隧道归当前子进程管理。普通失败按 1s / 2s / 5s / 10s 退避；远端转发失败时每 2s 重试，等待旧监听释放。stderr 只归纳错误类型，不保存原始输出。
 - 网络恢复：每 2s 检查非回环网卡地址变化，稳定 2s 后重建连接；系统唤醒也触发恢复，窗口关闭后仍然有效。地址未变化的路由或代理切换由 SSH 心跳兜底。重建时先结束旧进程，2s 未退出则强制结束，收到关闭通知后才建立新连接。认证/转发阶段另有 20s 总超时。
-- `index.ts`：组合 server + tunnel，维护状态 `{ state, clients, error }`，变化时向本机窗口发 `remote:status` 事件。
+- `remoteControlService.ts` 组合 server + tunnel，维护本地服务、隧道、客户端数及通知订阅数，变化时向本机窗口发 `remote:status` 事件；由 `src/main/index.ts` 注入现有 handler 和状态来源。
 
 ### 3.3 接入现有 IPC
 
@@ -84,15 +88,18 @@ remoteControl: {
 - `send()` 在发给主窗口后，再把 **白名单** 内的事件推给所有在线 SSE 客户端。
 - 结果中的 `Uint8Array` 等非 JSON 类型的通道不进入白名单。
 
-v1 远程可调用通道：
+当前远程可调用通道（普通白名单见 `src/main/remoteControl/policy.ts`；专用 HTTP 通道由 `remoteControlService.ts` 分发）：
 
 | 类别 | 通道 |
 |---|---|
-| 基础信息 | `agent:status` `agent:models` `agent:commands` `quota:list` `projects:list` `workspace:conversation` |
-| 会话 | `sessions:list` `sessions:load` `sessions:search` `claude/codex/agy:subagents` `…:subagentMessages` |
-| 对话 | `chat:send` `chat:interrupt` `chat:setModel` `chat:setPermissionMode` `permission:respond` `chat:live` `chat:snapshot` |
+| 基础信息 | `system:battery` `agent:status` `agent:models` `agent:commands` `quota:list` `projects:list` `workspace:conversation` |
+| 项目管理 | `projects:browseDirectories` `projects:addPath`（可浏览宿主机目录，添加已有项目或创建最后一级目录） |
+| 会话 | `sessions:list` `sessions:load` `sessions:search` `sessions:page` `sessions:refresh` `claude/codex/agy:subagents` `…:subagentMessages` |
+| 对话 | `chat:send` `chat:interrupt` `chat:steer` `chat:stopBackgroundTask` `chat:setModel` `chat:setPermissionMode` `permission:respond` `chat:live` `chat:snapshot` |
 | 输入辅助 | `fs:listProjectFiles` `fs:stageAttachment` |
-| 设置 | `settings:get`（远程专用的只读精简结果，见下） |
+| Git | `git:branches` `git:graph` `git:switchBranch` `git:branchSwitchPreview` `git:commitAndSwitch` `git:createBranch` |
+| 受限文件与工具详情 | `fs:stat` `fs:readText` `fs:readMedia` `tools:detail`；图片另经需登录的 `GET /api/media/…` 获取 |
+| 设置 | `settings:get`（保留设置结构，敏感路径与远程配置替换为默认值，见下） |
 
 v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:promptSuggestion` `permission:requested` `permission:resolved` `sessions:indexChanged` `quota:updated`。
 
@@ -100,7 +107,7 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
 
 - `terminal:*`：等同远程 shell。
 - `settings:set`：可改 `agentPaths` 指向任意程序。
-- `fs:readText` / `fs:stat` / `fs:readMedia` / `git:*`：任意路径读取、推送代码。
+- 未列入白名单的 Git 通道（包括直接推送）不开放。受限 `fs:*` 走远程专用实现，不能直接复用桌面的任意路径读取。
 - `app:*`、`projects:add`：会在本机弹出对话框或打开应用，对手机无意义。
 - `chat:close`、`sessions:delete` / `rename` / `fork`、`collaboration:*`、`extensions:*`：v1 不需要，减少误操作面。
 
@@ -108,23 +115,27 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
 
 - **远程可选择会话支持的权限模式**，包括完全放行；`chat:setPermissionMode` 校验模式属于当前会话的 CLI。远程续聊沿用会话选定的权限模式。
 - `chat:send` / `fs:listProjectFiles` 的项目路径必须属于 `projects:list` 或非项目对话工作目录。
-- 远程 `settings:get` 只返回界面渲染必需字段（主题、语言、界面模式、默认 CLI/模型/权限），不含 `remoteControl`、`agentPaths`、自定义声音与背景路径。
+- Git 操作校验已添加项目；远程可通过 `projects:addPath` 扩大项目列表。所有登录端共享同一个 Mac 用户的权限，没有独立的项目授权或审计身份。
+- 文件预览按真实路径限制到已添加项目及系统临时目录，文本最多 256 KiB、媒体最多 10 MiB；项目内的敏感文件也在此范围内，详见 `filePreview.ts`。附件引用必须先经远程上传暂存。
+- 远程 `settings:get` 保留设置结构，但 `remoteControl`、`agentPaths`、自定义声音与背景配置替换为默认值，`notifyOnFinish` 设为 false；不传出这些字段的实际本机配置。
 
 ### 3.4 中途接入：`chat:snapshot`
 
-手机打开一个正在运行的会话时，只靠增量 `chat:rows` 会缺前文。新增 invoke：
+手机打开一个正在运行的会话时，只靠增量 `chat:rows` 会缺前文。当前提供 invoke：
 
 ```ts
 "chat:snapshot": [[sessionKey: string], {
-  rows: ConversationRow[];          // 投影器 snapshot()，与 reset 操作同源
+  rows: ConversationRow[];          // 当前页；投影器 snapshot() 为数据源
   state: ChatStateEvent | null;
   permissions: PermissionRequestEvent[]; // 尚未处理的审批
+  seq: number;                    // 快照已覆盖的事件序号
+  earlierRows?: SessionLoadResult["earlierRows"]; // 更早历史的分页入口
 } | null]
 ```
 
-数据已在主进程：`rowProjectorBase` 维护完整行，`claudeSession.ts` 已用 `snapshot()` 下发 `reset`。各 `AgentProvider` 补一个读取方法，由 registry 路由。SSE 断开重连后，手机对当前打开的会话重新调用一次 `chat:snapshot` 覆盖本地内容（替代 ZCode 的逐条重放）。
+数据在主进程：`rowProjectorBase` 维护完整行，经 Provider/registry 提供读取。SSE 断开重连后，手机对当前打开的会话调用 `chat:snapshot` 恢复内容，再接收后续增量（替代 ZCode 的逐条重放）。
 
-此外需要一个「当前活跃会话」列表（可并入 `chat:snapshot` 的批量形式或新增 `chat:liveSessions`），让手机侧边栏标出正在运行和等待审批的会话。
+当前活跃会话由 `chat:live` 提供，手机侧边栏据此标出正在运行和等待审批的会话。首次历史/活动快照只加载最近 3 个完整回合，按需加载更早历史；工具详情和图片按需读取，事件正文只订阅当前查看的会话。重连时使用快照序号过滤已覆盖事件。
 
 ## 4. 渲染进程
 
@@ -135,28 +146,34 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
   - 新增 `remote: boolean` 标记，供界面隐藏本机功能。
 - 未登录时（invoke 返回 401）显示一个只有口令输入框的登录页。
 - 首次连接的探测请求最多等待 15s，失败后每 3s 自动重试，支持手动立即重试和浏览器恢复联网时提前重试。已打开页面断线时保留对话并提示重连；事件流恢复后重新取快照，快照失败也继续重试。取消页面连接时清理重连定时器和事件流，过期快照不覆盖新连接的数据。
-- `remote` 为 true 时隐藏：添加项目、终端、在 Finder 显示/打开文件、外部终端、Git 操作、协作「工作方式」菜单（固定普通对话）、设置对话框（只保留主题切换）、背景设置。权限菜单允许选择当前 CLI 支持的模式，包括完全放行。
+- 远程模式隐藏终端、Finder/外部应用入口、协作「工作方式」菜单、完整设置对话框和背景设置；提供远程项目选择及受支持的 Git 操作。主题修改保存在浏览器本地；权限菜单允许选择当前 CLI 支持的模式，包括完全放行。界面隐藏不替代服务端白名单校验。
 - 本机界面：设置中新增「远程操控」分组——开关、SSH 别名、服务器监听地址、状态、在线客户端数、复制/重新生成口令；有远程客户端在线时侧边栏底部显示提示，可一键关闭。
 
 构建：沿用同一份 `vite build` 产物，远程页面就是 `out/renderer/index.html`。`base: "./"` 已支持子路径 `/hcode/`；CSP `connect-src 'self'` 允许同源 fetch 与 SSE，无需修改。
 
-## 5. 服务器配置（手动操作，不入仓库）
+## 5. 服务器配置（通用模板入仓库，真实参数只保存在部署环境）
 
-以下步骤只写进本机私有笔记，仓库中仅保留此占位说明。
+从零安装和完整操作顺序见[服务器部署与验收指南](HCode-远程操控-服务器部署与验收指南.md)。下文是配置摘要，不能替代首次部署和验收；证书、用户、密钥与监听地址均需按目标环境设置。
 
 1. **受限隧道用户**：新建无登录 shell 的用户（如 `hcode-tunnel`），为它单独生成一把本机密钥（不复用 root 密钥）。`authorized_keys` 该行加限制：
    `restrict,port-forwarding,permitlisten="<网关地址>:<端口>" ssh-ed25519 …`
-   （服务器 OpenSSH 8.0 支持 `permitlisten`）。
-2. **sshd**：为该用户加 `Match User` 块：`GatewayPorts clientspecified`、`AllowTcpForwarding remote`、`PermitTTY no`、`X11Forwarding no`、`ClientAliveInterval 5`、`ClientAliveCountMax 2`（及时清理断掉的旧隧道，否则重连会因端口占用失败；当前部署实测约 15s 清理无响应连接）。改前备份，改后 `sshd -t` 校验再重载。重载后的心跳配置适用于新建立的会话。
+   `permitlisten` 需由服务器实际 OpenSSH 版本支持；以 `sshd -t` 与受限转发实测确认。私钥只留在 Mac。
+2. **sshd**：为该用户加 `Match User` 块，限制公钥认证、远端 TCP 转发、`PermitListen`、`MaxSessions 0` 和其他转发能力；完整配置以部署指南为准。`ClientAliveInterval 5`、`ClientAliveCountMax 2` 用于清理无响应连接，实际时间依环境而定。改前备份，改后 `sshd -t` 校验，并用 `sshd -T -C` 确认用户生效配置，再重载。重载后的心跳配置适用于新建立的会话。
 3. **nginx**：在 443 server 中加：
 
    ```nginx
    location = /hcode { return 301 /hcode/; }
-   location /hcode/ {
+   location = /hcode/api/notifications { return 404; }
+   location ^~ /hcode/api/notifications/ { return 404; }
+   location ^~ /hcode/ {
        error_page 500 502 503 504 =503 @hcode_unavailable;
        proxy_pass http://<网关地址>:<端口>/;
        proxy_http_version 1.1;
+       proxy_set_header Connection "";
        proxy_buffering off;          # SSE 必需
+       proxy_cache off;
+       proxy_intercept_errors on;    # 将上游错误统一为下方 503 响应
+       proxy_connect_timeout 5s;
        proxy_read_timeout 1h;
        client_max_body_size 30m;     # 附件上传（base64 后约 28 MB）
        proxy_set_header Host $host;
@@ -172,8 +189,8 @@ v1 远程可接收事件：`chat:rows` `chat:state` `chat:commands` `chat:prompt
    ```
 
    改前备份，`nginx -t` 校验后 reload 容器。配置文件以单文件方式挂载进容器时，需原地写入（保持 inode），`sed -i` 等替换文件的方式会让容器继续读到旧内容。隧道未连接时该路径返回 503，使用独立响应避免缺失的全局错误页把故障转换成 404。
-4. **防火墙**：不新增端口。`<网关地址>:<端口>` 只在 Docker 网桥上可达，公网仍只开 22/80/443。
-5. **本机 `~/.ssh/config`**：为隧道用户写一个 Host 别名（`User`、`IdentityFile`、`IdentitiesOnly yes`），HCode 设置里只填这个别名和 `<网关地址>:<端口>`。HCode 以 `BatchMode=yes` 运行 ssh，首次使用前需先在终端连接一次以信任主机密钥。
+4. **防火墙**：仅使用部署环境已有的 SSH、HTTP/HTTPS 入口，不向公网开放隧道监听端口。宿主机 nginx 使用 `127.0.0.1:<端口>`；Docker nginx 使用实测网桥地址，并在宿主机 INPUT 路径限制该端口只接受所需代理/订阅来源，不能把绑定网桥地址当作访问控制。不得直接套用固定公网端口或覆盖已有防火墙规则。
+5. **本机 `~/.ssh/config`**：为隧道用户写一个 Host 别名（`User`、`Port`、`IdentityFile`、`IdentitiesOnly yes`、`StrictHostKeyChecking yes`），HCode 设置里只填这个别名和服务器监听地址。首次连接先经服务器管理员核对主机密钥指纹，再用 `ssh -N` 建立信任；受限用户不能执行普通 shell 命令。HCode 以 `BatchMode=yes` 运行 ssh，不会弹出口令交互。
 
 ## 6. 手机界面的最小适配
 
@@ -196,9 +213,10 @@ v1 复用桌面界面，只保证能用：
 - **口令与设备**：远程操控默认关闭，本地服务仅监听回环地址；访问口令随机生成并由系统加密存储，登录失败有共用限流。登录会话最长 7 天，设备或口令泄露时应在设置中重新生成口令，使已有登录失效并断开远程客户端；不用时关闭远程操控。共用限流也可能被恶意请求触发，暂时阻止正常登录。
 - **部署配置**：确保 HTTPS 证书有效、代理正确设置 `X-Forwarded-Proto`，并限制隧道用户和监听地址。上述保护取决于实际服务器配置，应用本身不会验证服务器是否安全部署。
 - **本机需保持唤醒**：合盖或睡眠会断开隧道。现有「运行时阻止休眠」只覆盖有会话运行时；远程使用时需接电源并保持唤醒。v1 在设置页提示；是否在开启远程时自动阻止应用挂起，留作后续选项。
-- **延迟**：服务器在国内，手机与本机在海外时链路需跨境往返两次，流式输出会有可感知延迟和偶发断线；SSE 自动重连 + 快照刷新可恢复。
+- **延迟**：取决于手机、服务器与 Mac 的位置及两段网络质量；跨境或长距离中转可能增加延迟和断线，SSE 自动重连与快照刷新可恢复可读状态，不能保证所有中断操作已经执行。
 - **隧道残留**：网络切换后服务器上旧的转发可能尚未释放，新隧道启动失败。依靠服务器 `ClientAlive*` 清理与本机退避重连解决。
-- **非 JSON 数据**：白名单内通道都返回 JSON；以后开放媒体读取需单独做 HTTP 下载接口。
+- **非 JSON 数据**：invoke 保持 JSON；媒体已有需要登录的独立 HTTP 地址及受限媒体读取接口，不能据此开放任意文件下载。
+- **单用户信任模型**：共用口令不等于多用户账号。服务器管理员可接触中转明文，登录者能扩大项目列表、执行受支持的 Git 写操作并选择完全放行；需要多人隔离或不信任服务器管理员时，不适用本方案。
 
 ## 9. 实施步骤与验收
 
@@ -206,15 +224,17 @@ v1 复用桌面界面，只保证能用：
 |---|---|---|
 | R1 主进程服务 | 设置项、口令存储、HTTP 服务、白名单 invoke/SSE、`chat:snapshot` | 开关关闭时端口未监听；本机浏览器访问 `127.0.0.1:<本地端口>` 能登录、看到会话、收到实时输出；非白名单通道返回拒绝 |
 | R2 渲染进程 | 远程 bridge、登录页、隐藏本机功能、设置分组、状态提示 | 浏览器中能新建/续聊会话、停止、审批、上传图片，并选择当前 CLI 支持的权限模式 |
-| R3 隧道与服务器 | ssh 反向隧道与重连、服务器受限用户、sshd 与 nginx 配置 | 手机流量下打开 `https://<域名>/hcode/` 完成一轮带审批的对话；本机断网恢复后自动重连；关闭开关后手机立即断开、页面返回 502 |
+| R3 隧道与服务器 | ssh 反向隧道与重连、服务器受限用户、sshd 与 nginx 配置 | 手机流量下打开 `https://<域名>/hcode/` 完成一轮带审批的对话；本机断网恢复后自动重连；关闭开关后事件流断开，新请求返回 503（已打开页面可能继续显示缓存内容） |
 | R4 最小手机适配 | 视口、侧边栏收起、输入框字号 | iPhone Safari 竖屏可正常阅读和输入 |
 
 每阶段提交前检查改动中没有域名、IP、口令、密钥路径等真实值。
 
+交付部署还需完成指南中的未登录拒绝访问、Cookie 属性、非白名单拒绝、监听范围、公网通知接口屏蔽、口令轮换、服务器重启恢复与证书续期检查。未完成目标服务器和手机验收前，不标记为部署通过。
+
 ## 10. 后续（v2 及以后）
 
 - 专门的手机首页/聊天布局。
-- 开放协作、Git 只读查看、文件预览（HTTP 下载接口）。
+- 开放协作及进一步扩展远程能力；Git 分支/提交切换、受限文件预览与媒体 HTTP 接口已实现，不再列为待办。
 - 远程模式下可选的阻止休眠。
 - 多台 Mac 时的设备选择。
 - 服务器迁到离使用地更近的机器以降低延迟（方案不变，只换隧道目标和 nginx 所在机器）。
