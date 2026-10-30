@@ -9,7 +9,7 @@ it.each([
   ['0.162.0', true], ['0.163.0', true], ['0.163.42', true], ['0.164.0', true],
   ['0.164.1', false], ['0.165.0', false], ['0.161.0', false], ['0.164.0-preview', false],
   ['10.164.0', false], [undefined, false],
-] as const)('Codex %s 仅在已验证版本范围内启用实验工具', (version, expected) => {
+] as const)('Codex %s 仅在已验证版本范围内启用研究隔离', (version, expected) => {
   expect(isCodexResearchVersion(version)).toBe(expected);
 });
 

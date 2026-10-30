@@ -34,7 +34,7 @@ async function fixture(outcome: 'succeeded' | 'failed' = 'succeeded', hold = fal
   } });
   const repository = new InvocationRepository(root);
   const agents = new AgentRegistry(Object.fromEntries((['claude', 'codex', 'agy'] as const).map(kind => [kind, {
-    kind, getStatus: async () => ({ kind, found: true, version: kind === 'agy' ? '1.4.3' : 'test' }),
+    kind, getStatus: async () => ({ kind, found: true, version: kind === 'agy' ? '1.4.3' : '0.164.0' }),
     listModels: async () => [{ value: kind === 'agy' ? 'gemini-fixture' : 'selected-model', label: '已登录模型' }],
   }])) as Record<AgentKind, AgentProvider>);
   const service = new AgentInvocationService(repository, execution, call => updates.push(call), () => 'selected-model', agents);
@@ -68,6 +68,17 @@ it('目标发现向主 AI 返回原生 Gemini 模型和无头审批限制；不�
   const result = await f.call({ agent: 'agy', mode: 'execute', model: 'invented-model', prompt: '任务' });
   expect(result).toMatchObject({ status: 'failed', error: expect.stringContaining('可用 Gemini 模型') });
   expect(f.sent).toHaveLength(0);
+});
+
+it('普通 Codex 执行不按版本拦截，未知版本的研究隔离与并行写入仍独立拒绝', async () => {
+  const f = await fixture();
+  f.agents.get('codex').getStatus = async () => ({ kind: 'codex', found: true, version: '0.165.0' });
+  const discovery = f.runtime.tools!.find(tool => tool.name === 'list_agent_targets')!;
+  expect(await discovery.execute({})).toEqual(expect.arrayContaining([expect.objectContaining({ agent: 'codex', canExecute: true, canReadOnly: false, canExecuteParallel: false })]));
+  expect(await f.call({ agent: 'codex', mode: 'read-only', prompt: '只读审核' })).toMatchObject({ status: 'failed', error: expect.stringContaining('研究隔离') });
+  expect(f.sent).toHaveLength(0);
+  expect(await f.call({ agent: 'codex', mode: 'execute', prompt: '已授权执行' })).toMatchObject({ status: 'succeeded' });
+  expect(f.sent).toHaveLength(1);
 });
 it.each(['read-only', 'execute'] as const)('agy %s 续聊保留原生身份与实际模型，不自动使用另一个默认模型', async mode => {
   const f = await fixture();

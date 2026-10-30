@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { listProjectFiles } from "../projectFiles.js";
 
 export const CODEX_RESEARCH_PROTOCOL_VERSION = "0.162.0";
-/** 既有 0.162.x/0.163.x 协议与单独通过原生工具验收的 0.164.0；新版逐一准入。 */
+/** 仅用于已验证的研究沙箱与受限写入隔离；普通宿主工具通过 CLI 协议检测，不使用此版本判断。 */
 export const isCodexResearchVersion = (version?: string) => /^(?:0\.16[23]\.\d+|0\.164\.0)$/.test(version ?? "");
 export const RESEARCH_PERMISSION_PROFILE = "hcode_research";
 export const RESEARCH_MCP_NAME = "hcode";

@@ -260,6 +260,9 @@ export class CodexSession {
   /** 新会话 thread/start；历史会话 thread/resume（只取元数据，历史已由 seedHistory 填充）。 */
   private async attach() {
     await this.host.client.ensureStarted();
+    if ((this.research || this.requestedHosted?.tools?.length) && !this.host.client.experimentalApi) {
+      throw new Error(this.host.client.hostedToolsUnavailableReason ?? '当前 Codex CLI 未启用宿主工具协议，不能启动需要 HCode 工具的回合');
+    }
     if (this.attached && this.threadId) return;
     const policy = codexPolicy(this.permissionMode);
     const config = this.research || this.ordinaryContinuation
@@ -289,8 +292,8 @@ export class CodexSession {
       this.validateResearchProfile(result.activePermissionProfile);
       this.reportedModel = result.model;
     } else {
-      // 普通会话的宿主工具依赖实验 API；CLI 版本未协商时照常建线程，只是不提供 call_agent。
-      const tools = this.research ?? (this.hosted && this.host.client.experimentalApi ? this.hosted : undefined);
+      // 能力检测和 initialize 完成后再注册；不能创建缺少用户已开启工具的线程。
+      const tools = this.research ?? this.hosted;
       const result = await this.host.client.request<{ thread: { id: string }; model?: string; activePermissionProfile?: { id: string } }>(
         "thread/start",
         { ...common, ...(tools ? { dynamicTools: codexResearchTools(tools) } : {}) },
@@ -715,8 +718,7 @@ export class CodexSession {
       const limits: string[] = [];
       if (missing.some(tool => tool.name.startsWith('memory_'))) limits.push('本线程未注册完整记忆工具，缺少的工具不能调用；本线程不能保存记忆，新建 Codex 会话后可用。仍可读取宿主提供的记忆快照，不得冒充已保存或删除。');
       const delegation = missing.filter(tool => !tool.name.startsWith('memory_'));
-      if (delegation.length) limits.push(`本线程未注册 ${delegation.map(tool => tool.name).join('、')}，不能调用或冒充已派发。需要新增委派或并行工具请新建 Codex 会话；已有匹配工具可继续使用。`);
-      if (missing.length && !this.host.client.experimentalApi) limits.push('当前 Codex CLI 版本尚未通过 HCode 宿主工具验证，安装已验证的版本后新建会话可用。');
+      if (delegation.length) limits.push(`本线程未注册 ${delegation.map(tool => tool.name).join('、')}，不能调用或冒充已派发。需要新增委派或并行工具，请先在设置 → 模型与 CLI → AI 委派开启委派，再新建 Codex 会话；已有匹配工具可继续使用。缺少所需委派工具时必须向用户说明，不得通过终端启动其他 AI CLI 代替 HCode 委派，除非用户明确要求使用终端。`);
       if (missing.length) this.hosted = { ...this.hosted, tools: registered, instructions: [registered.length ? this.hosted.instructions : undefined, ...limits].filter(Boolean).join('\n') };
     }
     this.hostedAvailable = Boolean(this.hosted?.tools?.length && this.catalog && this.hosted.tools.every(tool => this.catalog!.some(spec => spec.name === `hcode_${tool.name}`)));
