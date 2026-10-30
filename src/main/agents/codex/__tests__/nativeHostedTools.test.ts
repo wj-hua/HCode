@@ -11,6 +11,7 @@ import type { TurnOutcome } from '../../../../shared/collaboration.js';
 import { findExecutable } from '../../../util/locateCli.js';
 import { AppServerClient, type ServerRequest } from '../appServerClient.js';
 import { CodexSession } from '../codexSession.js';
+import { probeCodexHostedProtocol } from '../hostedProtocol.js';
 
 const enabled = process.env.HCODE_NATIVE_CODEX_PROTOCOL === '1';
 
@@ -18,6 +19,8 @@ it.skipIf(!enabled)('真实 Codex 动态工具注册、成功/失败结果与重
   const executable = findExecutable('codex', process.env, process.env.HCODE_CODEX_PATH);
   if (!executable) throw new Error('未找到 Codex 验收程序');
   const { stdout } = await promisify(execFile)(executable, ['--version']);
+  const protocol = await probeCodexHostedProtocol(executable, process.env);
+  expect(protocol, stdout.trim()).toEqual({ supported: true });
   const root = await mkdtemp(join(tmpdir(), 'hcode-native-hosted-'));
   const requests: ServerRequest[] = [], items: Record<string, unknown>[] = [], outcomes: TurnOutcome[] = [];
   const registrations: unknown[] = [];
@@ -27,7 +30,7 @@ it.skipIf(!enabled)('真实 Codex 动态工具注册、成功/失败结果与重
   const calls: string[] = [];
   const success = randomUUID(), failure = randomUUID(), resumed = randomUUID();
   const connect = (threadId?: string) => {
-    client = new AppServerClient(async () => ({ path: executable, env: process.env as Record<string, string>, experimentalApi: true }), 'protocol-validation');
+    client = new AppServerClient(async () => ({ path: executable, env: process.env as Record<string, string>, experimentalApi: protocol.supported }), 'protocol-validation');
     const request = client.request.bind(client);
     client.request = async <T = unknown>(method: string, params?: unknown): Promise<T> => {
       if (method === 'thread/start') registrations.push(params);

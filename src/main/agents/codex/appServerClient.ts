@@ -32,11 +32,13 @@ export class AppServerClient extends EventEmitter {
   private stderrTail = "";
   /** initialize 是否协商了实验 API；未协商时不能发送 dynamicTools 等实验字段。 */
   experimentalApi = false;
+  /** 检测失败保留具体原因，申请宿主工具时由会话展示，不能静默降级为普通线程。 */
+  hostedToolsUnavailableReason?: string;
   /** codex 启动路径与真实路径所在目录；0.163 起建线程会在沙箱内重新执行 codex 读取 AGENTS.md。 */
   executableDirs: string[] = [];
 
   constructor(
-    private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string>; experimentalApi?: boolean }>,
+    private readonly resolveLaunch: () => Promise<{ path: string; env: Record<string, string>; experimentalApi?: boolean; hostedToolsUnavailableReason?: string }>,
     /** initialize 握手里上报的 HCode 版本。 */
     private readonly clientVersion: string,
   ) {
@@ -60,8 +62,9 @@ export class AppServerClient extends EventEmitter {
   }
 
   private async start() {
-    const { path, env, experimentalApi } = await this.resolveLaunch();
+    const { path, env, experimentalApi, hostedToolsUnavailableReason } = await this.resolveLaunch();
     this.experimentalApi = experimentalApi === true;
+    this.hostedToolsUnavailableReason = hostedToolsUnavailableReason;
     this.executableDirs = [...new Set([dirname(path), dirname(await realpath(path))])];
     const child = spawn(path, ["app-server"], { env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;

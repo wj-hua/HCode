@@ -25,7 +25,7 @@ export async function listInvocationTargets(agents: AgentRegistry, platform: Nod
       if (agent === 'agy' && !selectableModels.length) return { agent, available: false, reason: 'agy 未返回可用 Gemini 模型', limitation: AGY_LIMITATION };
       return {
         agent, available: true, version: status.version,
-        canReadOnly: agent !== 'agy' || agyReadOnlySupported(status.version, platform), canExecute: true,
+        canReadOnly: agent === 'codex' ? isCodexResearchVersion(status.version) : agent !== 'agy' || agyReadOnlySupported(status.version, platform), canExecute: true,
         canExecuteParallel: agent === 'codex' ? isCodexResearchVersion(status.version) : agent !== 'agy' || agyReadOnlySupported(status.version, platform),
         parallelExecution: 'call_agents 要求互不重叠的准确文件清单；原生命令和写入关闭，仅宿主文件工具可写清单内文件。子任务不运行测试，由主 AI 随后做集成验证。',
         models: selectableModels,
@@ -49,6 +49,7 @@ export async function validateInvocationTarget(agents: AgentRegistry, input: Age
   const provider = agents.get(input.agent);
   const status = await provider.getStatus();
   if (!status.found) throw new Error(status.error ?? `未安装 ${AGENTS[input.agent].name} CLI`);
+  if (input.agent === 'codex' && input.mode === 'read-only' && !isCodexResearchVersion(status.version)) throw new Error(`Codex ${status.version ?? '未知版本'} 尚未通过研究隔离验证，不能改用普通执行`);
   if (input.agent !== 'agy') return;
   if (input.mode === 'read-only' && !agyReadOnlySupported(status.version, platform)) throw new Error(`agy ${status.version ?? '未知版本'} 在当前平台尚未验证只读委派，不能改用普通执行`);
   const models = (await provider.listModels()).filter(model => model.value.startsWith(GEMINI_MODEL_PREFIX));

@@ -7,9 +7,10 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { CodexSession } from '../codexSession.js';
 import type { AppServerClient, ServerRequest } from '../appServerClient.js';
 import type { ResearchRuntime } from '../../../sessions/researchRuntime.js';
+import type { ChatStateEvent } from '../../../../shared/types.js';
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
-async function fixture(research = false, resumed = false, holdTurnReply = false) {
+async function fixture(research = false, resumed = false, holdTurnReply = false, experimentalApi = true) {
   const directory = await mkdtemp(join(tmpdir(), 'hcode-continued-read-'));
   directories.push(directory);
   const root = join(directory, 'project'); await mkdir(root); await writeFile(join(root, 'orientation.txt'), 'portrait; player fullscreen is an exception');
@@ -20,8 +21,9 @@ async function fixture(research = false, resumed = false, holdTurnReply = false)
   let releaseTurn: (() => void) | undefined;
   const delegate = vi.fn(async () => ({ deliveryId: 'must-not-dispatch' }));
   const runtime: ResearchRuntime = { root, tools: [{ name: 'delegate_task', description: 'delegate', schema: { taskId: z.string() }, execute: delegate }] };
+  const states: ChatStateEvent[] = [];
   const client = {
-    running: true, experimentalApi: true, ensureStarted: async () => {},
+    running: true, experimentalApi, hostedToolsUnavailableReason: 'CLI 协议缺少 thread/start.dynamicTools', ensureStarted: async () => {},
     request: async (method: string, params: Record<string, unknown>) => {
       requests.push({ method, params });
       if (method === 'config/read') return { config: { developer_instructions: '保留用户既有开发规范' } };
@@ -34,14 +36,14 @@ async function fixture(research = false, resumed = false, holdTurnReply = false)
     },
     respond: (id: string | number, result: typeof replies[number]['result']) => replies.push({ id, result }),
   } as unknown as AppServerClient;
-  const session = new CodexSession({ client, emitRows: () => {}, emitState: () => {}, emitPermission: () => {}, emitPermissionResolved: () => {}, onThreadId: () => {}, onTurnCompleted: () => {} }, { key: 'source', projectPath: root, permissionMode: research ? 'read-only' : 'full-access', ...(resumed ? { threadId: 'thread' } : {}), ...(research ? { research: runtime } : {}) });
+  const session = new CodexSession({ client, emitRows: () => {}, emitState: state => states.push(state), emitPermission: () => {}, emitPermissionResolved: () => {}, onThreadId: () => {}, onTurnCompleted: () => {} }, { key: 'source', projectPath: root, permissionMode: research ? 'read-only' : 'full-access', ...(resumed ? { threadId: 'thread' } : {}), ...(research ? { research: runtime } : {}) });
   const call = async (id: number, tool: string, argumentsValue: unknown, turnId = `turn-${turns}`, threadId = 'thread') => {
     const request: ServerRequest = { id, method: 'item/tool/call', params: { threadId, turnId, callId: `call-${id}`, tool, arguments: argumentsValue } };
     expect(session.handleServerRequest(request), '原生动态工具请求必须获得明确的宿主回应').toBe(true);
     await vi.waitFor(() => expect(replies.some(reply => reply.id === id)).toBe(true));
     return replies.find(reply => reply.id === id)!.result;
   };
-  return { session, call, root, directory, replies, requests, delegate, releaseTurn: () => releaseTurn?.() };
+  return { session, call, root, directory, replies, requests, states, delegate, releaseTurn: () => releaseTurn?.() };
 }
 it('评审结束回到普通会话后，原线程的项目读取继续可用，不继承委派闭包或只读权限配置', async () => {
   const f = await fixture(true);
@@ -133,9 +135,29 @@ it('普通旧线程没有 call_agent 时仍可聊天，明确说明限制并拒�
     await f.session.configureHosted({ root: f.root, tools: [{ name: 'call_agent', description: 'call', schema: { prompt: z.string() }, execute: invoke }] });
     await f.session.send('继续当前原生会话');
     expect(f.requests.find(request => request.method === 'thread/inject_items')?.params).toMatchObject({ threadId: 'thread', items: [expect.objectContaining({ role: 'developer', content: [expect.objectContaining({ text: expect.stringContaining('未注册') })] })] });
+    expect(JSON.stringify(f.requests.find(request => request.method === 'thread/inject_items')?.params)).toContain('不得通过终端');
     expect(await f.call(1, 'hcode_call_agent', { prompt: '不应执行' })).toMatchObject({ success: false });
     expect(invoke).not.toHaveBeenCalled();
     expect(f.requests.filter(request => request.method === 'thread/start')).toHaveLength(1);
+  } finally { f.session.close(); }
+});
+
+it('启用委派但 CLI 缺少协议能力时明确失败，不创建无工具线程或发送模型回合', async () => {
+  const f = await fixture(false, false, false, false);
+  try {
+    await f.session.configureHosted({ root: f.root, tools: [{ name: 'call_agent', description: 'call', schema: {}, execute: async () => ({}) }] });
+    await f.session.send('让 Claude 审核');
+    expect(f.states).toEqual(expect.arrayContaining([expect.objectContaining({ error: expect.stringContaining('CLI 协议缺少 thread/start.dynamicTools') })]));
+    expect(f.requests.some(request => request.method === 'thread/start' || request.method === 'turn/start')).toBe(false);
+  } finally { f.session.close(); }
+});
+
+it('未启用宿主工具时，不支持实验协议的 CLI 仍可普通聊天', async () => {
+  const f = await fixture(false, false, false, false);
+  try {
+    await f.session.send('普通聊天');
+    expect(f.requests.find(request => request.method === 'thread/start')?.params).not.toHaveProperty('dynamicTools');
+    expect(f.requests.some(request => request.method === 'turn/start')).toBe(true);
   } finally { f.session.close(); }
 });
 

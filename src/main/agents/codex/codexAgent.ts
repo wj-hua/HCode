@@ -28,6 +28,7 @@ import { AppServerClient, type ServerRequest } from "./appServerClient.js";
 import { projectCodexTurns, type CodexTurn } from "./codexProjector.js";
 import { CodexSession } from "./codexSession.js";
 import { isCodexResearchVersion } from "../../sessions/researchRuntime.js";
+import { probeCodexHostedProtocol } from "./hostedProtocol.js";
 import { readToolCatalog, sourceCatalogReason } from "./toolCatalog.js";
 import { listCodexSubagents } from "./subagents.js";
 
@@ -94,7 +95,10 @@ export class CodexAgent implements AgentProvider {
     this.client = new AppServerClient(async () => {
       const status = await this.getStatus();
       if (!status.found || !status.path) throw new Error("未找到 codex 命令，请在设置中指定路径");
-      return { path: status.path, env: this.getEnv(), experimentalApi: isCodexResearchVersion(status.version) };
+      const env = this.getEnv();
+      const protocol = await probeCodexHostedProtocol(status.path, env);
+      if (!protocol.supported) console.warn(`[HCode Codex] ${protocol.reason}`);
+      return { path: status.path, env, experimentalApi: protocol.supported, ...(!protocol.supported ? { hostedToolsUnavailableReason: protocol.reason } : {}) };
     }, appVersion);
     this.client.on("notification", (method: string, params: Record<string, unknown>) =>
       this.onNotification(method, params),
@@ -410,6 +414,11 @@ export class CodexAgent implements AgentProvider {
   }
 
   async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
+    // 普通工具协议兼容不等于沙箱隔离已验证；所有研究入口在发送前单独准入。
+    if (params.research) {
+      const status = await this.getStatus();
+      if (!isCodexResearchVersion(status.version)) throw new Error(`Codex ${status.version ?? '未知版本'} 尚未通过研究隔离验证，不能启动受限任务或降级为普通执行`);
+    }
     const compact = /^\/compact\s*$/i.test(params.text);
     const review = /^\/review(?:\s|$)/i.test(params.text.trim());
     if ((compact || review) && ((params.images?.length ?? 0) > 0 || (params.files?.length ?? 0) > 0)) {
