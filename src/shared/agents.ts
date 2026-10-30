@@ -19,6 +19,8 @@ export interface AgentDescriptor {
   models: ModelOption[];
   /** 支持从某条消息分叉 / 回退。 */
   fork?: boolean;
+  /** 支持回合进行中插话；实际能否投递仍由主进程按 CLI 能力判定，不能时退回队列。 */
+  steer?: boolean;
 }
 
 /** Claude Code 的 effort 档位；模型不支持的档位由 CLI 自动降级。 */
@@ -48,6 +50,7 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
       { value: "haiku", label: "Haiku" },
     ],
     fork: true,
+    steer: true,
   },
   codex: {
     kind: "codex",
@@ -72,6 +75,7 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     ],
     models: [{ value: "", label: "默认模型" }],
     fork: true,
+    steer: true,
   },
   agy: {
     kind: "agy",

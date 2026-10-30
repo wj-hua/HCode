@@ -180,6 +180,46 @@ describe("Codex 历史投影", () => {
   });
 });
 
+describe("Codex 插话（turn/steer）", () => {
+  it("实时回显的插话留在当前轮，回合结束后的新消息才开启下一轮", () => {
+    const projector = new CodexRowProjector();
+    const mirror = new RowsMirror(projector);
+    const at = S0 * 1000;
+    projector.beginLocalTurn("跑三条命令", at);
+    projector.itemStarted(userMessage("跑三条命令"), at + 1);
+    projector.itemStarted({ type: "commandExecution", id: "c1", command: "sleep 4", status: "inProgress" }, at + 2);
+    projector.itemStarted({ type: "userMessage", id: "steer-1", content: [{ type: "text", text: "只跑第一条" }] }, at + 3);
+    projector.finishTurn({ status: "completed", durationMs: 9 }, at + 9);
+    projector.itemStarted({ type: "userMessage", id: "external", content: [{ type: "text", text: "终端里发的新消息" }] }, at + 20);
+    const rows = mirror.flush();
+
+    const users = ofKind(rows, "userInput");
+    expect(users.map((row) => row.text)).toEqual(["跑三条命令", "只跑第一条", "终端里发的新消息"]);
+    expect(users[1]).toMatchObject({ guided: true, sourceCommandId: "steer-1", turnId: users[0]!.turnId });
+    expect(users[2]!.guided).toBeUndefined();
+    expect(users[2]!.turnId).not.toBe(users[0]!.turnId);
+    expect(ofKind(rows, "turnHeader")).toHaveLength(2);
+    expect(rows).toEqual(projector.snapshot());
+  });
+
+  it("历史中同一轮的多条 userMessage 只以第一条作为回合起点", () => {
+    const rows = projectCodexTurns([
+      turn([
+        userMessage("跑三条命令"),
+        { type: "commandExecution", id: "c1", command: "sleep 4", status: "completed", exitCode: 0 },
+        { type: "userMessage", id: "steer-1", content: [{ type: "text", text: "只跑第一条" }] },
+        { type: "agentMessage", id: "m1", text: "已跳过其余命令" },
+      ]),
+      turn([userMessage("下一轮")], { id: "turn-b" }),
+    ]).snapshot();
+    const users = ofKind(rows, "userInput");
+    expect(users.map((row) => [row.text, row.guided ?? false])).toEqual([["跑三条命令", false], ["只跑第一条", true], ["下一轮", false]]);
+    expect(users[1]!.turnId).toBe("turn-a");
+    expect(ofKind(rows, "turnHeader")).toHaveLength(2);
+    expect(ofKind(rows, "turnHeader")[0]?.state).toBe("completedSuccess");
+  });
+});
+
 describe("Codex 实时流", () => {
   it("本地气泡跳过服务端回显，正文按增量拼接", () => {
     const projector = new CodexRowProjector();

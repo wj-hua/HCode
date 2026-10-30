@@ -14,6 +14,7 @@ import {
 import type {
   ChatRunState,
   ChatStateEvent,
+  ChatSteerResult,
   ChatPromptSuggestionEvent,
   ChatUsage,
   FileInput,
@@ -25,7 +26,7 @@ import type {
   RowOp,
   SlashCommandOption,
 } from "../../../shared/types.js";
-import { inputAttachments } from "../rowProjectorBase.js";
+import { inputAttachments, type UserAttachment } from "../rowProjectorBase.js";
 import { ClaudeResponseMetrics } from "./claudeResponseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { ClaudeRowProjector, type ClaudeRecord } from "./rowProjector.js";
@@ -37,6 +38,8 @@ import { ClaudeBackgroundTasks } from './claudeBackgroundTasks.js';
 
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
 const FLUSH_INTERVAL_MS = 16;
+/** init 声明此能力时，interrupt 可连同排队消息一起撤回；插话依赖它保证“停止”不会被排队消息续跑。 */
+const CANCEL_QUEUED_CAPABILITY = "interrupt_cancel_queued_v1";
 
 export interface ClaudeSessionHost {
   emitTurnOutcome?(event: TurnOutcome): void;
@@ -82,6 +85,32 @@ class InputQueue<T> implements AsyncIterable<T> {
   }
 }
 
+/** 文字 + 图片 → Anthropic 用户消息内容；空文本块会被 API 拒绝，所以只在有文字时带上。 */
+function userContent(text: string, images: readonly ImageInput[], files: readonly FileInput[]): SDKUserMessage["message"]["content"] {
+  const prompt = withFileReferences(text, files);
+  if (!images.length) return prompt;
+  return [
+    ...images.map((image) => ({
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: image.mimeType as "image/png", data: image.data },
+    })),
+    ...(prompt.trim() ? [{ type: "text" as const, text: prompt }] : []),
+  ];
+}
+
+/** 已写入流式输入、尚未被 CLI 并入回合的插话；投递或退回时结算发起方的等待。 */
+interface PendingSteer {
+  text: string;
+  attachments: UserAttachment[];
+  resolve(result: ChatSteerResult): void;
+}
+
+/**
+ * SDK 运行时的 interrupt 接受 cancelQueued，但 0.3.280 的 Query 类型未声明该参数。
+ * 只在 init 声明 CANCEL_QUEUED_CAPABILITY 后调用；回执 cancelled 列出被撤回的消息 uuid。
+ */
+type CancelQueuedInterrupt = (options: { cancelQueued: true }) => Promise<{ cancelled?: string[] } | undefined>;
+
 interface PendingPermission {
   toolUseId: string;
   input: Record<string, unknown>;
@@ -117,6 +146,10 @@ export class ClaudeSession {
   private pumpPromise: Promise<void> | null = null;
   private readonly promptSuggestions: ClaudePromptSuggestions;
   private readonly backgroundTasks = new ClaudeBackgroundTasks();
+  private readonly steers = new Map<string, PendingSteer>();
+  private canCancelQueued = false;
+  /** 回合结束时仍有未投递插话：CLI 会立即用它们开下一轮，期间保持运行态。 */
+  private queuedTurnPending = false;
 
   constructor(
     private readonly host: ClaudeSessionHost,
@@ -221,24 +254,66 @@ export class ClaudeSession {
     this.projector.beginUserTurn(text, Date.now(), executionTurnId, inputAttachments(images, files));
     this.flushNow();
     if (!this.activeQuery) this.start();
-    // 有图片时用 Anthropic 的内容块数组；空文本块会被 API 拒绝，所以只在有文字时带上
-    const prompt = withFileReferences(text, files);
-    const content = images.length
-      ? [
-          ...images.map((image) => ({
-            type: "image",
-            source: { type: "base64", media_type: image.mimeType, data: image.data },
-          })),
-          ...(prompt.trim() ? [{ type: "text", text: prompt }] : []),
-        ]
-      : prompt;
     this.input!.push({
       type: "user",
-      message: { role: "user", content },
+      message: { role: "user", content: userContent(text, images, files) },
       parent_tool_use_id: null,
       uuid: executionTurnId,
     } as SDKUserMessage);
     this.setState("running");
+  }
+
+  /**
+   * 回合进行中插话：以 priority 'next' 写入流式输入，CLI 在下一个工具间隙把它并入当前回合。
+   * 以 replay 回显作为投递确认后才结算；回合先结束时 CLI 会把它作为下一轮执行，同样算已投递。
+   * 停止时连同未投递的插话一起撤回并退回给发起方，所以要求 CLI 支持撤回排队消息。
+   */
+  steer(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = []): Promise<ChatSteerResult> {
+    const blocked = this.steerBlocker();
+    if (blocked) return Promise.resolve({ delivered: false, reason: blocked });
+    const uuid = randomUUID();
+    return new Promise((resolve) => {
+      this.steers.set(uuid, { text, attachments: inputAttachments(images, files), resolve });
+      this.input!.push({
+        type: "user",
+        message: { role: "user", content: userContent(text, images, files) },
+        parent_tool_use_id: null,
+        uuid,
+        priority: "next",
+      } as SDKUserMessage);
+    });
+  }
+
+  private steerBlocker(): string | undefined {
+    if (this.closed || !this.isBusy || !this.input) return "当前没有进行中的回合";
+    if (this.research) return "协作研究回合不接受插话";
+    if (!this.canCancelQueued) return "当前 Claude CLI 版本不支持停止时撤回插话";
+    return undefined;
+  }
+
+  /** replay 回显即投递确认：回合仍在进行则并入当前轮，否则 CLI 已用它开始新一轮。 */
+  private deliverSteer(uuid: string): boolean {
+    const steer = this.steers.get(uuid);
+    if (!steer) return false;
+    this.steers.delete(uuid);
+    const at = Date.now();
+    if (this.projector.hasOpenTurn) this.projector.appendGuidedInput(steer.text, at, uuid, steer.attachments);
+    else this.projector.beginUserTurn(steer.text, at, uuid, steer.attachments);
+    this.flushNow();
+    steer.resolve({ delivered: true });
+    return true;
+  }
+
+  private returnSteer(uuid: string, reason: string) {
+    const steer = this.steers.get(uuid);
+    if (!steer) return;
+    this.steers.delete(uuid);
+    steer.resolve({ delivered: false, reason });
+  }
+
+  private returnAllSteers(reason: string) {
+    for (const uuid of [...this.steers.keys()]) this.returnSteer(uuid, reason);
+    this.queuedTurnPending = false;
   }
 
   private start() {
@@ -246,6 +321,7 @@ export class ClaudeSession {
     this.input = input;
     // 后台任务快照按进程计；新进程启动时不会补发，必须先清零
     this.backgroundTasks.reset();
+    this.canCancelQueued = false;
     const permissionMode = this.permissionMode;
     const instructions = [this.ordinaryContinuation, this.hosted?.instructions, this.memorySnapshot].filter(Boolean).join('\n');
     this.activeQuery = query({
@@ -260,6 +336,8 @@ export class ClaudeSession {
         allowDangerouslySkipPermissions: true,
         canUseTool: this.research ? undefined : this.canUseTool,
         includePartialMessages: true,
+        // 回显写入流式输入的用户消息：插话以回显确认投递，并判断它并入了当前轮还是开启了新一轮
+        extraArgs: { "replay-user-messages": null },
         promptSuggestions: !this.research,
         thinking: { type: "adaptive", display: "summarized" },
         settingSources: ["user", "project", "local"],
@@ -305,6 +383,7 @@ export class ClaudeSession {
         this.input = null;
       }
       this.rejectAllPending("会话已结束");
+      this.returnAllSteers("Claude 进程已结束，插话未送达");
       if (!this.closed && this.backgroundTasks.endProcess()) this.emitState();
       if (this.projector.hasOpenTurn) this.projector.closeTurn(Date.now(), this.error ? "failed" : undefined);
       this.flushNow();
@@ -314,6 +393,7 @@ export class ClaudeSession {
   }
 
   private handleMessage(message: SDKMessage) {
+    if (message.type === "user" && "isReplay" in message && message.isReplay && message.uuid && this.deliverSteer(message.uuid)) return;
     if (message.type === "stream_event" && this.responseMetrics.consumeStream(message)) this.emitState();
     if (message.type === "system" && message.subtype === "commands_changed") {
       this.host.onCommandsChanged(this.key, message.commands.map(({ name, description, argumentHint, aliases }) => ({
@@ -325,8 +405,9 @@ export class ClaudeSession {
       if (!this.isBusy) this.scheduleIdleClose();
     }
     if (message.type === "system" && message.subtype === "init") {
-      // 后台任务结束后 CLI 会自行开启新一轮回复，这一轮不经过 send()
-      if (!this.isBusy) this.beginNativeTurn();
+      this.canCancelQueued = message.capabilities?.includes(CANCEL_QUEUED_CAPABILITY) === true;
+      // 后台任务结束或执行未投递的插话时，CLI 会自行开启新一轮回复，这一轮不经过 send()
+      if (!this.isBusy || this.queuedTurnPending) this.beginNativeTurn();
       if (message.session_id && message.session_id !== this.sessionId) {
         this.sessionId = message.session_id;
         this.host.onSessionId(this.key, message.session_id, this.projectPath);
@@ -362,7 +443,10 @@ export class ClaudeSession {
       this.host.onQuotaChanged();
       this.flushNow();
       if (message.subtype !== "success" || message.is_error) this.error = message.subtype === "success" ? message.result : message.errors.join("\n");
-      if (this.pending.size === 0) this.setState(this.error ? "error" : "idle");
+      // 未投递的插话会被 CLI 立即作为下一轮执行；保持运行态，避免渲染进程误判空闲后重复发送
+      this.queuedTurnPending = this.steers.size > 0;
+      if (this.queuedTurnPending) this.responseMetrics.finish();
+      else if (this.pending.size === 0) this.setState(this.error ? "error" : "idle");
       else this.emitState();
       this.scheduleIdleClose();
       this.lifecycle.finish({
@@ -378,6 +462,7 @@ export class ClaudeSession {
   }
 
   private beginNativeTurn() {
+    this.queuedTurnPending = false;
     this.promptSuggestions.clear();
     this.clearIdleTimer();
     this.error = undefined;
@@ -492,10 +577,26 @@ export class ClaudeSession {
     this.projector.markInterrupted();
     this.rejectAllPending("用户已停止");
     try {
-      await this.activeQuery?.interrupt();
+      if (this.activeQuery) await this.interruptQuery(this.activeQuery);
     } catch (error) {
       if (this.research) throw error;
       // 进程已退出时忽略
+    }
+  }
+
+  /** 有未投递插话时连同排队消息一起撤回；否则 CLI 会在中断后把它们作为新一轮继续执行。 */
+  private async interruptQuery(activeQuery: Query) {
+    if (this.steers.size === 0) {
+      await activeQuery.interrupt();
+      return;
+    }
+    const interrupt = activeQuery.interrupt as unknown as CancelQueuedInterrupt;
+    const receipt = await interrupt.call(activeQuery, { cancelQueued: true });
+    for (const uuid of receipt?.cancelled ?? []) this.returnSteer(uuid, "已停止，插话未送达");
+    // 停在“上一轮已结束、插话轮尚未开始”的间隙：没有回合会再结束，需要在这里落回空闲
+    if (this.queuedTurnPending && this.steers.size === 0) {
+      this.queuedTurnPending = false;
+      this.setState(this.error ? "error" : "idle");
     }
   }
 
@@ -536,6 +637,7 @@ export class ClaudeSession {
     if (this.backgroundTasks.endProcess()) this.emitState();
     this.clearIdleTimer();
     this.rejectAllPending("会话已关闭");
+    this.returnAllSteers("会话已关闭，插话未送达");
     this.input?.end();
     this.activeQuery?.close();
     this.activeQuery = null;

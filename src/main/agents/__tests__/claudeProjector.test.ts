@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ClaudeRowProjector, projectHistory, projectSubagentHistory, type ClaudeRecord } from "../claude/rowProjector.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { kinds, ofKind, RowsMirror } from "./helpers.js";
+import { isTurnStartInput } from "../../../shared/conversationTurns.js";
 
 const T0 = Date.parse("2026-01-01T00:00:00.000Z");
 const ts = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
@@ -70,6 +71,22 @@ describe("Claude 历史投影", () => {
     ]).snapshot();
     expect(ofKind(rows, "userInput").map((row) => row.text)).toEqual(["真正的问题"]);
     expect(ofKind(rows, "turnHeader")).toHaveLength(1);
+  });
+
+  it("回合中途投递的排队消息留在原轮，分叉只把回合起点算作用户消息", () => {
+    const rows = projectHistory([
+      user("跑三条命令", 0, { uuid: "u1" }),
+      assistant([{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "sleep 4" } }], 1),
+      user([{ type: "tool_result", tool_use_id: "toolu_1", content: "one" }], 5),
+      user("只跑第一条", 5, { uuid: "steer-1", isQueuedCommand: true }),
+      assistant([{ type: "text", text: "已跳过其余命令" }], 6, "msg_2"),
+      user("下一轮", 10, { uuid: "u2" }),
+    ]).snapshot();
+    const users = ofKind(rows, "userInput");
+    expect(users.map((row) => [row.text, row.guided ?? false])).toEqual([["跑三条命令", false], ["只跑第一条", true], ["下一轮", false]]);
+    expect(users[1]).toMatchObject({ turnId: "u1", sourceCommandId: "steer-1" });
+    expect(ofKind(rows, "turnHeader")).toHaveLength(2);
+    expect(rows.filter(isTurnStartInput).map((row) => row.turnId)).toEqual(["u1", "u2"]);
   });
 
   it("斜杠命令显示为命令本身", () => {

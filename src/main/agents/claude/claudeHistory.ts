@@ -10,6 +10,7 @@ import {
   type SDKSessionInfo,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ForkParams, SessionLoadResult, SessionSummary } from "../../../shared/types.js";
+import { isTurnStartInput } from "../../../shared/conversationTurns.js";
 import { trashPaths } from "../../util/trash.js";
 import { projectHistory, type ClaudeRecord } from "./rowProjector.js";
 import { listClaudeSessionInfos } from "./claudeSessionIndex.js";
@@ -150,7 +151,7 @@ export class ClaudeHistory {
     const records = await this.loadRecords(ref.id, ref.projectPath);
     // 历史投影里真实用户消息的 turnId 就是开启该轮的记录 uuid
     const starts = projectHistory(records).snapshot()
-      .filter((row) => row.kind === "userInput")
+      .filter(isTurnStartInput)
       .map((row) => records.findIndex((record) => record.uuid === row.turnId));
     const start = starts[turnIndex];
     if (starts.length !== turnCount || start === undefined || start < 0) {

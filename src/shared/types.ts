@@ -305,6 +305,20 @@ export interface ChatSendParams {
   codexSpeed?: CodexSpeed;
 }
 
+/** 回合进行中向活动会话插话（turn steer）；附件规则同 ChatSendParams。 */
+export interface ChatSteerParams {
+  sessionKey: string;
+  text: string;
+  images?: ImageInput[];
+  files?: FileInput[];
+}
+
+/**
+ * 插话结果。delivered 表示消息已进入当前回合；未投递（没有活动回合、CLI 不支持、
+ * 回合恰好结束、停止时被撤回）时内容原样退回，由渲染进程放回待发送队列。
+ */
+export type ChatSteerResult = { delivered: true } | { delivered: false; reason: string };
+
 /** 额度窗口：5 小时滚动窗口、周窗口，或其他时长。 */
 export type QuotaWindowKind = "5h" | "weekly" | "other";
 

@@ -272,10 +272,15 @@ export class CodexRowProjector extends RowProjectorBase {
     const completedAt = (turn.completedAt ?? turn.startedAt ?? 0) * 1000;
     const hasUser = turn.items.some((item) => item.type === "userMessage");
     if (!hasUser) this.ensureTurnAt(startedAt || completedAt);
+    let started = false;
     for (const item of turn.items) {
       if (item.type === "userMessage") {
         const { text, attachments } = userInputParts(item.content);
-        if (text.trim() || attachments.length) this.beginUserTurn(text, startedAt || completedAt, turn.id, attachments);
+        if (!text.trim() && !attachments.length) continue;
+        // 同一轮里第一条之后的 userMessage 来自 turn/steer，留在原轮内
+        if (started) this.appendGuidedInput(text, startedAt || completedAt, item.id, attachments);
+        else this.beginUserTurn(text, startedAt || completedAt, turn.id, attachments);
+        started = true;
         continue;
       }
       this.itemCompleted(item, completedAt || startedAt);
@@ -312,7 +317,10 @@ export class CodexRowProjector extends RowProjectorBase {
         return;
       }
       const { text, attachments } = userInputParts(item.content);
-      if (text.trim() || attachments.length) this.beginUserTurn(text, at, undefined, attachments);
+      if (!text.trim() && !attachments.length) return;
+      // 会话只转发当前原生轮的通知；轮未结束时再出现的 userMessage 是 turn/steer 回显
+      if (this.turn) this.appendGuidedInput(text, at, item.id, attachments);
+      else this.beginUserTurn(text, at, undefined, attachments);
       return;
     }
     this.ensureTurn(at);

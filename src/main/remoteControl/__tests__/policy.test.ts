@@ -20,6 +20,15 @@ describe("远程权限模式", () => {
   });
 });
 
+describe("远程插话", () => {
+  it("只允许插话到存在的会话，附件必须先上传", () => {
+    expect(checkRemoteInvoke(context, "chat:steer", [{ sessionKey: "session", text: "改一下" }])).toBe(true);
+    expect(checkRemoteInvoke(context, "chat:steer", [{ sessionKey: "session", text: "看图", files: [{ path: "/attachments/a.png", name: "a.png", mimeType: "image/png", size: 1 }] }])).toBe(true);
+    expect(() => checkRemoteInvoke(context, "chat:steer", [{ sessionKey: "missing", text: "改一下" }])).toThrow("会话不存在或已关闭");
+    expect(() => checkRemoteInvoke(context, "chat:steer", [{ sessionKey: "session", text: "读", files: [{ path: "/etc/passwd", name: "passwd", mimeType: "text/plain", size: 1 }] }])).toThrow("远程附件需要先上传");
+  });
+});
+
 describe("远程项目和分支", () => {
   it("允许管理已添加项目的分支，拒绝其他路径", () => {
     for (const channel of ["git:branches", "git:graph", "git:switchBranch", "git:createBranch", "git:branchSwitchPreview", "git:commitAndSwitch"]) {
