@@ -26,9 +26,6 @@ const EMPTY_RESULTS: Partial<Record<InvokeChannel, unknown>> = {
   "collaboration:expertDraftList": [],
   "agentInvocation:list": [],
   "git:worktree": null,
-  "fs:stat": null,
-  "fs:readText": null,
-  "fs:readMedia": null,
 };
 
 export class RemoteUnauthorizedError extends Error {}
@@ -387,6 +384,11 @@ export function createRemoteBridge(): HCodeBridge & {
     async invoke(channel, ...args) {
       if (channel in EMPTY_RESULTS) return EMPTY_RESULTS[channel] as never;
       switch (channel) {
+        case "fs:readMedia": {
+          // HTTP JSON 不保留 Uint8Array；专用文件接口返回有界的 base64 内容。
+          const encoded = await call(channel, args) as string | null;
+          return (encoded === null ? null : Uint8Array.from(atob(encoded), character => character.charCodeAt(0))) as never;
+        }
         case "sessions:load":
           return await call((args[1] as { complete?: boolean } | undefined)?.complete ? "sessions:load" : "sessions:page", [args[0]]) as never;
         case "settings:get":
