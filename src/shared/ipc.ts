@@ -191,6 +191,13 @@ export interface InvokeMap {
   "remote:notificationToken": [[], string];
   /** 重新生成订阅令牌，已有订阅立即断开。 */
   "remote:regenerateNotificationToken": [[], string];
+  "weixin:status": [[], import("./remoteControl.js").WeixinNotifyStatus];
+  /** 开始扫码登录；二维码经 weixin:status 事件更新。 */
+  "weixin:login": [[], void];
+  /** 退出登录并删除本机保存的微信凭据。 */
+  "weixin:logout": [[], void];
+  /** 向已激活的微信发送一条测试消息。 */
+  "weixin:test": [[], void];
 }
 
 /** 主进程 → 渲染进程事件 */
@@ -213,6 +220,7 @@ export interface EventMap {
   "window:fullscreen": { fullscreen: boolean };
   "quota:updated": AgentQuota;
   "remote:status": import("./remoteControl.js").RemoteControlStatus;
+  "weixin:status": import("./remoteControl.js").WeixinNotifyStatus;
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -307,6 +315,10 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "remote:regenerateToken",
   "remote:notificationToken",
   "remote:regenerateNotificationToken",
+  "weixin:status",
+  "weixin:login",
+  "weixin:logout",
+  "weixin:test",
 ];
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
@@ -327,4 +339,5 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "window:fullscreen",
   "quota:updated",
   "remote:status",
+  "weixin:status",
 ];

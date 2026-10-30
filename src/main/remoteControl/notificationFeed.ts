@@ -29,6 +29,8 @@ export class NotificationFeed {
     private readonly now: () => number = Date.now,
     private readonly sessionTitle?: (state: ChatStateEvent) => Promise<string | undefined>,
     private readonly liveRows?: (sessionKey: string) => ConversationRow[] | undefined,
+    /** 每条新事件的本机监听方（如微信通知），与 SSE 订阅无关。 */
+    private readonly onEvent?: (event: NotificationFeedEvent) => void,
   ) {}
 
   get subscriberCount(): number {
@@ -140,6 +142,7 @@ export class NotificationFeed {
   private publish(event: NotificationFeedEvent) {
     this.events.push(event);
     if (this.events.length > MAX_EVENTS) this.events.shift();
+    this.onEvent?.(event);
     const data = frame(event);
     for (const subscriber of this.subscribers) {
       if (subscriber.writableLength > MAX_PENDING_BYTES) subscriber.destroy();

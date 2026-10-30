@@ -90,6 +90,7 @@ export function remoteSettings(settings: Settings): Settings {
     customSounds: DEFAULT_SETTINGS.customSounds,
     background: DEFAULT_SETTINGS.background,
     remoteControl: DEFAULT_SETTINGS.remoteControl,
+    weixinNotify: false,
   };
 }
 

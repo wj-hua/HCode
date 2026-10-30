@@ -76,3 +76,14 @@ export interface RemoteOnlyInvokeMap {
   "chat:live": [[], ChatStateEvent[]];
   "chat:snapshot": [[sessionKey: string], RemoteSessionSnapshot | null];
 }
+
+/** 微信通知（设置 → 通知与系统）：本机窗口查询的状态。 */
+export interface WeixinNotifyStatus {
+  enabled: boolean;
+  /** loggedOut：未扫码；waiting：已扫码，等待用户在微信给机器人发第一条消息；ready：可以推送。 */
+  state: "loggedOut" | "waiting" | "ready";
+  /** 进行中的扫码登录；qrUrl 需渲染成二维码。 */
+  login?: { qrUrl: string; status: "pending" | "scanned" | "expired" | "error"; message?: string };
+  /** 最近一次收发失败的原因；恢复后清除。 */
+  error?: string;
+}

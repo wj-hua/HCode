@@ -50,6 +50,7 @@ import { RemoteControlService } from "./remoteControl/remoteControlService.js";
 import { remoteImageThumbnail } from "./remoteControl/imageThumbnail.js";
 import { RemoteTokenStore } from "./remoteControl/tokenStore.js";
 import { RemoteSessionStore } from "./remoteControl/sessionStore.js";
+import { WeixinNotifier } from "./weixin/weixinNotifier.js";
 import { browseProjectDirectories, prepareProjectDirectory } from "./remoteControl/projectDirectory.js";
 
 app.setName("HCode");
@@ -531,6 +532,16 @@ async function bootstrap() {
     return path;
   });
 
+  const weixin = new WeixinNotifier({
+    dataDir: app.getPath("userData"),
+    enabled: () => store.settings.weixinNotify,
+    onStatus: (status) => send("weixin:status", status),
+  });
+  handle("weixin:status", () => weixin.getStatus());
+  handle("weixin:login", () => weixin.startLogin());
+  handle("weixin:logout", () => weixin.logout());
+  handle("weixin:test", () => weixin.test());
+
   const remoteTokens = new RemoteTokenStore(app.getPath("userData"));
   const remoteNotificationTokens = new RemoteTokenStore(app.getPath("userData"), "remote-notification-token");
   remote = new RemoteControlService({
@@ -555,6 +566,7 @@ async function bootstrap() {
     thumbnail: remoteImageThumbnail,
     env: buildAgentEnv,
     onStatus: (status) => send("remote:status", status),
+    onNotification: (event) => weixin.notify(event),
   });
   handle("remote:status", () => remote!.getStatus());
   handle("remote:token", () => remoteTokens.get());
@@ -567,12 +579,14 @@ async function bootstrap() {
     const settings = store.updateSettings(patch);
     syncSleepBlocker();
     if (patch.remoteControl) void remote?.apply();
+    if (patch.weixinNotify !== undefined) weixin.apply();
     if (process.platform === "darwin" && patch.shortcuts) installApplicationMenu(() => mainWindow, settings.shortcuts);
     return settings;
   });
 
   agents.startWatching();
   void remote.apply();
+  weixin.apply();
   powerMonitor.on("resume", () => remote?.reconnect());
   if (process.platform === "darwin") installApplicationMenu(() => mainWindow, store.settings.shortcuts);
   const openMainWindow = () => {
@@ -598,6 +612,7 @@ async function bootstrap() {
     collaboration.dispose();
     quota?.dispose();
     remote?.dispose();
+    weixin.dispose();
     agents.dispose();
   });
 }

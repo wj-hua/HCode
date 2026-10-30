@@ -408,6 +408,8 @@ export interface Settings {
   notificationSound: NotificationSound;
   /** notificationSound 为 custom 时各事件的音频文件路径；空串 = 用系统提示音。 */
   customSounds: Record<NotificationEvent, string>;
+  /** 任务完成、出错或等待审批时推送到微信（需扫码登录）。默认关闭。 */
+  weixinNotify: boolean;
   background: BackgroundSettings;
   shortcuts: ShortcutOverrides;
   remoteControl: RemoteControlSettings;
@@ -454,6 +456,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnFinish: true,
   notificationSound: "system",
   customSounds: { start: "", done: "", error: "", approval: "" },
+  weixinNotify: false,
   background: { path: "", blur: 20, mask: 60 },
   remoteControl: { enabled: false, sshHost: "", remoteBind: "", localPort: 0, notificationFeed: false },
 };

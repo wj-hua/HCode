@@ -9,7 +9,10 @@ import { Button } from "@/components/ui/button.js";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog.js";
 import { Switch } from "@/components/ui/switch.js";
 import { cn } from "@/components/lib/utils.js";
-import { useAppStore } from "../store/appStore";
+import QRCode from "qrcode";
+import type { WeixinNotifyStatus } from "@hcode/shared/remoteControl";
+import { errorMessage, useAppStore } from "../store/appStore";
+import { toast } from "@/components/ui/toast.js";
 import { hcode } from "../bridge";
 import {
   isBuiltinSound,
@@ -69,7 +72,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "general", label: "常规与外观", desc: "主题、语言与个性化背景", icon: Palette },
   { id: "agents", label: "模型与 CLI", desc: "默认 CLI、模型与权限", icon: Bot },
-  { id: "notifications", label: "通知与系统", desc: "休眠策略与提示音", icon: Bell },
+  { id: "notifications", label: "通知与系统", desc: "休眠策略、提示音与微信通知", icon: Bell },
   { id: "shortcuts", label: "快捷键", desc: "查看与修改键盘快捷键", icon: Keyboard },
   { id: "extensions", label: "MCP 与技能", desc: "上下文扩展与技能工具", icon: Boxes },
   { id: "remote", label: "远程操控", desc: "用手机浏览器访问这台电脑", icon: Smartphone },
@@ -78,7 +81,7 @@ const NAV_ITEMS: NavItem[] = [
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
   general: ["常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "theme", "wallpaper", "blur"],
   agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "effort", "model", "path"],
-  notifications: ["通知", "系统", "休眠", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "记忆", "memory", "sound", "notify", "sleep"],
+  notifications: ["通知", "系统", "休眠", "微信", "weixin", "wechat", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "记忆", "memory", "sound", "notify", "sleep"],
   shortcuts: ["快捷键", "键盘", "按键", "shortcut", "keyboard", ...APP_SHORTCUTS.map((entry) => entry.label.toLowerCase())],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
   remote: ["远程", "手机", "操控", "口令", "隧道", "remote", "ssh", "mobile"],
@@ -749,6 +752,8 @@ function NotificationsTab() {
         />
       </CardGroup>
 
+      <WeixinNotifyCard />
+
       {/* AI 委派卡片 */}
       <CardGroup title="AI 委派" subtitle="普通对话调用其他 AI 的能力，默认关闭">
         <ToggleRow
@@ -919,6 +924,114 @@ const TUNNEL_STATE_LABEL = { off: "未启用", connecting: "连接中", connecte
 const REMOTE_INPUT_CLASS = "h-8 rounded-lg border border-input-border bg-input px-2.5 font-mono text-ui-xs text-foreground outline-none transition-colors hover:border-input-border-hover focus:border-input-border-focused";
 
 /** 失焦或回车时提交，避免每输入一个字符就重启隧道。 */
+const WEIXIN_STATE_LABEL: Record<WeixinNotifyStatus["state"], string> = {
+  loggedOut: "未登录",
+  waiting: "等待激活",
+  ready: "已连接",
+};
+
+const WEIXIN_STATE_HINT: Record<WeixinNotifyStatus["state"], string> = {
+  loggedOut: "用微信扫码登录通知机器人",
+  waiting: "已登录。请在微信里给机器人发任意一条消息完成激活",
+  ready: "任务完成、运行出错或等待审批时推送到微信",
+};
+
+const WEIXIN_LOGIN_LABEL: Record<NonNullable<WeixinNotifyStatus["login"]>["status"], string> = {
+  pending: "请用微信扫描二维码",
+  scanned: "已扫码，请在手机上确认登录",
+  expired: "二维码已过期，请重新获取",
+  error: "登录失败",
+};
+
+/** 微信通知：开关默认关闭；开启后扫码登录，再在微信给机器人发一条消息即可接收推送。 */
+function WeixinNotifyCard() {
+  const enabled = useAppStore((state) => state.settings.weixinNotify);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const [status, setStatus] = useState<WeixinNotifyStatus | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const qrUrl = status?.login?.qrUrl;
+
+  useEffect(() => {
+    let alive = true;
+    void hcode.invoke("weixin:status").then((value) => { if (alive) setStatus(value); });
+    const off = hcode.on("weixin:status", setStatus);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  useEffect(() => {
+    setQrDataUrl(null);
+    if (!qrUrl) return;
+    let alive = true;
+    void QRCode.toDataURL(qrUrl, { margin: 1, width: 200 })
+      .then((url) => { if (alive) setQrDataUrl(url); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [qrUrl]);
+
+  const run = async (action: () => Promise<void>, success?: string) => {
+    setBusy(true);
+    try {
+      await action();
+      if (success) toast(success);
+    } catch (error) {
+      toast(errorMessage(error), { variant: "warning" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const login = () => run(() => hcode.invoke("weixin:login"));
+  const state = status?.state ?? "loggedOut";
+  const loginStatus = status?.login?.status;
+
+  return (
+    <CardGroup title="微信通知" subtitle="任务完成、运行出错或等待审批时推送到你的微信。默认关闭；推送内容含项目名、会话标题和回复开头，经微信服务器发送">
+      <ToggleRow
+        label="启用微信通知"
+        hint="不论 HCode 是否在前台都会推送；关闭后停止接收和推送，登录信息保留"
+        checked={enabled}
+        onChange={(weixinNotify) => void updateSettings({ weixinNotify })}
+      />
+      {enabled && (
+        <>
+          <SettingRow label="状态" hint={status?.error ?? WEIXIN_STATE_HINT[state]}>
+            <span className="text-ui-sm text-foreground-subtle">{status ? WEIXIN_STATE_LABEL[state] : "…"}</span>
+            {state === "ready" && (
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => hcode.invoke("weixin:test"), "测试消息已发送")}>
+                发送测试
+              </Button>
+            )}
+            <Button variant="outline" size="sm" disabled={busy || loginStatus === "pending" || loginStatus === "scanned"} onClick={() => void login()}>
+              <RefreshCw className="size-3.5 mr-1" />
+              {state === "loggedOut" ? "扫码登录" : "重新扫码"}
+            </Button>
+            {state !== "loggedOut" && (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(() => hcode.invoke("weixin:logout"))} className="text-destructive hover:bg-destructive/10">
+                退出登录
+              </Button>
+            )}
+          </SettingRow>
+          {status?.login && (
+            <div className="flex items-center gap-4 px-4 py-3.5">
+              {qrDataUrl && (loginStatus === "pending" || loginStatus === "scanned") ? (
+                <img src={qrDataUrl} alt="微信登录二维码" className="size-36 rounded-lg bg-white p-1" />
+              ) : null}
+              <div className="flex flex-col gap-1">
+                <span className="text-ui-base font-medium text-foreground">{WEIXIN_LOGIN_LABEL[status.login.status]}</span>
+                {status.login.message && <span className="text-ui-sm text-foreground-subtle">{status.login.message}</span>}
+                <span className="text-ui-sm text-foreground-subtle">登录后在微信里给机器人发任意一条消息，之后的通知只发给这个人</span>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </CardGroup>
+  );
+}
+
 function CommitInput({ value, onCommit, placeholder, className }: { value: string; onCommit: (value: string) => void; placeholder?: string; className?: string }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);

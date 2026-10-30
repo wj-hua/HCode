@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { extname, join, normalize, sep } from "node:path";
 import type { EventChannel, EventMap, InvokeChannel } from "../../shared/ipc.js";
-import type { RemoteControlStatus, RemoteSessionSnapshot } from "../../shared/remoteControl.js";
+import type { NotificationFeedEvent, RemoteControlStatus, RemoteSessionSnapshot } from "../../shared/remoteControl.js";
 import type { ChatStateEvent, ChatRowsEvent, ConversationRow, PermissionRequestEvent, RemoteControlSettings, SessionLoadResult, Settings } from "../../shared/types.js";
 import { REMOTE_MEDIA_PATH } from "../../shared/remoteControl.js";
 import { RemoteMedia, RemoteMediaNotFound, REMOTE_IMAGE_HEADERS, type RemoteImage, type RemoteMediaSource } from "./remoteMedia.js";
@@ -69,6 +69,8 @@ export interface RemoteControlDeps {
   /** ssh 进程的环境变量。 */
   env(): Record<string, string>;
   onStatus(status: RemoteControlStatus): void;
+  /** 通知事件的本机监听方；不论远程操控是否开启都会收到。 */
+  onNotification?(event: NotificationFeedEvent): void;
   thumbnail?(image: RemoteImage): RemoteImage;
 }
 
@@ -100,7 +102,7 @@ export class RemoteControlService {
   constructor(private readonly deps: RemoteControlDeps) {
     this.media = new RemoteMedia(source => this.mediaRows(source));
     this.tools = new RemoteToolDetails(source => this.mediaRows(source));
-    this.feed = new NotificationFeed(Date.now, deps.sessionTitle, deps.liveRows);
+    this.feed = new NotificationFeed(Date.now, deps.sessionTitle, deps.liveRows, deps.onNotification);
     this.tunnel = new ReverseTunnel(deps.env, (tunnel) => this.setStatus({ tunnel }));
   }
 
