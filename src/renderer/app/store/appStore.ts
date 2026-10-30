@@ -120,7 +120,7 @@ export interface AppState {
   settingsOpen: boolean;
   remoteProjectDialogOpen: boolean;
   setRemoteProjectDialogOpen(open: boolean): void;
-  settingsTab: "general" | "agents" | "notifications" | "extensions" | "remote";
+  settingsTab: "general" | "agents" | "memory" | "notifications" | "extensions" | "shortcuts" | "remote";
   fullscreen: boolean;
   /** 编辑重发：待写入某个会话输入框的内容，输入框挂载后取走。 */
   composerPrefill: { viewId: string; text: string; images: ImageInput[]; files: FileInput[] } | null;
@@ -178,7 +178,7 @@ export interface AppState {
   editMessage(rowId: number): void;
   updateSettings(patch: SettingsPatch): Promise<void>;
   setSidebarCollapsed(collapsed: boolean): void;
-  setSettingsOpen(open: boolean, tab?: "general" | "agents" | "notifications" | "extensions" | "remote"): void;
+  setSettingsOpen(open: boolean, tab?: "general" | "agents" | "memory" | "notifications" | "extensions" | "shortcuts" | "remote"): void;
   /** 关闭当前视图；会话记录仍保留在项目列表中。 */
   closeActiveView(): Promise<void>;
   activateView(viewId: string): void;

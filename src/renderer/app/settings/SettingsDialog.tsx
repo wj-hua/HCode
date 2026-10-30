@@ -27,6 +27,7 @@ import { useRemoteStatus } from "../remote/useRemoteStatus";
 import {
   Palette,
   Bot,
+  Brain,
   Bell,
   Boxes,
   Monitor,
@@ -58,7 +59,7 @@ import {
   EyeOff,
 } from "lucide-react";
 
-type SettingsTab = "general" | "agents" | "notifications" | "extensions" | "shortcuts" | "remote";
+type SettingsTab = "general" | "agents" | "memory" | "notifications" | "extensions" | "shortcuts" | "remote";
 
 const LAST_SELECTED_MODEL_VALUE = "__hcode_last_selected_model__";
 
@@ -70,18 +71,20 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "general", label: "常规与外观", desc: "主题、语言与个性化背景", icon: Palette },
-  { id: "agents", label: "模型与 CLI", desc: "默认 CLI、模型与权限", icon: Bot },
-  { id: "notifications", label: "通知与系统", desc: "休眠策略、提示音与微信通知", icon: Bell },
-  { id: "shortcuts", label: "快捷键", desc: "查看与修改键盘快捷键", icon: Keyboard },
+  { id: "general", label: "通用与外观", desc: "主题、语言、背景与休眠策略", icon: Palette },
+  { id: "agents", label: "模型与 CLI", desc: "默认 CLI、模型、权限与 AI 委派", icon: Bot },
+  { id: "memory", label: "记忆", desc: "管理全局和项目记忆", icon: Brain },
+  { id: "notifications", label: "通知", desc: "桌面通知、提示音与微信通知", icon: Bell },
   { id: "extensions", label: "MCP 与技能", desc: "上下文扩展与技能工具", icon: Boxes },
+  { id: "shortcuts", label: "快捷键", desc: "查看与修改键盘快捷键", icon: Keyboard },
   { id: "remote", label: "远程操控", desc: "用手机浏览器访问这台电脑", icon: Smartphone },
 ];
 
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
-  general: ["常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "theme", "wallpaper", "blur"],
-  agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "effort", "model", "path"],
-  notifications: ["通知", "系统", "休眠", "微信", "weixin", "wechat", "睡眠", "声音", "提示音", "潇", "试听", "音频", "静音", "记忆", "memory", "sound", "notify", "sleep"],
+  general: ["通用", "常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "系统", "休眠", "睡眠", "theme", "wallpaper", "blur", "sleep"],
+  agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "委派", "effort", "model", "path", "delegation"],
+  memory: ["记忆", "全局", "项目", "memory"],
+  notifications: ["通知", "桌面", "微信", "weixin", "wechat", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify"],
   shortcuts: ["快捷键", "键盘", "按键", "shortcut", "keyboard", ...APP_SHORTCUTS.map((entry) => entry.label.toLowerCase())],
   extensions: ["mcp", "技能", "skill", "扩展", "服务器", "stdio", "http", "tool", "插件"],
   remote: ["远程", "手机", "操控", "口令", "隧道", "remote", "ssh", "mobile"],
@@ -445,6 +448,15 @@ function GeneralTab() {
           </div>
         )}
       </CardGroup>
+
+      <CardGroup title="系统策略" subtitle="长时间任务执行时的硬件唤醒">
+        <ToggleRow
+          label="运行任务时阻止休眠"
+          hint="当有代码会话正在执行后台任务时，保持系统唤醒，防止网络连接中断或执行停滞"
+          checked={settings.preventSleepWhileRunning}
+          onChange={(preventSleepWhileRunning) => update({ preventSleepWhileRunning })}
+        />
+      </CardGroup>
     </div>
   );
 }
@@ -707,12 +719,29 @@ function AgentsTab() {
           ))}
         </div>
       </div>
+
+      <CardGroup title="AI 委派" subtitle="普通对话调用其他 AI 的能力，默认关闭">
+        <ToggleRow
+          label="允许普通对话跨 AI 委派"
+          hint="开启后新建的 Claude/Codex 会话可通过 call_agent 调用其他 AI；已有 Codex 会话需新建才生效，已有 Claude 会话从下一条消息起生效。关闭后，已有 Codex 会话仍可能保留委派工具，需新建会话才完全停用。会增加 token 消耗"
+          checked={settings.agentDelegation}
+          onChange={(agentDelegation) => void updateSettings({ agentDelegation })}
+        />
+      </CardGroup>
     </div>
   );
 }
 
-function NotificationsTab() {
+function MemoryTab() {
   const { intl } = useZCodeIntl();
+  return (
+    <CardGroup title={intl.formatMessage({ id: 'memory.title' })} subtitle={intl.formatMessage({ id: 'memory.subtitle' })}>
+      <MemorySection />
+    </CardGroup>
+  );
+}
+
+function NotificationsTab() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const sound = settings.notificationSound;
@@ -736,14 +765,7 @@ function NotificationsTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 系统策略卡片 */}
-      <CardGroup title="系统策略" subtitle="长时间任务执行时的硬件唤醒与后台调度">
-        <ToggleRow
-          label="运行任务时阻止休眠"
-          hint="当有代码会话正在执行后台任务时，保持系统唤醒，防止网络连接中断或执行停滞"
-          checked={settings.preventSleepWhileRunning}
-          onChange={(preventSleepWhileRunning) => update({ preventSleepWhileRunning })}
-        />
+      <CardGroup title="桌面通知" subtitle="配置任务状态的系统提醒">
         <ToggleRow
           label="桌面系统通知"
           hint="HCode 处于后台时，任务启动、执行完毕、运行报错或需手动审批时发送桌面弹窗"
@@ -753,20 +775,6 @@ function NotificationsTab() {
       </CardGroup>
 
       <WeixinNotifyCard />
-
-      {/* AI 委派卡片 */}
-      <CardGroup title="AI 委派" subtitle="普通对话调用其他 AI 的能力，默认关闭">
-        <ToggleRow
-          label="允许普通对话跨 AI 委派"
-          hint="开启后新建的 Claude/Codex 会话可通过 call_agent 调用其他 AI；已有 Codex 会话需新建才生效，已有 Claude 会话从下一条消息起生效。关闭后，已有 Codex 会话仍可能保留委派工具，需新建会话才完全停用。会增加 token 消耗"
-          checked={settings.agentDelegation}
-          onChange={(agentDelegation) => update({ agentDelegation })}
-        />
-      </CardGroup>
-
-      <CardGroup title={intl.formatMessage({ id: 'memory.title' })} subtitle={intl.formatMessage({ id: 'memory.subtitle' })}>
-        <MemorySection />
-      </CardGroup>
 
       {/* 通知音效卡片 */}
       {settings.notifyOnFinish && (
@@ -1258,6 +1266,7 @@ export function SettingsDialog() {
           <main className="flex-1 min-w-0 overflow-y-auto px-7 py-6">
             {tab === "general" && <GeneralTab />}
             {tab === "agents" && <AgentsTab />}
+            {tab === "memory" && <MemoryTab />}
             {tab === "notifications" && <NotificationsTab />}
             {tab === "shortcuts" && <ShortcutsTab />}
             {tab === "extensions" && <ExtensionsSection open={open} />}
