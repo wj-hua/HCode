@@ -6,7 +6,7 @@ import { usePresentationStore } from "../collaboration/presentationStore";
 import { ExpertConversationResult } from "../collaboration/ExpertConversationResult";
 import { presentationContent } from "@hcode/shared/collaborationPresentation";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
-import { CopyIcon, GitBranchIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
+import { AlertCircleIcon, CopyIcon, GitBranchIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import type {
   AssistantTextRow,
@@ -18,6 +18,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import type { ForkMode, PermissionRequestEvent } from "@hcode/shared/types";
 import { isTurnStartInput } from "@hcode/shared/conversationTurns";
+import { lostContextAfterCompaction } from "@hcode/shared/conversationChanges";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -74,6 +75,7 @@ export function Timeline({
   canFork,
   canResend,
   highlightedRowId,
+  warnCompactionContextLoss = false,
 }: {
   presentation?: PresentationConversation & { viewId: string };
   rows: readonly ConversationRow[];
@@ -85,6 +87,8 @@ export function Timeline({
   /** 用户消息悬停时显示编辑重发 / 重试按钮。 */
   canResend: boolean;
   highlightedRowId: number | null;
+  /** 压缩可能不带摘要的代理（Codex）才提示核对任务，避免对保留摘要的代理误报。 */
+  warnCompactionContextLoss?: boolean;
 }) {
   const entries = usePresentationStore(state => state.entries);
   const turns = useMemo(() => groupTurns(rows), [rows]);
@@ -93,7 +97,7 @@ export function Timeline({
     <div className="flex flex-col gap-6">
       {turns.map((turn, index) => {
         const owned = presentation ? presentationTaskForTurn(entries, presentation, turn.turnId) : undefined;
-        const content = <TurnView key={turn.turnId} turn={turn} workspacePath={workspacePath} permissions={permissions} isLast={index === turns.length - 1} running={running} canFork={owned ? false : canFork} canResend={owned ? false : canResend} lastUserRowId={lastUserRowId} highlightedRowId={highlightedRowId} />;
+        const content = <TurnView key={turn.turnId} turn={turn} workspacePath={workspacePath} permissions={permissions} isLast={index === turns.length - 1} running={running} canFork={owned ? false : canFork} canResend={owned ? false : canResend} lastUserRowId={lastUserRowId} highlightedRowId={highlightedRowId} warnCompactionContextLoss={warnCompactionContextLoss} />;
         if (!owned || Object.keys(permissions).length) return content;
         const highlighted = turn.rows.some(row => row.rowId === highlightedRowId);
         const isSource = presentation && presentationBelongsToSource(owned.entry, presentation);
@@ -121,6 +125,7 @@ function TurnView({
   canResend,
   lastUserRowId,
   highlightedRowId,
+  warnCompactionContextLoss,
 }: {
   turn: Turn;
   workspacePath: string;
@@ -131,6 +136,7 @@ function TurnView({
   canResend: boolean;
   lastUserRowId: number | null;
   highlightedRowId: number | null;
+  warnCompactionContextLoss: boolean;
 }) {
   const header = turn.header;
   const turnRunning = header?.state === "running" && isLast && running;
@@ -152,6 +158,12 @@ function TurnView({
         </div>
       ))}
       {header && header.state !== "running" ? <TurnChangeSummary rows={turn.rows} /> : null}
+      {warnCompactionContextLoss && header?.state === "completedSuccess" && lostContextAfterCompaction(turn.rows) ? (
+        <div role="status" className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-ui-sm text-foreground-subtle">
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-warning" />
+          <p>上下文压缩后本轮没有文件改动就结束了，可能已丢失任务上下文。请核对回复，必要时重新说明任务和工作目录。</p>
+        </div>
+      ) : null}
       {showThinking ? (
         <div className="flex items-center gap-2 text-ui-base text-foreground-subtle">
           <LoaderIcon className="size-4 animate-spin" />
