@@ -52,3 +52,12 @@ export function changesFromRows(rows: readonly ConversationRow[]): Change[] {
   return [...files.values()];
 }
 
+
+/**
+ * Codex 的窗口重置可能不带摘要：笔记 / 历史服务失败时，新窗口只剩系统提示，模型会把规范当新指令草草收尾。
+ * 最后一次压缩后没有任何文件变更的轮次，提示用户核对任务是否丢失；压缩前的改动不能证明上下文仍在。
+ */
+export function lostContextAfterCompaction(rows: readonly ConversationRow[]): boolean {
+  const index = rows.findLastIndex(row => row.kind === "timelineMarker" && row.marker.type === "compact");
+  return index >= 0 && changesFromRows(rows.slice(index + 1)).length === 0;
+}

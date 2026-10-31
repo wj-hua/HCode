@@ -102,6 +102,7 @@ export function ConversationView({
                   canFork={Boolean(AGENTS[conversation.agent].fork && conversation.sessionId) && !running}
                   canResend={!running && !column && !conversation.compareId}
                   highlightedRowId={searchTarget?.rowId ?? null}
+                  warnCompactionContextLoss={conversation.agent === "codex"}
                 />
               )}
               {!conversation.loading && !draftEmpty ? <div className="mt-6 space-y-8">
