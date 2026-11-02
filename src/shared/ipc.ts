@@ -121,6 +121,7 @@ export interface InvokeMap {
   "workspace:conversation": [[], string];
   "projects:add": [[], Project | null];
   "projects:addPath": [[path: string, create: boolean], Project];
+  "projects:takeExternalPaths": [[], string[]];
   "projects:browseDirectories": [[path: string | null, showHidden: boolean], ProjectDirectoryListing];
   "projects:setPinned": [[path: string, pinned: boolean], void];
   "projects:reorder": [[paths: string[]], void];
@@ -211,6 +212,7 @@ export interface EventMap {
   "collaboration:updated": CollaborationSnapshot;
   "app:menuCommand": { command: AppCommand; index?: number; fromAccelerator?: boolean };
   "sessions:indexChanged": { projectPaths: string[] };
+  "projects:externalPathsAvailable": void;
   "chat:rows": ChatRowsEvent;
   "chat:state": ChatStateEvent;
   "chat:commands": SlashCommandsEvent;
@@ -258,6 +260,7 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "workspace:conversation",
   "projects:add",
   "projects:addPath",
+  "projects:takeExternalPaths",
   "projects:browseDirectories",
   "projects:setPinned",
   "projects:reorder",
@@ -330,6 +333,7 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "collaboration:updated",
   "app:menuCommand",
   "sessions:indexChanged",
+  "projects:externalPathsAvailable",
   "chat:rows",
   "chat:state",
   "chat:commands",

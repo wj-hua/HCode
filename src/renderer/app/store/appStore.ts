@@ -402,6 +402,9 @@ export const useAppStore = create<AppState>((set, get) => {
   };
 
   const subscribeEvents = () => {
+    hcode.on("projects:externalPathsAvailable", () => {
+      if (get().ready) void openExternalProjects();
+    });
     hcode.on('chat:promptSuggestion', event => usePromptSuggestionStore.getState().accept(event));
     hcode.on("chat:rows", (event) => {
       const { sessionKey } = event;
@@ -477,6 +480,22 @@ export const useAppStore = create<AppState>((set, get) => {
     hcode.on("window:fullscreen", ({ fullscreen }) => set({ fullscreen }));
   };
 
+  const openExternalProjects = async () => {
+    const paths = await hcode.invoke("projects:takeExternalPaths");
+    for (const path of paths) {
+      try {
+        const project = await hcode.invoke("projects:addPath", path, false);
+        await get().refreshProjects();
+        get().toggleProject(project.path, true);
+        const conv = activeConversation();
+        if (conv && !conv.sessionKey && !conv.sessionId && !conv.compareId) get().setDraftProject(project.path);
+        else get().newChat(project.path);
+      } catch (error) {
+        toast(`打开文件夹失败：${errorMessage(error)}`, { variant: "warning" });
+      }
+    }
+  };
+
   return {
     ready: false,
     settings: DEFAULT_SETTINGS,
@@ -519,6 +538,7 @@ export const useAppStore = create<AppState>((set, get) => {
       if (link) await openSessionLink(get, link).catch((error) => toast(`打开通知对应的会话失败：${errorMessage(error)}`, { variant: "warning" }));
       if (!get().activeViewId) await get().workOutsideProject(true);
       set({ ready: true });
+      if (!isRemote) await openExternalProjects();
       set({ agentStatuses: await hcode.invoke("agent:status") });
     },
 

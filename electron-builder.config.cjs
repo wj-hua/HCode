@@ -2,6 +2,7 @@
 module.exports = {
   appId: "com.mino.hcode",
   productName: "HCode",
+  protocols: [{ name: "HCode", schemes: ["hcode"] }],
   directories: { output: "release", buildResources: "resources" },
   files: ["out/**/*", "!out/**/*.map", "!out/test/**", "package.json"],
   asar: true,

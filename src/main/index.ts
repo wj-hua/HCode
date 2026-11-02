@@ -67,6 +67,21 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+const externalProjectPaths: string[] = [];
+let showMainWindow: (() => void) | undefined;
+app.on("open-url", (event, rawURL) => {
+  event.preventDefault();
+  try {
+    const url = new URL(rawURL);
+    const path = url.searchParams.get("path");
+    if (url.protocol !== "hcode:" || url.hostname !== "open-project" || !path) return;
+    externalProjectPaths.push(path);
+    showMainWindow?.();
+    send("projects:externalPathsAvailable", undefined);
+  } catch {
+    // 忽略格式错误的外部链接。
+  }
+});
 let shellEnv: Record<string, string> = {};
 let remote: RemoteControlService | null = null;
 /** handle() 注册的全部 handler，远程操控按白名单复用。 */
@@ -234,6 +249,7 @@ async function bootstrap() {
     send("sessions:indexChanged", { projectPaths: [path] });
     return project;
   });
+  handle("projects:takeExternalPaths", () => externalProjectPaths.splice(0));
   handle("projects:browseDirectories", (path, showHidden) => browseProjectDirectories(path, showHidden));
   handle("projects:setPinned", (path, pinned) => {
     if (path === conversationWorkspace.path) throw new Error("对话目录不支持项目置顶");
@@ -599,6 +615,12 @@ async function bootstrap() {
     return window;
   };
   mainWindow = openMainWindow();
+  showMainWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) mainWindow = openMainWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  };
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
