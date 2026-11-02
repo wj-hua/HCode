@@ -86,3 +86,39 @@ describe("回合中插话", () => {
     expect(invoke).toHaveBeenCalledWith("chat:steer", { sessionKey: "live", text: "先处理报错" });
   });
 });
+
+describe("Codex 异步回答", () => {
+  const question = { id: "question-1", title: "提交吗？", options: ["提交", "保留"] };
+  function setup(runState: Conversation["runState"]) {
+    const conv = runningConversation({ agent: "codex", runState, rows: [{
+      kind: "assistantText", turnId: "turn", rowId: 1, createdAt: 1, createdAtSeq: 1,
+      state: "complete", text: "提交吗？", asyncQuestions: [question],
+    }] });
+    useAppStore.setState({ activeViewId: "other", conversations: { [VIEW]: conv } });
+  }
+  const reply = () => useAppStore.getState().answerAsyncQuestion(VIEW, question.id, "保留");
+
+  it("运行中只向题目的会话投递一次，并保留运行态", async () => {
+    setup("running");
+    const settle = deferredSteer();
+    const pending = reply();
+    await reply();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("chat:steer", { sessionKey: "live", text: expect.stringContaining('"answer":"保留"') });
+    settle({ delivered: true });
+    await pending;
+    expect(conversation().runState).toBe("running");
+    expect(conversation().asyncAnswerStates?.[question.id]).toBe("sent");
+  });
+
+  it("投递被拒保留问题，回合结束后可重试为新消息", async () => {
+    setup("running");
+    invoke.mockResolvedValueOnce({ delivered: false, reason: "回合已结束" });
+    await expect(reply()).rejects.toThrow("回合已结束");
+    expect(conversation().asyncAnswerStates?.[question.id]).toBeUndefined();
+    useAppStore.setState({ conversations: { [VIEW]: { ...conversation(), runState: "idle" } } });
+    invoke.mockResolvedValueOnce({});
+    await reply();
+    expect(invoke).toHaveBeenLastCalledWith("chat:send", expect.objectContaining({ sessionKey: "live", text: expect.stringContaining("提交吗？") }));
+  });
+});

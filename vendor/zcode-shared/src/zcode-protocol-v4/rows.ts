@@ -161,6 +161,8 @@ export const assistantTextRowSchema = z.object({
   text: z.string(),
   state: z.enum(["streaming", "complete", "interrupted", "failed"]),
   model: z.string().optional(),
+  // HCode 的 Codex 扩展。异步问题不走阻塞式审批，原生身份供回复和历史重建使用。
+  asyncQuestions: z.array(z.object({ id: z.string(), title: z.string(), options: z.array(z.string()) })).optional(),
   feedback: z.enum(["like", "dislike"]).optional(),
 });
 export type AssistantTextRow = z.infer<typeof assistantTextRowSchema>;

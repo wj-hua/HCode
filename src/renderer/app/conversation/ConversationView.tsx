@@ -13,6 +13,7 @@ import { useAppStore, type Conversation } from "../store/appStore";
 import { Timeline } from "./Timeline";
 import { FilePreviewProvider } from "./FilePreviewContext";
 import { TaskListPanel } from "./TaskListPanel";
+import { CodexAsyncQuestionPanel } from "./CodexAsyncQuestionPanel";
 import { BackgroundTaskPanel } from './BackgroundTaskPanel';
 import { GitTools } from "./GitTools";
 import { NativeSubagents } from "./NativeSubagents";
@@ -133,6 +134,7 @@ export function ConversationView({
           {!conversation.loading && conversation.sessionId ? <NativeSubagents key={`${conversation.agent}:${conversation.projectPath}:${conversation.sessionId}`} agent={conversation.agent} sessionId={conversation.sessionId} projectPath={conversation.projectPath} /> : null}
           <TaskListPanel conversation={conversation} />
           <BackgroundTaskPanel conversation={conversation} />
+          {conversation.agent === "codex" && !conversation.loading && !conversation.loadError ? <CodexAsyncQuestionPanel key={conversation.viewId} conversation={conversation} /> : null}
           {column ? null : (
             <Composer
               key={conversation.viewId}

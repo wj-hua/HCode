@@ -70,3 +70,18 @@ it("普通历史线程没有动态工具时拒绝启用研究，保留原生线�
     expect(session.threadId).toBe("thread");
   } finally { session.close(); }
 });
+
+it("异步回答只有原生接受后才回显，失败时仍可重试", async () => {
+  const { session } = fixture();
+  const text = '<send_user_message_question_reply>\n[{"questionItemId":"q","question":"执行吗","answer":"好"}]\n</send_user_message_question_reply>';
+  try {
+    const pending = session.send(text);
+    expect(session.liveRows().filter(row => row.kind === "userInput")).toHaveLength(0);
+    await pending;
+    expect(session.liveRows().filter(row => row.kind === "userInput")).toHaveLength(1);
+    session.handleNotification("turn/completed", { turn: { id: "turn-1", status: "completed" } });
+    await session.configureResearch({ root: "/fixture" });
+    await expect(session.send(text)).rejects.toThrow();
+    expect(session.liveRows().filter(row => row.kind === "userInput")).toHaveLength(1);
+  } finally { session.close(); }
+});

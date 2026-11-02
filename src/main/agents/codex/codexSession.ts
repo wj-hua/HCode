@@ -21,6 +21,7 @@ import type {
   PermissionResolvedEvent,
 } from "../../../shared/types.js";
 import { isRecord } from "../rowProjectorBase.js";
+import { readAsyncReply } from "../../../shared/codexAsyncQuestions.js";
 import { CodexResponseMetrics } from "./codexResponseMetrics.js";
 import { withFileReferences } from "../fileAttachments.js";
 import type { AppServerClient, ServerRequest } from "./appServerClient.js";
@@ -156,6 +157,15 @@ export class CodexSession {
   private hostedAvailable = false;
   private ordinaryContinuation: string | undefined;
   private finalAnswer: string | undefined;
+  private beginAcceptedReply?: () => void;
+
+  /** 原生 turn/started 通知与 RPC 响应可能先后互换，回复只回显一次。 */
+  private confirmReplyStart() {
+    if (!this.beginAcceptedReply) return;
+    this.beginAcceptedReply();
+    this.beginAcceptedReply = undefined;
+    this.flushNow();
+  }
 
   seedHistory(turns: readonly CodexTurn[]) {
     for (const turn of turns) this.projector.consumeTurn(turn);
@@ -179,7 +189,11 @@ export class CodexSession {
       contextWindowTokens: this.usage.contextWindowTokens,
       contextUsedPercent: this.usage.contextUsedPercent,
     } : undefined;
-    this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
+    const asyncReply = readAsyncReply(text).length > 0;
+    const beginTurn = () => this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
+    // 新回合的异步答案回显也是问题关闭的依据，须等原生接受后才写入。
+    if (asyncReply) this.beginAcceptedReply = beginTurn;
+    else beginTurn();
     this.flushNow();
     this.setState("running");
     try {
@@ -236,11 +250,13 @@ export class CodexSession {
         this.speedOverridden = Boolean(this.speed);
         this.speedInitialized = true;
       }
+      this.confirmReplyStart();
       this.currentTurnId = result.turn.id;
       this.lifecycle.bindNativeTurn(result.turn.id);
       this.bindHostedTools(result.turn.id);
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
+      if (asyncReply) throw error;
     }
   }
 
@@ -347,6 +363,7 @@ export class CodexSession {
     const now = Date.now();
     if (method === "turn/started" && isRecord(params.turn) && typeof params.turn.id === "string") {
       if (!this.responseMetrics.beginTurn(params.turn.id)) return;
+      this.confirmReplyStart();
       this.currentTurnId = params.turn.id;
     }
     const turnId = params.turnId ?? (isRecord(params.turn) ? params.turn.id : undefined);
@@ -746,6 +763,7 @@ export class CodexSession {
   }
 
   private fail(message: string) {
+    this.beginAcceptedReply = undefined;
     this.error = message;
     this.projector.failTurn(`Codex 出错：${message}`, Date.now());
     this.currentTurnId = null;

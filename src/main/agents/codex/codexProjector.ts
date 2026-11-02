@@ -22,6 +22,8 @@ import {
 } from "../rowProjectorBase.js";
 import type { FileInput, ImageInput } from "../../../shared/types.js";
 
+import { readAsyncQuestions } from "../../../shared/codexAsyncQuestions.js";
+
 export type CodexItem = JsonRecord & { type: string; id: string };
 
 export interface CodexTurn {
@@ -367,10 +369,13 @@ export class CodexRowProjector extends RowProjectorBase {
       case "agentMessage":
       case "plan": {
         const text = typeof item.text === "string" ? item.text : "";
+        const questions = item.type === "agentMessage" && item.delivery === "async" ? readAsyncQuestions(item.id, item.questions) : [];
+        const metadata = questions.length ? { asyncQuestions: questions } : {};
         if (existing !== undefined) {
-          this.patch<AssistantTextRow>(existing, (row) => ({ ...row, text: text || row.text, state: "complete" }));
-        } else if (text.trim()) {
+          this.patch<AssistantTextRow>(existing, (row) => ({ ...row, ...metadata, text: text || row.text, state: "complete" }));
+        } else if (text.trim() || questions.length) {
           const row: AssistantTextRow = {
+            ...metadata,
             ...this.base(at),
             kind: "assistantText",
             text,
