@@ -1,3 +1,4 @@
+import { readAsyncReply } from "@hcode/shared/codexAsyncQuestions";
 // 对话时间线：按轮（turnId）分组渲染 ZCode v4 行。
 // 用户气泡 / 助手正文 / 思考块 / 工具卡片分别复用 ZCode 的组件（见各 import）。
 import { presentationBelongsToSource, presentationTaskForTurn } from "@hcode/shared/collaborationPresentation";
@@ -308,6 +309,8 @@ function MessageActions({ row, canFork, canResend, isLastUser }: {
 
 function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow; canFork: boolean; canResend: boolean; isLastUser: boolean }) {
   const preview = useFilePreview();
+  const replies = readAsyncReply(row.text);
+  const displayText = replies.length ? replies.map(reply => reply.answer).join("\n") : row.text;
   const imageAttachment = (ref: string) => ref.startsWith("data:image/") || ref.startsWith(REMOTE_MEDIA_PATH);
   const images = (row.attachments ?? []).filter((attachment) => imageAttachment(attachment.ref)).map((attachment) => ({ src: attachment.ref, name: attachment.fileName }));
   const files = (row.attachments ?? []).filter((attachment) => !imageAttachment(attachment.ref)).map((attachment) => ({ path: attachment.ref, name: attachment.fileName, mimeType: attachment.mime, size: attachment.bytes }));
@@ -318,8 +321,8 @@ function UserBubble({ row, canFork, canResend, isLastUser }: { row: UserInputRow
       <FileAttachments files={files} className="justify-end" onPreview={preview?.onOpenFilePath} />
       {row.text.trim() ? (
         <div className="flex min-w-0 max-w-[min(100%,var(--container-xl))] flex-col gap-2 rounded-xl rounded-tr-xs border border-border bg-surface px-4 py-3 text-ui-base text-foreground">
-          <ConversationUserInputBody contentText={row.text} rowId={row.rowId}>
-            <ConversationUserInputContent text={row.text} onOpenFile={preview?.onOpenFilePath} />
+          <ConversationUserInputBody contentText={displayText} rowId={row.rowId}>
+            <ConversationUserInputContent text={displayText} onOpenFile={preview?.onOpenFilePath} />
           </ConversationUserInputBody>
         </div>
       ) : null}

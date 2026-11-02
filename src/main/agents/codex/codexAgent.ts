@@ -1,3 +1,4 @@
+import { readAsyncReply } from "../../../shared/codexAsyncQuestions.js";
 // Codex 接入：历史（thread/list、thread/turns/list）+ 实时会话 + 审批，全部通过一个共享的 codex app-server。
 import { watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
@@ -473,7 +474,9 @@ export class CodexAgent implements AgentProvider {
     const skill = match && !["review", "compact"].includes(match[1]!.toLowerCase())
       ? (await this.listSkills(params.projectPath)).find((item) => item.name === match[1])
       : undefined;
-    void session.send(params.text, params.images, params.files, skill, params.executionTurnId, params.onNativeSession);
+    const started = session.send(params.text, params.images, params.files, skill, params.executionTurnId, params.onNativeSession);
+    // 普通消息异步启动；答题框只有收到原生 turn/start 确认才能清除答案。
+    if (readAsyncReply(params.text).length) await started;
     return { sessionKey: session.key };
   }
 

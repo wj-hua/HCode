@@ -27,6 +27,7 @@ import type {
 } from "@hcode/shared/types";
 import { DEFAULT_SETTINGS, getDefaultModel } from "@hcode/shared/types";
 import { sessionPinKey } from "@hcode/shared/sessionPins";
+import { encodeAsyncReply, pendingAsyncQuestions } from "@hcode/shared/codexAsyncQuestions";
 import { AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
 import { hcode, isRemote } from "../bridge";
@@ -93,6 +94,8 @@ export interface Conversation {
   queue: QueuedMessage[];
   /** 已提交插话、等待主进程确认投递的消息；未投递时回到 queue。 */
   steering?: QueuedMessage[];
+  /** RPC 返回和原生 userMessage 回显之间也须防止重复提交。 */
+  asyncAnswerStates?: Record<string, "sending" | "sent">;
   /** 队列暂停原因：用户停止或本轮出错后不再自动发送，等用户点「继续」。 */
   queuePaused?: "stopped" | "error";
   /** 多 CLI 对比：同一组会话共用同一个 id，界面并排显示。 */
@@ -151,6 +154,7 @@ export interface AppState {
   steer(text: string, images: ImageInput[], files: FileInput[]): void;
   /** 把一条排队消息立即插话进当前回合。 */
   steerQueued(id: string): void;
+  answerAsyncQuestion(viewId: string, id: string, answer: string): Promise<void>;
   removeQueued(id: string): void;
   /** 取消暂停，空闲时立即发送队首。 */
   resumeQueue(): void;
@@ -736,6 +740,36 @@ export const useAppStore = create<AppState>((set, get) => {
         return;
       }
       void steerConversation(conv.viewId, { id: crypto.randomUUID(), text, images, files }, get, patchConversation, returnToQueue);
+    },
+
+    async answerAsyncQuestion(viewId, id, answer) {
+      const conv = get().conversations[viewId];
+      const question = conv && pendingAsyncQuestions(conv.rows).find(item => item.id === id);
+      if (!question || !conv || conv.agent !== "codex" || !answer.trim()) throw new Error("当前问题已不可回复");
+      if (conv.asyncAnswerStates?.[id]) return;
+      const mark = (status?: "sending" | "sent") => {
+        const current = get().conversations[viewId];
+        if (!current) return;
+        const states = { ...current.asyncAnswerStates };
+        if (status) states[id] = status;
+        else delete states[id];
+        patchConversation(viewId, { asyncAnswerStates: states });
+      };
+      const text = encodeAsyncReply(question, answer.trim());
+      mark("sending");
+      try {
+        if (conv.runState === "running" || conv.runState === "awaitingApproval") {
+          if (!conv.sessionKey) throw new Error("无法连接当前回合，请刷新后重试");
+          const result = await hcode.invoke("chat:steer", { sessionKey: conv.sessionKey, text });
+          if (!result.delivered) throw new Error(result.reason);
+        } else if (!await sendConversation(viewId, text, [], [])) {
+          throw new Error(get().conversations[viewId]?.error ?? "回复未发送，请重试");
+        }
+        mark("sent");
+      } catch (error) {
+        mark();
+        throw error;
+      }
     },
 
     steerQueued(id) {
