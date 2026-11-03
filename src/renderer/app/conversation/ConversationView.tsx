@@ -134,7 +134,7 @@ export function ConversationView({
           {!conversation.loading && conversation.sessionId ? <NativeSubagents key={`${conversation.agent}:${conversation.projectPath}:${conversation.sessionId}`} agent={conversation.agent} sessionId={conversation.sessionId} projectPath={conversation.projectPath} /> : null}
           <TaskListPanel conversation={conversation} />
           <BackgroundTaskPanel conversation={conversation} />
-          {conversation.agent === "codex" && !conversation.loading && !conversation.loadError ? <CodexAsyncQuestionPanel key={conversation.viewId} conversation={conversation} /> : null}
+          {conversation.agent === "codex" && !conversation.loading && !conversation.loadError ? <CodexAsyncQuestionPanel conversation={conversation} /> : null}
           {column ? null : (
             <Composer
               key={conversation.viewId}
