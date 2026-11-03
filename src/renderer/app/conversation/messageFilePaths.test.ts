@@ -82,3 +82,15 @@ describe("消息中的普通文件路径", () => {
     }
   });
 });
+
+it("文档链接从当前 Markdown 所在目录解析，允许项目内的上级路径", () => {
+  const html = renderToStaticMarkup(createElement(ZCodeIntlProvider, { initialLocale: "zh-CN", children:
+    createElement(TooltipProvider, { children: createElement(MessageResponse, {
+      workspacePath, documentPath: workspacePath + "/docs/guide.md", onOpenFileLink() {},
+      children: "[说明](./design/guide.md) · [入口](../src/main.ts) · [禁止](../../outside.md)",
+    }) }),
+  }));
+  expect(html).toContain(`title="${workspacePath}/docs/design/guide.md"`);
+  expect(html).toContain(`title="${workspacePath}/src/main.ts"`);
+  expect(html.match(/<button\b/g)).toHaveLength(2);
+});

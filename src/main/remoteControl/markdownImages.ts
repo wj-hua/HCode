@@ -3,9 +3,10 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { extname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { linkedArtifactRoot } from "./linkedWorktree.js";
 import { RemoteReferenceNotFound } from "./signedReference.js";
 
-const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif", ".svg": "image/svg+xml" };
+export const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".bmp": "image/bmp", ".ico": "image/x-icon", ".apng": "image/apng", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif", ".svg": "image/svg+xml" };
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const INLINE_CODE = /(`+).*?\1(?!`)/g;
 const IMAGE_LINK = /!\[([^\]\n]*)\]\((?:<([^>\n]+)>|([^\)\n]+))\)/g;
@@ -51,12 +52,16 @@ export async function readMarkdownImage(source: string, projectPath?: string) {
       try { return await realpath(root); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
     }));
-    if (!roots.some(root => root !== undefined && file.startsWith(root + sep))) throw new RemoteReferenceNotFound();
+    const inProject = roots.some(root => root !== undefined && file.startsWith(root + sep));
+    if (!inProject && (extname(file).toLowerCase() !== extname(path).toLowerCase() ||
+        !projectPath || !await linkedArtifactRoot(projectPath, path, file))) {
+      throw new RemoteReferenceNotFound("图片不在当前项目、关联工作树或临时目录");
+    }
     const info = await stat(file);
     if (!info.isFile() || info.size > MAX_IMAGE_BYTES) throw new RemoteReferenceNotFound("图片过大或不是普通文件");
     const body = await readFile(file);
     if (body.length > MAX_IMAGE_BYTES) throw new RemoteReferenceNotFound("图片超过 20 MiB");
-    return { body, type: IMAGE_TYPES[extname(path).toLowerCase()]!, cacheControl: "private, no-cache" };
+    return { body, type: IMAGE_TYPES[extname(path).toLowerCase()]!, fileBacked: true };
   } catch (error) {
     if (["ENOENT", "EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw new RemoteReferenceNotFound("图片不存在或不可读取");
     throw error;

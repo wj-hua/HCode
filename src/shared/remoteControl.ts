@@ -1,6 +1,8 @@
 // 远程操控：本机界面查询的状态，以及只对远程客户端开放的快照接口。
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent } from "./types.js";
 
+export interface RemoteTextPage { text: string; next: number | null; version: string }
+
 export type RemoteRowSource = { sessionKey: string; projectPath?: string } | { ref: import("./types.js").SessionRef };
 export interface RemoteFileChange { path: string; additions: number; deletions: number; hasPatch: boolean }
 export type RemoteToolRow = Extract<ConversationRow, { kind: "toolCall" }> & {

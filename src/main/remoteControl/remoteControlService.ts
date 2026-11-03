@@ -14,6 +14,7 @@ import { remoteHistoryPage } from "./historyPage.js";
 import { RemoteEventClients } from "./eventClients.js";
 import { RemoteToolDetails } from "./remoteToolDetails.js";
 import { RemoteReferenceNotFound } from "./signedReference.js";
+import { HTML_RESOURCE_PATH, RemoteHtmlPreview } from "./remoteHtmlPreview.js";
 import { invokeRemoteFile, isRemoteFileChannel } from "./filePreview.js";
 import { compress, isCompressible, negotiateEncoding, type ContentEncoding } from "./httpCompression.js";
 import { NotificationFeed } from "./notificationFeed.js";
@@ -96,11 +97,19 @@ export class RemoteControlService {
   private readonly feed: NotificationFeed;
   private readonly media: RemoteMedia;
   private readonly tools: RemoteToolDetails;
+  private readonly html: RemoteHtmlPreview;
   /** 带哈希构建产物的压缩结果，键为“路径 + 编码”；内容不变，进程内缓存即可。 */
   private readonly compressedAssets = new Map<string, Promise<Buffer>>();
 
   constructor(private readonly deps: RemoteControlDeps) {
-    this.media = new RemoteMedia(source => this.mediaRows(source));
+    this.html = new RemoteHtmlPreview(() => deps.policy.projectPaths(), async (source, rowId, path) => {
+      if ("sessionKey" in source && this.states.get(source.sessionKey)?.projectPath !== source.projectPath) return false;
+      const row = (await this.mediaRows(source)).find(item => item.rowId === rowId);
+      if (row?.kind !== "assistantText") return false;
+      return [...row.text.matchAll(/\]\((?:<([^>]+)>|([^()\n]+))\)/g)].some(match =>
+        (match[1] ?? match[2])?.split(/[?#]/, 1)[0] === path);
+    });
+    this.media = new RemoteMedia(source => this.mediaRows(source), () => deps.policy.projectPaths());
     this.tools = new RemoteToolDetails(source => this.mediaRows(source));
     this.feed = new NotificationFeed(Date.now, deps.sessionTitle, deps.liveRows, deps.onNotification);
     this.tunnel = new ReverseTunnel(deps.env, (tunnel) => this.setStatus({ tunnel }));
@@ -218,6 +227,7 @@ export class RemoteControlService {
   }
 
   private stop() {
+    this.html.clear();
     this.tunnel.stop();
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
@@ -265,6 +275,19 @@ export class RemoteControlService {
       if (sid) this.deps.sessions.revoke(sid);
       res.setHeader("Set-Cookie", `${COOKIE}=; HttpOnly; SameSite=Strict; Path=${cookiePath(req)}; Max-Age=0`);
       return sendJson(res, 200, { ok: true });
+    }
+    if (pathname.startsWith(`/${HTML_RESOURCE_PATH}`)) {
+      if (req.method !== "HEAD" && req.method !== "GET") throw new HttpError(405, "Method not allowed");
+      if (req.headers["service-worker"]) throw new HttpError(403, "预览不能注册 Service Worker");
+      const resource = pathname.slice(HTML_RESOURCE_PATH.length + 1);
+      const primary = sessionCookie(req);
+      const session = primary ?? this.html.assetSession(resource);
+      if (!session || !this.deps.sessions.isValid(session)) throw new HttpError(401, "预览登录已过期");
+      const result = await this.html.read(resource, req.method, session, !primary);
+      res.setHeader("X-Frame-Options", "SAMEORIGIN");
+      res.writeHead(result.status, Object.fromEntries(result.headers));
+      res.end(Buffer.from(await result.arrayBuffer()));
+      return;
     }
     if (!this.authorized(req)) throw new HttpError(401, "需要登录");
     if (pathname.startsWith(`/${REMOTE_MEDIA_PATH}`)) return this.serveMedia(req, res, pathname);
@@ -317,14 +340,17 @@ export class RemoteControlService {
     const channel = typeof body.channel === "string" ? body.channel : "";
     const args = Array.isArray(body.args) ? body.args : [];
     try {
-      await sendCompressedJson(req, res, { ok: true, result: await this.dispatch(channel, args) });
+      await sendCompressedJson(req, res, { ok: true, result: await this.dispatch(channel, args, sessionCookie(req)!) });
     } catch (error) {
       if (error instanceof HttpError) throw error;
       sendJson(res, 200, { ok: false, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
-  private async dispatch(channel: string, args: unknown[]): Promise<unknown> {
+  private async dispatch(channel: string, args: unknown[], session: string): Promise<unknown> {
+    if (channel === "fs:createHtmlPreview") return this.html.create(args, session);
+    if (channel === "fs:releaseHtmlPreview") return this.html.release(args[0], session);
+    if (channel === "preview:imageUrl") return this.media.fileUrl(args[0]);
     if (isRemoteFileChannel(channel)) return invokeRemoteFile(channel, args, this.deps.policy.projectPaths());
     if (channel === "tools:detail") return this.tools.read(args[0] as string);
     if (channel === "sessions:refresh") {
@@ -409,12 +435,24 @@ export class RemoteControlService {
     let image: RemoteImage;
     try { image = await this.media.read(pathname.slice(REMOTE_MEDIA_PATH.length + 1)); }
     catch (error) {
-      if (error instanceof RemoteReferenceNotFound) throw new HttpError(error.status, error.message);
+      if (error instanceof RemoteReferenceNotFound) {
+        res.setHeader("X-HCode-Media-Error", encodeURIComponent(error.message));
+        throw new HttpError(error.status, error.message);
+      }
       throw error;
     }
     const thumbnail = new URL(req.url!, "http://localhost").searchParams.has("thumbnail");
-    if (thumbnail && this.deps.thumbnail) image = this.deps.thumbnail(image);
-    res.writeHead(200, { ...REMOTE_IMAGE_HEADERS, ...(image.cacheControl ? { "Cache-Control": image.cacheControl } : {}), "Content-Type": image.type, "Content-Length": image.body.length });
+    const fileBacked = image.fileBacked;
+    if (thumbnail) {
+      const small = this.deps.thumbnail?.(image);
+      if (fileBacked && (!small || small === image)) {
+        const message = "该格式无法生成缩略图";
+        res.setHeader("X-HCode-Media-Error", encodeURIComponent(message));
+        throw new HttpError(415, message);
+      }
+      image = small ?? image;
+    }
+    res.writeHead(200, { ...REMOTE_IMAGE_HEADERS, ...(fileBacked ? { "Cache-Control": "private, no-cache" } : {}), "Content-Type": image.type, "Content-Length": image.body.length });
     res.end(req.method === "HEAD" ? undefined : image.body);
   }
 

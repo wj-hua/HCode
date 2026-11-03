@@ -24,6 +24,9 @@ import { getPathLeaf } from "@/lib/path.js";
 import { getPlainTextPatchPreviewLines } from "@/lib/patchDiffPreview.js";
 import { ImagePreviewContent, SvgPreviewContent } from "@/previewPaneImageContent.js";
 import { resolveTheme } from "@/useTheme.js";
+import { MarkdownImage } from "@/components/ai-elements/markdown-image.js";
+import { PagedTextPreview } from "./PagedTextPreview";
+import { useFilePreviewResult } from "./useFilePreviewResult";
 import { hcode, isRemote } from "../bridge";
 import { errorMessage } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
@@ -31,13 +34,8 @@ import { useFilePreview } from "./FilePreviewContext";
 import { SidePanel } from "./SidePanel";
 import { HtmlPreviewContent } from "./HtmlPreviewContent";
 
-type FileResult =
-  | { kind: "text"; content: string }
-  | { kind: "image"; url: string }
-  | { kind: "notice"; notice: string };
 type ViewMode = "preview" | "code";
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const isSvgPath = (path?: string) => path?.toLowerCase().endsWith(".svg") ?? false;
 const openExternal = (url: string) => void hcode.invoke("app:openExternal", url);
 const copyText = (text: string) => {
@@ -60,7 +58,6 @@ function buildBreadcrumb(path: string, workspacePath?: string) {
 
 export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource; onClose: () => void }) {
   const preview = useFilePreview();
-  const [result, setResult] = useState<FileResult | null>(null);
   const [revision, setRevision] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [markdownViewMode, setMarkdownViewMode] = useState<ViewMode>("preview");
@@ -94,41 +91,8 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
   // SVG 按文本读取，以便在预览和源码之间切换。
   const imageType = readsFile && !isSvgPath(path) ? inferImageMediaType(path) : null;
 
-  useEffect(() => {
-    setActionError(null);
-    // HTML 页面走隔离资源协议；只有切到源码时才读取文本，源码上限不能阻止页面加载。
-    if (!readsFile || !path || showsHtmlPage) return;
-    let active = true;
-    let imageUrl: string | null = null;
-    setResult(null);
-    const load = async (): Promise<FileResult> => {
-      const info = await hcode.invoke("fs:stat", path);
-      if (!info?.exists) return { kind: "notice", notice: "文件不存在或无法访问，可能已移动或删除。" };
-      if (info.isDirectory) return { kind: "notice", notice: "这是一个文件夹，请在 Finder 中查看。" };
-      if (imageType) {
-        if (info.size > MAX_IMAGE_BYTES) return { kind: "notice", notice: "图片超过 10 MiB 预览上限，请用默认应用打开。" };
-        const bytes = await hcode.invoke("fs:readMedia", path);
-        if (!bytes) return { kind: "notice", notice: "无法读取该图片，请用默认应用打开。" };
-        imageUrl = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: imageType }));
-        return { kind: "image", url: imageUrl };
-      }
-      if (info.size > FILE_VIEWER_MAX_TEXT_BYTES) return { kind: "notice", notice: canToggleHtml
-        ? "HTML 源码超过 256 KiB 高亮上限，请切回「页面」继续预览，或用默认应用查看源码。"
-        : "文件超过 256 KiB 预览上限，请用默认应用打开。" };
-      const content = await hcode.invoke("fs:readText", path, FILE_VIEWER_MAX_TEXT_BYTES);
-      return content === null
-        ? { kind: "notice", notice: "该文件为二进制、非 UTF-8 文本或无法读取，请用默认应用打开。" }
-        : { kind: "text", content };
-    };
-    void load().then(
-      (value) => { if (active) setResult(value); },
-      (error) => { if (active) setResult({ kind: "notice", notice: `读取文件失败：${errorMessage(error)}` }); },
-    );
-    return () => {
-      active = false;
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-    };
-  }, [source, path, readsFile, imageType, revision, showsHtmlPage, canToggleHtml]);
+  const result = useFilePreviewResult(readsFile ? path : undefined, workspacePath, breadcrumb?.relativePath,
+    imageType, showsHtmlPage, canToggleHtml, revision);
 
   const perform = async (channel: "app:showInFinder" | "app:openPath") => {
     if (!path) return;
@@ -155,11 +119,22 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
     if (patch) {
       return <HighlightedLightweightDiffPreview codePreviewSettings={settings} language={inferCodeLanguage(path)} lines={lines} path={path} theme={previewTheme} />;
     }
+    if (result?.kind === "missing") {
+      return <div className="space-y-2 p-4"><p>文件不存在或无法访问。</p>
+        {result.candidates.length > 0 && <p>项目内有路径匹配的文件，请选择：</p>}
+        {result.candidates.map(candidate => <button key={candidate} className="block text-left text-brand underline"
+          onClick={() => preview?.onOpenFileLink({ path: candidate, label: candidate, htmlSuffix: source.type === "file" ? source.htmlSuffix : undefined })}>{candidate}</button>)}
+      </div>;
+    }
+    if (!showsHtmlPage && result?.kind === "paged") return <PagedTextPreview key={revision} path={path!} first={result.page} />;
+    if (result?.kind === "remoteImage") return <div className="space-y-3 p-4">
+      <MarkdownImage src={result.url} alt={source.title} />
+    </div>;
     if (result?.kind === "image") {
       return <ImagePreviewContent title={source.title} imageSource={result.url} sourcePath={path} />;
     }
-    if (showsHtmlPage) {
-      return <HtmlPreviewContent path={path!} workspacePath={workspacePath} revision={revision} title={source.title} />;
+    if (showsHtmlPage && result?.kind === "html") {
+      return <HtmlPreviewContent suffix={source.type === "file" ? source.htmlSuffix : undefined} proof={source.type === "file" ? source.htmlProof : undefined} path={path!} workspacePath={workspacePath} revision={revision} title={source.title} />;
     }
     if (content === undefined) {
       const notice = !readsFile ? "该工具没有可显示的差异。" : result?.kind === "notice" ? result.notice : imageType ? "正在读取图片…" : "正在读取文件…";
@@ -173,6 +148,7 @@ export function FilePreviewPanel({ source, onClose }: { source: CodeViewerSource
             className="min-w-0 break-words"
             theme={theme}
             codePreviewSettings={settings}
+            documentPath={path}
             workspacePath={workspacePath}
             onOpenFileLink={preview?.onOpenFileLink}
             onOpenCodeViewer={preview?.onOpenCodeViewer}

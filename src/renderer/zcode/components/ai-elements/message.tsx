@@ -99,6 +99,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import type { Theme } from "@/useTheme.js";
 import { createZCodeFileCitationRemarkPlugin } from "@/lib/zcodeFileCitationRemarkPlugin.js";
+import { documentLinksRemarkPlugin } from "@/lib/documentLinksRemarkPlugin.js";
 import { createPlainFilePathRemarkPlugin } from "@/lib/plainFilePathRemarkPlugin.js";
 import { windowsFileLinkEscapeRemarkPlugin } from "@/lib/windowsFileLinkEscapeRemarkPlugin.js";
 import { projectZCodeFileCitations } from "@/lib/zcodeFileCitation.js";
@@ -362,6 +363,7 @@ export type MessageResponseProps = {
   streaming?: boolean;
   streamingAnimationKey?: string;
   workspacePath?: string;
+  documentPath?: string;
   workspaceHomePath?: string;
   workspaceIdentity?: string;
   workspaceRemoteSessionId?: string;
@@ -388,6 +390,7 @@ export type MessageResponseProps = {
 };
 
 export interface MessageFileLinkTarget {
+  htmlSuffix?: string;
   path: string;
   label: string;
   /** 仅用于显式尾随斜杠的目录展示提示；打开第三方应用前必须重新 stat。 */
@@ -1309,6 +1312,7 @@ export const messageResponsePropsAreEqual = (
   nextProps.theme === prevProps.theme &&
   nextProps.codePreviewSettings === prevProps.codePreviewSettings &&
   nextProps.onOpenCodeViewer === prevProps.onOpenCodeViewer &&
+  nextProps.documentPath === prevProps.documentPath &&
   nextProps.onOpenFileLink === prevProps.onOpenFileLink &&
   nextProps.onOpenExternalUrl === prevProps.onOpenExternalUrl;
 
@@ -1320,6 +1324,7 @@ export const MessageResponse = memo(
     onOpenCodeViewer,
     onOpenFileLink,
     onOpenExternalUrl,
+    documentPath,
     renderZCodeFileCitations = false,
     workspacePath,
     workspaceHomePath,
@@ -1363,8 +1368,9 @@ export const MessageResponse = memo(
           ? [createZCodeFileCitationRemarkPlugin(workspacePath, workspaceHomePath)]
           : []),
         ...(workspacePath ? [createPlainFilePathRemarkPlugin(workspacePath, workspaceHomePath)] : []),
+        ...(documentPath && workspacePath ? [documentLinksRemarkPlugin(documentPath, workspacePath)] : []),
       ],
-      [renderZCodeFileCitations, workspaceHomePath, workspacePath],
+      [documentPath, renderZCodeFileCitations, workspaceHomePath, workspacePath],
     );
     const responseClassName = cn(
       "size-full text-ui-base leading-[1.75] tracking-wide [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -1436,7 +1442,8 @@ export const MessageResponse = memo(
         }: ComponentProps<"a"> & { node?: unknown }) => {
           const resolvedHref =
             typeof href === "string" ? stripBalancedAssistantPathQuotes(href) : "";
-          const fileLink = resolveMarkdownFileLink(workspacePath, resolvedHref, {
+          const htmlLink = /^(.*?\.html?)([?#].*)$/i.exec(resolvedHref);
+          const fileLink = resolveMarkdownFileLink(workspacePath, htmlLink?.[1] ?? resolvedHref, {
             homePath: workspaceHomePath,
           });
 
@@ -1463,12 +1470,13 @@ export const MessageResponse = memo(
                 fileLink={fileLinkTarget}
                 onOpen={() => {
                   if (onOpenFileLink) {
-                    onOpenFileLink(fileLinkTarget);
+                    onOpenFileLink({ ...fileLinkTarget, htmlSuffix: htmlLink?.[2] });
                     return;
                   }
                   onOpenCodeViewer?.({
                     type: "file",
                     title: getPathLeaf(fileLink.path),
+                    htmlSuffix: htmlLink?.[2],
                     path: fileLink.path,
                     workspacePath,
                     workspaceIdentity,

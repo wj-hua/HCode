@@ -83,3 +83,21 @@ it("图片读取限制为普通文件和 10 MiB，边界内返回完整字节", 
   expect(await invokeRemoteFile("fs:readMedia", [path], [project])).toBeNull();
   expect(await invokeRemoteFile("fs:readMedia", [project], [project])).toBeNull();
 });
+
+it("逐页读取 UTF-8，跨页字符只出现一次，修改文件后旧游标失效", async () => {
+  const path = join(project, "长文.txt");
+  const content = "x".repeat(64 * 1024 - 1) + "测🙂试";
+  await writeFile(path, content);
+  type Page = import("../../../shared/remoteControl.js").RemoteTextPage;
+  const read = async (offset: number, version?: string) => await invokeRemoteFile("preview:textPage", [path, offset, version], [project]) as Page;
+  const first = await read(0);
+  expect(first.next).toBe(Buffer.byteLength(first.text));
+  const last = await read(first.next!, first.version);
+  expect(first.text + last.text).toBe(content);
+  expect(last.next).toBeNull();
+  await writeFile(path, content + "后续");
+  await expect(read(first.next!, first.version)).rejects.toThrow("文件已变化");
+  await expect(read(-1)).rejects.toThrow("无效的文本位置");
+  await writeFile(path, Buffer.from([65, 0, 66]));
+  await expect(read(0)).rejects.toThrow("二进制");
+});

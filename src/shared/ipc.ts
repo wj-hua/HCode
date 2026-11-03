@@ -161,7 +161,7 @@ export interface InvokeMap {
   "git:createBranch": [[cwd: string, name: string], void];
   /** 有界 UTF-8 文本读取（最多 2 MiB）；二进制、超限或读取失败返回 null。 */
   "fs:readText": [[path: string, maxBytes?: number], string | null];
-  "fs:createHtmlPreview": [[path: string, workspacePath?: string], import("./htmlPreview.js").HtmlPreviewLease];
+  "fs:createHtmlPreview": [[path: string, workspacePath?: string, proof?: import("./htmlPreview.js").HtmlPreviewProof], import("./htmlPreview.js").HtmlPreviewLease];
   "fs:releaseHtmlPreview": [[id: string], void];
   "fs:stat": [[path: string], { exists: boolean; isDirectory: boolean; size: number } | null];
   "fs:listProjectFiles": [[cwd: string, query: string], string[]];
