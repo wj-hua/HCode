@@ -135,26 +135,30 @@ function InlineCodeContent({
 function InlineImageContent({ preview }: { preview: ImageCodeViewerSource }) {
   const { fileService } = useServices();
   const { intl } = useZCodeIntl();
+  const [error, setError] = useState("");
   const [imagePreview, setImagePreview] = useState<FileMediaPreview | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setError("");
+    setImagePreview(null);
     void fileService.readMediaPreview({ path: preview.path }).then((mediaPreview) => {
       if (!cancelled) {
         setImagePreview(mediaPreview);
       }
-    });
+    }, (reason: unknown) => { if (!cancelled) setError(String(reason)); });
 
     return () => {
       cancelled = true;
     };
   }, [fileService, preview.path]);
 
+  if (error) return <p role="alert">{error}</p>;
   if (!imagePreview) {
     return <p>{intl.formatMessage({ id: "chat.toolCall.loading" })}</p>;
   }
 
-  return <img src={imagePreview.dataBase64} alt={preview.title} />;
+  return <img src={`data:${imagePreview.mediaType};base64,${imagePreview.dataBase64}`} alt={preview.title} />;
 }
 
 function InlinePlanResult({

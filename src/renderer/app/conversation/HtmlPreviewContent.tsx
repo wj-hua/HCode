@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import type { HtmlPreviewLease } from "@hcode/shared/htmlPreview";
 import { hcode } from "../bridge";
 
-export function HtmlPreviewContent({ path, workspacePath, revision, title }: {
-  path: string; workspacePath?: string; revision: number; title: string;
+export function HtmlPreviewContent({ path, workspacePath, revision, title, proof, suffix = "" }: {
+  path: string; workspacePath?: string; revision: number; title: string; suffix?: string; proof?: import("@hcode/shared/htmlPreview").HtmlPreviewProof;
 }) {
   const [lease, setLease] = useState<HtmlPreviewLease | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +18,7 @@ export function HtmlPreviewContent({ path, workspacePath, revision, title }: {
     setError(null);
     const load = async () => {
       try {
-        const result = await hcode.invoke("fs:createHtmlPreview", path, workspacePath);
+        const result = await hcode.invoke("fs:createHtmlPreview", path, workspacePath, proof);
         if (!active) { release(result.id); return; }
         current = result;
         setLease(result);
@@ -28,8 +28,8 @@ export function HtmlPreviewContent({ path, workspacePath, revision, title }: {
     };
     void load();
     return () => { active = false; if (current) release(current.id); };
-  }, [path, workspacePath, revision]);
+  }, [path, workspacePath, revision, proof]);
   if (error) return <p role="alert" className="p-4 text-ui-sm text-destructive">页面预览失败：{error}</p>;
   if (!lease) return <p role="status" className="p-4 text-ui-sm text-foreground-subtle">正在加载页面…</p>;
-  return <iframe title={`${title} 页面预览`} src={lease.url} sandbox="allow-scripts" referrerPolicy="no-referrer" className="block h-full w-full border-0 bg-white" />;
+  return <iframe title={`${title} 页面预览`} src={lease.url + suffix} sandbox="allow-scripts" referrerPolicy="no-referrer" className="block h-full w-full border-0 bg-white" />;
 }

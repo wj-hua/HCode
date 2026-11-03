@@ -352,7 +352,7 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
         theme={theme}
         codePreviewSettings={codePreviewSettings}
         onOpenExternalUrl={openExternal}
-        onOpenFileLink={preview?.onOpenFileLink}
+        onOpenFileLink={preview ? target => preview.onOpenFileLink(target, row.rowId) : undefined}
         onOpenCodeViewer={preview?.onOpenCodeViewer}
         workspacePath={preview?.workspacePath}
       >

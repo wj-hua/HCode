@@ -3,12 +3,13 @@ import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js"
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { resolveMarkdownFileLink } from "@/lib/markdownFileLink.js";
 import { getPathLeaf, joinFilePath } from "@/lib/path.js";
+import { useAppStore } from "../store/appStore";
 import { useUiStore } from "../store/uiStore";
 
 interface FilePreviewActions {
   workspacePath: string;
   onOpenCodeViewer(source: CodeViewerSource): void;
-  onOpenFileLink(target: MessageFileLinkTarget): void;
+  onOpenFileLink(target: MessageFileLinkTarget, rowId?: number): void;
   onOpenFilePath(path: string): void;
 }
 
@@ -29,8 +30,12 @@ export function FilePreviewProvider({ viewId, workspacePath, children }: {
         source: { ...source, ...(source.path ? { path: joinFilePath(workspacePath, source.path) } : {}), workspacePath },
       });
     };
-    const onOpenFileLink = (target: MessageFileLinkTarget) => {
-      onOpenCodeViewer({ type: "file", title: getPathLeaf(target.path), path: target.path });
+    const onOpenFileLink = (target: MessageFileLinkTarget, rowId?: number) => {
+      const conv = useAppStore.getState().conversations[viewId];
+      const source = conv?.sessionKey ? { sessionKey: conv.sessionKey, projectPath: workspacePath }
+        : conv?.sessionId ? { ref: { agent: conv.agent, projectPath: workspacePath, id: conv.sessionId } } : undefined;
+      const htmlProof = source && rowId !== undefined ? { source, rowId } : undefined;
+      onOpenCodeViewer({ type: "file", title: getPathLeaf(target.path), path: target.path, htmlSuffix: target.htmlSuffix, htmlProof });
     };
     return {
       workspacePath,

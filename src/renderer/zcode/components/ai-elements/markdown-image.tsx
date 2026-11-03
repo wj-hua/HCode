@@ -21,6 +21,8 @@ import { useOptionalServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { isImagePreviewPath } from "@/lib/codeViewer.js";
 import { resolveMarkdownFileLink } from "@/lib/markdownFileLink.js";
+import { remoteBridge } from "@app/bridge";
+import { REMOTE_MEDIA_PATH } from "@hcode/shared/remoteControl";
 import { logger } from "@/logger.js";
 
 export { clampImagePreviewOffset as clampMarkdownImagePreviewOffset } from "@/components/ai-elements/image-preview-dialog.js";
@@ -135,7 +137,7 @@ function readPreviewGroup(target: HTMLButtonElement): ImagePreviewDialogItem[] {
     : [target];
   return buttons.flatMap((button) => {
     const image = button.querySelector<HTMLImageElement>("img[data-markdown-image]");
-    return image?.src ? [{ alt: image.alt, filename: image.alt, src: image.src }] : [];
+    return image?.src ? [{ alt: image.alt, filename: image.alt, src: image.dataset.originalSrc ?? image.src }] : [];
   });
 }
 
@@ -155,6 +157,8 @@ export function MarkdownImage({
   const { intl } = useZCodeIntl();
   const services = useOptionalServices();
   const resolvedSrc = typeof src === "string" ? src : "";
+  // Markdown 安全处理可能在相对地址前加斜杠，代理子路径仍相对于 HCode 入口。
+  const mediaRef = resolvedSrc.replace(/^\//, "");
   const artifactRef = useMemo(() => decodeMarkdownArtifactImageSource(resolvedSrc), [resolvedSrc]);
   const localImageLink = useMemo(() => {
     const fileLink = resolveMarkdownFileLink(workspacePath, resolvedSrc, {
@@ -164,7 +168,9 @@ export function MarkdownImage({
   }, [resolvedSrc, workspaceHomePath, workspacePath]);
   const [retryVersion, setRetryVersion] = useState(0);
   const [localImageDataUrl, setLocalImageDataUrl] = useState<string | null>(null);
-  const [localImageFailed, setLocalImageFailed] = useState(false);
+  const remoteOriginal = remoteBridge && mediaRef.startsWith(REMOTE_MEDIA_PATH) ? mediaRef
+    : localImageDataUrl?.startsWith(REMOTE_MEDIA_PATH) ? localImageDataUrl : undefined;
+  const [localImageError, setLocalImageError] = useState("");
   const [artifactImageUrl, setArtifactImageUrl] = useState<string | null>(null);
   const [artifactImageFailed, setArtifactImageFailed] = useState(false);
   const [previewItems, setPreviewItems] = useState<ImagePreviewDialogItem[]>([]);
@@ -179,19 +185,19 @@ export function MarkdownImage({
 
   useEffect(() => {
     setLocalImageDataUrl(null);
-    setLocalImageFailed(false);
+    setLocalImageError("");
     if (!localImageLink) return;
-    if (!services) { setLocalImageFailed(true); return; }
+    if (!services) { setLocalImageError("无法连接文件服务"); return; }
 
     let disposed = false;
-    services.fileService
-      .readMediaPreview({ path: localImageLink.path })
-      .then((preview) => {
-        if (!disposed) setLocalImageDataUrl(formatMediaPreviewDataUrl(preview));
+    const load = remoteBridge ? remoteBridge.imageUrl(localImageLink.path)
+      : services.fileService.readMediaPreview({ path: localImageLink.path }).then(formatMediaPreviewDataUrl);
+    load.then((url: string) => {
+        if (!disposed) setLocalImageDataUrl(url);
       })
       .catch((error) => {
         if (disposed) return;
-        setLocalImageFailed(true);
+        setLocalImageError(error instanceof Error ? error.message : String(error));
         logger.warn("[MarkdownImage] markdown 本地图片预览失败", {
           path: localImageLink.path,
           error: error instanceof Error ? error.message : String(error),
@@ -254,10 +260,28 @@ export function MarkdownImage({
     ? artifactImageUrl
     : localImageLink
       ? localImageDataUrl
-      : resolvedSrc;
+      : remoteOriginal ?? resolvedSrc;
+  const failedRemote = browserImageState.status === "error" && browserImageState.source === displaySrc ? remoteOriginal : undefined;
+  const [httpError, setHttpError] = useState("");
+  const [originalAvailable, setOriginalAvailable] = useState(false);
+  const [explicitOriginal, setExplicitOriginal] = useState<string>();
+  useEffect(() => {
+    setHttpError("");
+    setOriginalAvailable(false);
+    if (!failedRemote || failedRemote === explicitOriginal) return;
+    const controller = new AbortController();
+    void fetch(failedRemote + "?thumbnail=1", { method: "HEAD", signal: controller.signal }).then(response => {
+      if (controller.signal.aborted) return;
+      setOriginalAvailable(response.status === 415);
+      const reason = response.headers.get("X-HCode-Media-Error");
+      if (!controller.signal.aborted) setHttpError(reason ? decodeURIComponent(reason) :
+        response.status === 401 ? "登录已过期，请重新连接" : "无法加载图片，请重试");
+    }, () => { if (!controller.signal.aborted) setHttpError("网络连接失败，请重试"); });
+    return () => controller.abort();
+  }, [failedRemote, explicitOriginal]);
   if (!resolvedSrc) return null;
   if ((artifactRef || localImageLink) && !displaySrc) {
-    const failed = artifactRef ? artifactImageFailed : localImageFailed;
+    const failed = artifactRef ? artifactImageFailed : Boolean(localImageError);
     return (
       <div
         aria-label={failed ? intl.formatMessage({ id: "codeViewer.imageUnavailable" }) : undefined}
@@ -270,7 +294,7 @@ export function MarkdownImage({
         title={localImageLink?.path}
       >
         {failed ? (
-          <div className="flex flex-col items-center gap-2"><ImageOffIcon aria-hidden="true" className="size-6" /><span role="status">{intl.formatMessage({ id: "codeViewer.imageUnavailable" })}</span><button type="button" className="min-h-11 rounded-md border border-border px-3 focus-visible:outline focus-visible:outline-2" onClick={() => { setRetryVersion(version => version + 1); setBrowserImageState({ source: displaySrc ?? "", status: "loading" }); }}>{intl.formatMessage({ id: "common.retry" })}</button></div>
+          <div className="flex flex-col items-center gap-2"><ImageOffIcon aria-hidden="true" className="size-6" /><span role="status">{localImageError || intl.formatMessage({ id: "codeViewer.imageUnavailable" })}</span><button type="button" className="min-h-11 rounded-md border border-border px-3 focus-visible:outline focus-visible:outline-2" onClick={() => { setRetryVersion(version => version + 1); setBrowserImageState({ source: displaySrc ?? "", status: "loading" }); }}>{intl.formatMessage({ id: "common.retry" })}</button></div>
         ) : (
           intl.formatMessage({ id: "common.loading" })
         )}
@@ -290,7 +314,11 @@ export function MarkdownImage({
         data-markdown-image-state="error"
         title={localImageLink?.path}
       >
-        <div className="flex flex-col items-center gap-2"><ImageOffIcon aria-hidden="true" className="size-6" /><span role="status">{intl.formatMessage({ id: "codeViewer.imageUnavailable" })}</span><button type="button" className="min-h-11 rounded-md border border-border px-3 focus-visible:outline focus-visible:outline-2" onClick={() => { setRetryVersion(version => version + 1); setBrowserImageState({ source: displaySrc ?? "", status: "loading" }); }}>{intl.formatMessage({ id: "common.retry" })}</button></div>
+        <div className="flex flex-col items-center gap-2"><ImageOffIcon aria-hidden="true" className="size-6" /><span role="status">{httpError || intl.formatMessage({ id: "codeViewer.imageUnavailable" })}</span>
+        {originalAvailable && remoteOriginal && <button type="button" onClick={() => {
+          setExplicitOriginal(remoteOriginal);
+          setBrowserImageState({ source: displaySrc ?? "", status: "loading" });
+        }}>查看原图</button>}<button type="button" className="min-h-11 rounded-md border border-border px-3 focus-visible:outline focus-visible:outline-2" onClick={() => { setRetryVersion(version => version + 1); setBrowserImageState({ source: displaySrc ?? "", status: "loading" }); }}>{intl.formatMessage({ id: "common.retry" })}</button></div>
       </div>
     );
   }
@@ -301,7 +329,7 @@ export function MarkdownImage({
     setPreviewIndex(
       Math.max(
         0,
-        items.findIndex((item) => item.src === displaySrc),
+        items.findIndex((item) => item.src === (remoteOriginal ? new URL(remoteOriginal, document.baseURI).href : displaySrc)),
       ),
     );
     setPreviewOpen(true);
@@ -377,7 +405,8 @@ export function MarkdownImage({
             setBrowserImageState({ source: displaySrc ?? "", status: "loaded" });
             onLoad?.(event);
           }}
-          src={displaySrc ?? undefined}
+          data-original-src={remoteOriginal ? new URL(remoteOriginal, document.baseURI).href : undefined}
+          src={remoteOriginal && explicitOriginal !== remoteOriginal ? remoteOriginal + "?thumbnail=1" : displaySrc ?? undefined}
           {...props}
         />
       </button>

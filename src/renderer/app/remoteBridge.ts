@@ -102,6 +102,8 @@ export function createRemoteBridge(): HCodeBridge & {
   loadEarlier(ref: SessionRef, beforeRowId: number): Promise<SessionLoadResult>;
   setViewedSessions(keys: string[]): void;
   stageAttachment: typeof stageAttachment;
+  readTextPage(path: string, offset: number, version?: string): Promise<import("@hcode/shared/remoteControl").RemoteTextPage>;
+  imageUrl(path: string): Promise<string>;
   loadToolDetails(ref: string, signal?: AbortSignal): Promise<import("@hcode/shared/types").ConversationRow & { kind: "toolCall" }>;
   refreshSession(sessionKey: string): Promise<void>;
   refreshHistory(ref: SessionRef, firstRowId?: number): Promise<SessionLoadResult>;
@@ -349,6 +351,12 @@ export function createRemoteBridge(): HCodeBridge & {
     async loadEarlier(ref, beforeRowId) {
       return await call("sessions:page", [ref, beforeRowId]) as SessionLoadResult;
     },
+    async readTextPage(path, offset, version) {
+      const page = await call("preview:textPage", [path, offset, version]);
+      if (!page) throw new Error("文件已不存在，请刷新预览");
+      return page as import("@hcode/shared/remoteControl").RemoteTextPage;
+    },
+    async imageUrl(path) { return await call("preview:imageUrl", [path]) as string; },
     async loadToolDetails(ref, signal) { return await call("tools:detail", [ref], signal) as import("@hcode/shared/types").ConversationRow & { kind: "toolCall" }; },
     async refreshSession(sessionKey) {
       const state = latestStates.get(sessionKey);

@@ -248,3 +248,49 @@ it("手动刷新保留已加载范围，运行中工具和完整导出仍包含�
   expect((await invoke("sessions:load", [ref])).result.rows).toEqual(liveRows);
   expect((await invoke("sessions:refresh", [ref, -1])).ok).toBe(false);
 });
+
+it("手机 HTML 页面保留相对资源，登录隔离、撤销和项目移除即时生效", async () => {
+  projectPaths = [staticDir];
+  const path = join(staticDir, "白色.html");
+  await writeFile(path, '<script src="prototype.js"></script>');
+  await writeFile(join(staticDir, "prototype.js"), "window.loaded = true");
+  const cookie = await login();
+  const invoke = async (channel: string, args: unknown[]) =>
+    JSON.parse((await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie }, JSON.stringify({ channel, args }))).body.toString());
+  const { result: lease } = await invoke("fs:createHtmlPreview", [path, staticDir]);
+  const page = "/" + lease.url;
+  expect((await raw("GET", page, {})).status).toBe(401);
+  expect((await raw("GET", page, { Cookie: await login() })).status).toBe(404);
+  const response = await raw("GET", page + "?appearance=white", { Cookie: cookie });
+  expect(response.status).toBe(200);
+  expect(response.headers["content-security-policy"]).toContain("sandbox allow-scripts");
+  expect(response.headers["content-security-policy"]).not.toContain("allow-same-origin");
+  const script = page.slice(0, page.lastIndexOf("/") + 1) + "prototype.js";
+  expect((await raw("GET", script, { Cookie: cookie })).body.toString()).toBe("window.loaded = true");
+  // opaque iframe 的静态请求可能没有 Cookie，只能凭当前页面已声明的资源地址读取。
+  expect((await raw("GET", script, {})).body.toString()).toBe("window.loaded = true");
+  expect((await raw("GET", script.replace("prototype.js", "private.js"), {})).status).toBe(401);
+  expect((await raw("GET", page, {})).status).toBe(401);
+  expect((await raw("GET", script, { Cookie: cookie, "Service-Worker": "script" })).status).toBe(403);
+  projectPaths = [];
+  expect((await raw("GET", page, { Cookie: cookie })).status).toBe(404);
+  projectPaths = [staticDir];
+  await invoke("fs:releaseHtmlPreview", [lease.id]);
+  expect((await raw("GET", script, { Cookie: cookie })).status).toBe(404);
+  expect((await raw("GET", script, {})).status).toBe(401);
+});
+
+it("文件面板和文档图片先取缩略图，打开原图才返回原始字节", async () => {
+  const file = join(staticDir, "design.png");
+  const original = Buffer.from("original-bytes");
+  await writeFile(file, original);
+  const cookie = await login();
+  const result = await raw("POST", "/api/invoke", { ...HEADERS, Cookie: cookie },
+    JSON.stringify({ channel: "preview:imageUrl", args: [file] }));
+  const path = "/" + JSON.parse(result.body.toString()).result;
+  expect((await raw("GET", path, {})).status).toBe(401);
+  expect((await raw("GET", path + "?thumbnail=1", { Cookie: cookie })).body.toString()).toBe("small-preview");
+  expect((await raw("GET", path, { Cookie: cookie })).body).toEqual(original);
+  await rm(file);
+  expect((await raw("GET", path, { Cookie: cookie })).status).toBe(404);
+});

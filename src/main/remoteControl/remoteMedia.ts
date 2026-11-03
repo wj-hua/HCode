@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import type { ConversationRow } from "../../shared/types.js";
 import { REMOTE_MEDIA_PATH, type RemoteRowSource } from "../../shared/remoteControl.js";
 import { RemoteReferenceNotFound, SignedReference } from "./signedReference.js";
-import { mapMarkdownImages, readMarkdownImage } from "./markdownImages.js";
+import { extname } from "node:path";
+import { allowedFile, readFileImageBytes } from "./filePreview.js";
+import { IMAGE_TYPES, mapMarkdownImages, readMarkdownImage } from "./markdownImages.js";
 
 export type RemoteMediaSource = RemoteRowSource;
-export interface RemoteImage { body: Buffer; type: string; cacheControl?: string }
+export interface RemoteImage { body: Buffer; type: string; fileBacked?: boolean }
 type ImageReference = { source: RemoteMediaSource; rowId: number } & ({ index: number; digest: string } | { markdown: string });
 const INLINE_IMAGE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)$/;
 const IMAGE_CACHE = "private, max-age=31536000, immutable";
@@ -18,7 +20,8 @@ export class RemoteMediaNotFound extends RemoteReferenceNotFound {
 export class RemoteMedia {
   private readonly references = new SignedReference();
 
-  constructor(private readonly readRows: (source: RemoteMediaSource) => Promise<readonly ConversationRow[]>) {}
+  constructor(private readonly readRows: (source: RemoteMediaSource) => Promise<readonly ConversationRow[]>,
+    private readonly projects: () => string[]) {}
 
   /** 只改远程响应的附件地址，主进程和桌面窗口继续使用原始图片。 */
   mapRows(rows: readonly ConversationRow[], source: RemoteMediaSource): ConversationRow[] {
@@ -34,9 +37,25 @@ export class RemoteMedia {
     }) };
   }
 
+  /** 文档内嵌图片和文件面板使用同一认证地址，发地址和取字节时分别校验目录。 */
+  async fileUrl(path: unknown) {
+    const file = await allowedFile(path, this.projects());
+    if (!file || !IMAGE_TYPES[extname(file).toLowerCase()]) throw new RemoteReferenceNotFound("图片不存在或格式不支持");
+    return REMOTE_MEDIA_PATH + this.references.encode({ file });
+  }
+
   /** 签名仅定位图片，不能代替 HTTP 登录；摘要防止旧地址命中新历史中的另一张附件。 */
   async read(token: string): Promise<RemoteImage> {
-    const reference = this.references.decode<ImageReference>(token);
+    const reference = this.references.decode<ImageReference | { file: string }>(token);
+    if ("file" in reference) {
+      const file = await allowedFile(reference.file, this.projects());
+      if (!file) throw new RemoteMediaNotFound();
+      const type = IMAGE_TYPES[extname(file).toLowerCase()];
+      if (!type) throw new RemoteReferenceNotFound("不支持的图片类型");
+      const body = await readFileImageBytes(file);
+      if (!body) throw new RemoteReferenceNotFound("无法读取图片或文件超过 10 MiB");
+      return { body, type, fileBacked: true };
+    }
     const rows = await this.readRows(reference.source);
     const row = rows.find(candidate => candidate.rowId === reference.rowId);
     if ("markdown" in reference) {
