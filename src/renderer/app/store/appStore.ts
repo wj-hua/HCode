@@ -344,6 +344,10 @@ export const useAppStore = create<AppState>((set, get) => {
   ): Promise<boolean> => {
     const conv = get().conversations[viewId];
     if (!conv || (!text.trim() && images.length === 0 && files.length === 0)) return false;
+    if (!conv.projectPath) {
+      toast("请先选择项目或重试打开对话目录", { variant: "warning" });
+      return false;
+    }
     const sessionKey = conv.sessionKey ?? crypto.randomUUID();
     const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
     const models = get().models[conv.agent] ?? AGENTS[conv.agent].models;
@@ -648,6 +652,7 @@ export const useAppStore = create<AppState>((set, get) => {
         await selectConversationWorkspace(get, newDraft);
       } catch (error) {
         toast(`打开对话工作目录失败：${errorMessage(error)}`, { variant: "warning" });
+        if (!get().activeViewId) get().newChat("");
       } finally {
         set({ conversationWorkspacePending: false });
       }

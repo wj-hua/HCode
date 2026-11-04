@@ -52,7 +52,7 @@ function FolderPicker({ conversation }: { conversation: Conversation }) {
   const pending = useAppStore((state) => state.conversationWorkspacePending);
   const outsideProject = projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation");
   const [query, setQuery] = useState("");
-  const name = outsideProject ? "选择项目" : conversation.projectPath.split("/").filter(Boolean).at(-1) ?? conversation.projectPath;
+  const name = outsideProject || !conversation.projectPath ? "选择项目" : conversation.projectPath.split("/").filter(Boolean).at(-1) ?? conversation.projectPath;
   const visible = projects.filter((project) => project.purpose !== "conversation" && project.exists && matches(query, project.name, project.path));
 
   return (
@@ -275,7 +275,7 @@ export function DraftContextBar({ conversation, className = "mt-1.5" }: { conver
   return (
     <div className={cn("flex min-w-0 items-center gap-1", className)}>
       <FolderPicker conversation={conversation} />
-      {!outsideProject ? <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} /> : null}
+      {!outsideProject && conversation.projectPath ? <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} /> : null}
     </div>
   );
 }

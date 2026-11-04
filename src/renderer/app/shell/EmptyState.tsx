@@ -3,9 +3,11 @@ import { Button } from "@/components/ui/button.js";
 import { formatRelativeTime, shortenHome } from "../format";
 import { useAppStore } from "../store/appStore";
 import { isRemote } from "../bridge";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function EmptyState() {
+  const [opening, setOpening] = useState(true);
+  const started = useRef(false);
   const projects = useAppStore((state) => state.projects);
   const newChat = useAppStore((state) => state.newChat);
   const toggleProject = useAppStore((state) => state.toggleProject);
@@ -18,8 +20,12 @@ export function EmptyState() {
   const recent = projects.filter((project) => project.exists && project.purpose !== "conversation").slice(0, 6);
 
   useEffect(() => {
-    void workOutsideProject(true);
+    if (started.current) return;
+    started.current = true;
+    void workOutsideProject(true).finally(() => setOpening(false));
   }, [workOutsideProject]);
+
+  if (opening || pending) return <div className="min-h-0 flex-1" />;
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-8">

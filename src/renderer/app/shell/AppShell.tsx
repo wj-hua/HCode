@@ -66,7 +66,7 @@ export function AppShell() {
     setSideTerminalProjects(current => current.filter(path => openWorkspacePaths.includes(path)));
   }, [openWorkspacePaths]);
   useEffect(() => {
-    if (!terminalVisible || !conversation) return;
+    if (!terminalVisible || !conversation?.projectPath) return;
     setTerminalProjects(projects => projects.includes(conversation.projectPath) ? projects : [...projects, conversation.projectPath]);
   }, [terminalVisible, conversation?.projectPath]);
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
@@ -77,7 +77,8 @@ export function AppShell() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const openQuickSwitch = useCallback(() => setQuickSwitchOpen(true), []);
   const toggleTerminal = useCallback(() => {
-    if (isRemote || !useAppStore.getState().activeViewId) return;
+    const state = useAppStore.getState();
+    if (isRemote || !state.activeViewId || !state.conversations[state.activeViewId]?.projectPath) return;
     setTerminalVisible(value => !value);
   }, []);
   const terminalEmpty = useCallback((path: string) => {
@@ -87,7 +88,7 @@ export function AppShell() {
   }, []);
   const sideTerminalVisible = sidePanel?.type === "terminal" && sidePanel.workspacePath === conversation?.projectPath;
   const toggleSideTerminal = () => {
-    if (!conversation) return;
+    if (!conversation?.projectPath) return;
     if (sideTerminalVisible) { setSidePanel(null); return; }
     setSideTerminalProjects(current => current.includes(conversation.projectPath) ? current : [...current, conversation.projectPath]);
     setSidePanel({ type: "terminal", viewId: conversation.viewId, workspacePath: conversation.projectPath });

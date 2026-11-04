@@ -191,10 +191,10 @@ export function Composer({
   );
   const mention = fileMentionAt(text, caret);
   const mentionKey = mention ? `${conversation.projectPath}\0${mention.start}\0${mention.query}` : "";
-  const showFileResults = Boolean(mention && mentionKey !== dismissedMention);
+  const showFileResults = Boolean(conversation.projectPath && mention && mentionKey !== dismissedMention);
   const slashMatch = caret === text.length ? /^\/([^\s]*)$/.exec(text) : null;
   const slashContext = `${conversation.agent}\0${conversation.projectPath}\0${conversation.sessionKey ?? ""}\0${conversation.sessionId ?? ""}`;
-  const showSlashResults = Boolean(slashMatch && text !== dismissedSlash && !showFileResults);
+  const showSlashResults = Boolean(conversation.projectPath && slashMatch && text !== dismissedSlash && !showFileResults);
   const matchingCommands = slashResults.key === slashContext
     ? slashResults.commands.filter((command) => {
         const query = slashMatch?.[1]?.toLowerCase() ?? "";
@@ -524,7 +524,7 @@ export function Composer({
   return (
     <>
     {!conversation.compareId && !isRemote ? <CollaborationPanel conversation={conversation} currentInput={text} workMode={workMode} attachmentBlocked={attachmentBlocked} onStarted={input => { setText(current => current === input ? "" : current); onSubmitted(); }} /> : null}
-    {submission.reason ? <p role="status" className="mb-2 text-ui-sm text-foreground-subtle">{submission.reason}</p> : workMode !== "chat" ? <p className="mb-2 text-ui-sm text-foreground-subtle">{WORK_MODES[workMode].description}</p> : null}
+    {!conversation.projectPath ? <p role="status" className="mb-2 text-ui-sm text-foreground-subtle">请先选择项目，或在项目菜单中重试“不在项目中工作”。</p> : submission.reason ? <p role="status" className="mb-2 text-ui-sm text-foreground-subtle">{submission.reason}</p> : workMode !== "chat" ? <p className="mb-2 text-ui-sm text-foreground-subtle">{WORK_MODES[workMode].description}</p> : null}
     {activeInTerminal ? (
       <div className="mb-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-ui-sm text-foreground-subtle">
         这个会话正在某个终端的 claude 中运行。在这里继续发送会与终端同时写入同一会话，建议先在终端里退出。

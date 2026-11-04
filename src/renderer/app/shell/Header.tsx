@@ -76,7 +76,7 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
       ) : (
         <div className="flex-1" />
       )}
-      {conversation && !isRemote ? (
+      {conversation?.projectPath && !isRemote ? (
         <div className="app-no-drag flex shrink-0 items-center gap-0.5">
           {!isOfficeMode ? <ControlHintTooltip title={terminalVisible ? "收起内置终端" : "打开内置终端"} side="bottom"><Button variant="ghost" size="icon-md" className="text-foreground-subtle" aria-label={terminalVisible ? "收起内置终端" : "打开内置终端"} aria-pressed={terminalVisible} onClick={onToggleTerminal}><SquareTerminalIcon /></Button></ControlHintTooltip> : null}
           {!isOfficeMode ? <ControlHintTooltip title={sideTerminalVisible ? "收起侧边终端" : "打开侧边终端"} side="bottom"><Button variant="ghost" size="icon-md" className="text-foreground-subtle" aria-label={sideTerminalVisible ? "收起侧边终端面板" : "打开侧边终端"} aria-pressed={sideTerminalVisible} onClick={onToggleSideTerminal}><PanelRightIcon /></Button></ControlHintTooltip> : null}

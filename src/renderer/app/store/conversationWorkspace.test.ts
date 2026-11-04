@@ -75,6 +75,20 @@ describe("不在项目中工作", () => {
     expect(useAppStore.getState().conversationWorkspacePending).toBe(false);
   });
 
+  it("没有活动会话且目录创建失败时保留可恢复的新会话草稿", async () => {
+    invoke.mockRejectedValueOnce(new Error("permission denied"));
+    await useAppStore.getState().workOutsideProject(true);
+    const id = useAppStore.getState().activeViewId!;
+    expect(useAppStore.getState().conversations[id]?.projectPath).toBe("");
+    drafts.set(id, "保留输入");
+    expect(await useAppStore.getState().send("保留输入")).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith("chat:send", expect.anything());
+    await useAppStore.getState().workOutsideProject();
+    expect(useAppStore.getState().activeViewId).toBe(id);
+    expect(useAppStore.getState().conversations[id]?.projectPath).toBe(WORKSPACE);
+    expect(drafts.get(id)).toBe("保留输入");
+  });
+
   it("异步目录创建期间切换了会话时，不改写新选中的会话", async () => {
     let resolveWorkspace!: (path: string) => void;
     invoke.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveWorkspace = resolve; }));
