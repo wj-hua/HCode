@@ -8,7 +8,7 @@ import { ExpertConversationResult } from "../collaboration/ExpertConversationRes
 import { presentationContent } from "@hcode/shared/collaborationPresentation";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
 import { AlertCircleIcon, CopyIcon, GitBranchIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type {
   AssistantTextRow,
   ConversationRow,
@@ -336,6 +336,13 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
   const theme = useUiStore((state) => state.theme);
   const codePreviewSettings = useUiStore((state) => state.codePreviewSettings);
   const isOfficeMode = useIsOfficeMode();
+  // 回调必须保持引用稳定：MessageResponse 的 markdown 组件表依赖它，
+  // 流式输出时每个 token 都会重渲染，内联箭头函数会让文件链接整体重挂载，图标反复重新加载而闪烁。
+  const rowId = row.rowId;
+  const handleOpenFileLink = useCallback(
+    (target: Parameters<NonNullable<typeof preview>["onOpenFileLink"]>[0]) => preview?.onOpenFileLink(target, rowId),
+    [preview, rowId],
+  );
   if (row.state === "failed") {
     return (
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui-base whitespace-pre-wrap text-destructive">
@@ -352,7 +359,7 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
         theme={theme}
         codePreviewSettings={codePreviewSettings}
         onOpenExternalUrl={openExternal}
-        onOpenFileLink={preview ? target => preview.onOpenFileLink(target, row.rowId) : undefined}
+        onOpenFileLink={preview ? handleOpenFileLink : undefined}
         onOpenCodeViewer={preview?.onOpenCodeViewer}
         workspacePath={preview?.workspacePath}
       >
