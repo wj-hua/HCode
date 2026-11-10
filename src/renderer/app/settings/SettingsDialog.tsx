@@ -422,7 +422,7 @@ function GeneralTab() {
                 <Sliders className="size-3.5" />
                 <span>壁纸视觉特效微调</span>
               </div>
-              <span className="text-ui-xs text-foreground-subtle/80">调节背景毛玻璃质感与界面对比度</span>
+              <span className="text-ui-xs text-foreground-subtle">调节壁纸效果，阅读区域保留半透明底色</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {sliders.map(({ key, label, max, unit }) => (

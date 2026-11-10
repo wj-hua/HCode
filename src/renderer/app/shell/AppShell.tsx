@@ -113,7 +113,7 @@ export function AppShell() {
 
   return (
     <DesktopWindowFrame title="HCode" isDesktop={!isRemote} isMacDesktop={!isRemote}>
-      <div className="relative isolate flex h-full min-h-0 w-full overflow-hidden">
+      <div className={cn("relative isolate flex h-full min-h-0 w-full overflow-hidden", hasBackground && "app-wallpaper")}>
         <AppBackground />
         {narrow && !collapsed ? <div className="absolute inset-0 z-30 bg-black/40" aria-hidden onClick={() => useAppStore.getState().setSidebarCollapsed(true)} /> : null}
         <div
@@ -124,13 +124,13 @@ export function AppShell() {
           )}
           style={{ width: collapsed ? 0 : SIDEBAR_WIDTH }}
         >
-          <aside className="h-full overflow-hidden select-none" style={{ width: SIDEBAR_WIDTH }}>
+          <aside className="app-reading-surface h-full overflow-hidden select-none" style={{ width: SIDEBAR_WIDTH }}>
             <Sidebar onOpenSearch={openSearch} />
           </aside>
         </div>
         <div className={cn("flex min-h-0 flex-1 flex-col", narrow ? "min-w-0" : "min-w-[320px] p-1 pt-0", !collapsed && !narrow && "pl-0")}>
           {!narrow ? <div className="app-drag h-1 w-full" /> : null}
-          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden", !narrow && "rounded-xl border border-border", !hasBackground && "bg-background")}>
+          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("app-reading-surface collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden", !narrow && "rounded-xl border border-border", !hasBackground && "bg-background")}>
             <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
             {conversation ? (
               <>

@@ -9,6 +9,16 @@
   app-region: no-drag;
 }
 
+/* 壁纸亮暗不固定：辅助文字用不透明的主题色，阅读区保留稳定底色。
+ * 不用 backdrop-filter，避免透明窗口滚动时整窗重绘和闪烁。 */
+.app-wallpaper {
+  --color-foreground-subtle: color-mix(in oklab, var(--color-foreground) 94%, var(--color-background));
+  --color-foreground-subtlest: color-mix(in oklab, var(--color-foreground) 88%, var(--color-background));
+}
+.app-wallpaper .app-reading-surface {
+  background-color: color-mix(in srgb, var(--color-background) 80%, transparent);
+}
+
 /* 协作是持续的并行工作层；宽窗口留出输入空间，窄窗口沿用可关闭的面板。 */
 .collaboration-shell {
   container: collaboration-workspace / inline-size;
