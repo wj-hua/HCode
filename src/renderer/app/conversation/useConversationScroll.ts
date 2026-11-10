@@ -7,6 +7,7 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const revealedResult = useRef<string | undefined>(undefined);
+  const revealedSearchKey = useRef<number | undefined>(undefined);
   const stickRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const prependPosition = useRef<{ top: number; height: number } | null>(null);
@@ -64,10 +65,12 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
     result.scrollIntoView({ block: 'start' });
   }, [conversation.loading, latest, searchTarget?.rowId]);
 
+  // 每次搜索只定位一次；保留行数依赖以等待目标加载，但新消息不能重复拉回旧结果。
   useLayoutEffect(() => {
-    if (conversation.loading || searchTarget?.rowId == null) return;
+    if (conversation.loading || searchTarget?.rowId == null || revealedSearchKey.current === searchTarget.key) return;
     const row = contentRef.current?.querySelector(`[data-search-row-id="${searchTarget.rowId}"]`);
     if (!row) return;
+    revealedSearchKey.current = searchTarget.key;
     stickRef.current = false;
     row.scrollIntoView({ block: "center" });
   }, [conversation.loading, conversation.rows.length, searchTarget?.key, searchTarget?.rowId]);
