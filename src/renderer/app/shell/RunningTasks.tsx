@@ -1,11 +1,11 @@
 // 侧边栏“运行中”区块：跨项目汇总正在执行或等待审批的会话，点击跳转。
 import { useEffect, useMemo, useState } from "react";
 import { LoaderIcon } from "lucide-react";
-import type { AgentKind } from "@hcode/shared/types";
 import { cn } from "@/components/lib/utils.js";
 import { AgentBadge } from "../AgentBadge";
 import { formatDuration } from "../format";
-import { conversationTitle, useAppStore } from "../store/appStore";
+import { useAppStore } from "../store/appStore";
+import { collectRunningTasks } from "./runningTaskList";
 import { usePresentationStore } from "../collaboration/presentationStore";
 
 function Elapsed({ since }: { since: number }) {
@@ -25,30 +25,11 @@ export function RunningTasks() {
   const activateView = useAppStore((state) => state.activateView);
 
   const tasks = useMemo(() => {
-    const busy = Object.values(conversations).filter(
-      (conv) => conv.runState === "running" || conv.runState === "awaitingApproval" || !!conv.backgroundTasks,
-    );
-    const groups = new Map<string, typeof busy>();
-    for (const conv of busy) {
-      // 对比组合并为一行
-      const key = conv.compareId ?? conv.viewId;
-      groups.set(key, [...(groups.get(key) ?? []), conv]);
-    }
-    return [...groups.entries()]
-      .map(([key, list]) => {
-        const target = list.find((conv) => conv.runState === "awaitingApproval") ?? list[0]!;
-        return {
-          key,
-          viewId: target.viewId,
-          agents: list.map((conv) => conv.agent) as AgentKind[],
-          title: conversationTitle(target),
-          projectName: projects.find((project) => project.path === target.projectPath)?.name ?? target.projectPath,
-          awaiting: list.some((conv) => conv.runState === "awaitingApproval"),
-          startedAt: Math.min(...list.map((conv) => conv.runStartedAt ?? Date.now())),
-          active: list.some((conv) => conv.viewId === activeViewId),
-        };
-      })
-      .sort((a, b) => Number(b.awaiting) - Number(a.awaiting) || a.startedAt - b.startedAt);
+    const active = activeViewId ? conversations[activeViewId] : undefined;
+    return collectRunningTasks(conversations, projects).map((task) => ({
+      ...task,
+      active: !!active && (task.viewId === activeViewId || task.key === active.compareId),
+    }));
   }, [conversations, projects, activeViewId, presentationEntries]);
 
   if (tasks.length === 0) return null;
@@ -90,7 +71,7 @@ export function RunningTasks() {
                 <span className="min-w-0 flex-1 truncate text-ui-base text-foreground">{task.title}</span>
               </div>
               <span className={cn("truncate text-ui-xs", task.awaiting ? "text-warning" : "text-foreground-subtlest")}>
-                {task.awaiting ? "等待审批" : "运行中"} · <Elapsed since={task.startedAt} /> · {task.projectName}
+                {task.awaiting ? "等待审批" : "运行中"} · <Elapsed since={task.startedAt || Date.now()} /> · {task.projectName}
               </span>
             </div>
           </li>

@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { ZCodeIntlProvider } from "@/i18n/IntlProvider.js";
 import { AppShell } from "./shell/AppShell";
 import { useAppStore } from "./store/appStore";
+import { useFloatingTasksSync } from "./shell/runningTaskList";
 
 export function App() {
   const init = useAppStore((state) => state.init);
@@ -12,6 +13,7 @@ export function App() {
   const ready = useAppStore((state) => state.ready);
 
   useEffect(subscribePresentation, []);
+  useFloatingTasksSync();
   useEffect(() => {
     void init();
   }, [init]);

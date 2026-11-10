@@ -486,6 +486,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }, 200);
     });
     hcode.on("window:fullscreen", ({ fullscreen }) => set({ fullscreen }));
+    hcode.on("floating:openView", ({ viewId }) => get().activateView(viewId));
   };
 
   const openExternalProjects = async () => {

@@ -30,6 +30,7 @@ import { ConversationWorkspace } from "./conversationWorkspace.js";
 import { buildShellBootstrapPath, captureLoginShellEnvSnapshot } from "./util/loginShellEnv.js";
 import { QuotaService } from "./quotaService.js";
 import { createMainWindow } from "./window.js";
+import { FloatingIndicator } from "./floatingWindow.js";
 import { listProjectFiles } from "./projectFiles.js";
 import { ExtensionsService } from "./extensions.js";
 import { searchSessions } from "./sessionSearch.js";
@@ -590,12 +591,29 @@ async function bootstrap() {
   handle("remote:notificationToken", () => remoteNotificationTokens.get());
   handle("remote:regenerateNotificationToken", () => remote!.regenerateNotificationToken());
 
+  const floating = new FloatingIndicator({
+    enabled: () => store.settings.floatingIndicator,
+    theme: () => store.settings.theme,
+    readAnchor: () => store.readFloatingAnchor(),
+    writeAnchor: (anchor) => store.writeFloatingAnchor(anchor),
+    openView: (viewId) => {
+      showMainWindow?.();
+      // 只发给本机主窗口，不影响远程操控页面
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("floating:openView", { viewId });
+    },
+  });
+  handle("floating:setTasks", (tasks) => floating.setTasks(tasks));
+  handle("floating:getState", () => floating.state());
+  handle("floating:open", (viewId) => floating.open(viewId));
+  handle("floating:resize", (size) => floating.resize(size));
+
   handle("settings:get", () => store.settings);
   handle("settings:set", (patch) => {
     const settings = store.updateSettings(patch);
     syncSleepBlocker();
     if (patch.remoteControl) void remote?.apply();
     if (patch.weixinNotify !== undefined) weixin.apply();
+    if (patch.floatingIndicator !== undefined || patch.theme !== undefined) floating.refresh();
     if (process.platform === "darwin" && patch.shortcuts) installApplicationMenu(() => mainWindow, settings.shortcuts);
     return settings;
   });
@@ -607,7 +625,11 @@ async function bootstrap() {
   if (process.platform === "darwin") installApplicationMenu(() => mainWindow, store.settings.shortcuts);
   const openMainWindow = () => {
     const window = createMainWindow(store);
-    window.on("closed", () => terminals.dispose());
+    window.on("closed", () => {
+      terminals.dispose();
+      // 主窗口关闭后没有任务来源，收起悬浮窗
+      floating.setTasks([]);
+    });
     window.webContents.on("render-process-gone", () => terminals.dispose());
     window.webContents.on("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => {
       if (isMainFrame && !_inPlace) terminals.dispose();
@@ -623,7 +645,8 @@ async function bootstrap() {
   };
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // 悬浮窗也算 BrowserWindow，只按主窗口判断
+    if (!mainWindow || mainWindow.isDestroyed()) {
       mainWindow = openMainWindow();
     }
   });
@@ -635,6 +658,7 @@ async function bootstrap() {
     quota?.dispose();
     remote?.dispose();
     weixin.dispose();
+    floating.dispose();
     agents.dispose();
   });
 }

@@ -405,6 +405,8 @@ export interface Settings {
   memoryEnabled: boolean;
   /** 任务开始、完成、出错或等待审批时通知；后台发送系统通知。 */
   notifyOnFinish: boolean;
+  /** HCode 处于后台且有任务运行或等待审批时，在屏幕上显示悬浮窗。 */
+  floatingIndicator: boolean;
   notificationSound: NotificationSound;
   /** notificationSound 为 custom 时各事件的音频文件路径；空串 = 用系统提示音。 */
   customSounds: Record<NotificationEvent, string>;
@@ -454,12 +456,30 @@ export const DEFAULT_SETTINGS: Settings = {
   agentDelegation: false,
   memoryEnabled: false,
   notifyOnFinish: true,
+  floatingIndicator: true,
   notificationSound: "system",
   customSounds: { start: "", done: "", error: "", approval: "" },
   weixinNotify: false,
   background: { path: "", blur: 20, mask: 60 },
   remoteControl: { enabled: false, sshHost: "", remoteBind: "", localPort: 0, notificationFeed: false },
 };
+
+/** 悬浮窗中的一行：一个运行中的会话（对比组合并为一行）。 */
+export interface FloatingTask {
+  key: string;
+  viewId: string;
+  agents: AgentKind[];
+  title: string;
+  projectName: string;
+  awaiting: boolean;
+  startedAt: number;
+}
+
+/** 主进程推给悬浮窗的完整状态。 */
+export interface FloatingState {
+  tasks: FloatingTask[];
+  theme: Settings["theme"];
+}
 
 /** 尚无手动选择记录时沿用原来的固定模型。 */
 export function getDefaultModel(settings: Settings, agent: AgentKind): string {

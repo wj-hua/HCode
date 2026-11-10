@@ -102,6 +102,7 @@ export class AppStore {
   private readonly settingsPath: string;
   private readonly projectsPath: string;
   private readonly windowPath: string;
+  private readonly floatingPath: string;
   settings: Settings;
   projects: ProjectPrefs;
 
@@ -110,6 +111,7 @@ export class AppStore {
     this.settingsPath = join(dataDir, "settings.json");
     this.projectsPath = join(dataDir, "projects.json");
     this.windowPath = join(dataDir, "window.json");
+    this.floatingPath = join(dataDir, "floating-window.json");
     this.settings = migrateSettings(readJson<Record<string, unknown>>(this.settingsPath, {}));
     this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [] });
   }
@@ -137,5 +139,17 @@ export class AppStore {
 
   writeWindowState(state: WindowState) {
     writeJson(this.windowPath, state);
+  }
+
+  /** 悬浮窗被拖动后的右上角位置；没拖动过时返回 undefined。 */
+  readFloatingAnchor(): { right: number; top: number } | undefined {
+    const anchor = readJson<{ right?: unknown; top?: unknown }>(this.floatingPath, {});
+    return typeof anchor.right === "number" && typeof anchor.top === "number"
+      ? { right: anchor.right, top: anchor.top }
+      : undefined;
+  }
+
+  writeFloatingAnchor(anchor: { right: number; top: number }) {
+    writeJson(this.floatingPath, anchor);
   }
 }

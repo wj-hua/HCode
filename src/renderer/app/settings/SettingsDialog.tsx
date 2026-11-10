@@ -772,6 +772,12 @@ function NotificationsTab() {
           checked={settings.notifyOnFinish}
           onChange={(notifyOnFinish) => update({ notifyOnFinish })}
         />
+        <ToggleRow
+          label="后台任务悬浮窗"
+          hint="HCode 处于后台且有任务运行或等待审批时，在屏幕右上角显示悬浮窗，点击任务可回到对应会话"
+          checked={settings.floatingIndicator}
+          onChange={(floatingIndicator) => update({ floatingIndicator })}
+        />
       </CardGroup>
 
       <WeixinNotifyCard />

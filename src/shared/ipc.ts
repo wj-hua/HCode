@@ -30,6 +30,8 @@ import type {
   SlashCommandOption,
   SlashCommandsEvent,
   ExtensionAgent,
+  FloatingState,
+  FloatingTask,
   ExtensionsSnapshot,
   ForkParams,
   McpAddParams,
@@ -181,6 +183,14 @@ export interface InvokeMap {
   "app:saveText": [[defaultName: string, text: string], string | null];
   /** 显示并聚焦主窗口（点击系统通知时用）。 */
   "app:focusWindow": [[], void];
+  /** 主窗口上报运行中的任务，主进程据此显示或隐藏悬浮窗。 */
+  "floating:setTasks": [[tasks: FloatingTask[]], void];
+  /** 悬浮窗请求当前状态（页面加载完成时）。 */
+  "floating:getState": [[], FloatingState];
+  /** 悬浮窗点击任务：聚焦主窗口并切到该会话。 */
+  "floating:open": [[viewId: string], void];
+  /** 悬浮窗内容尺寸变化，窗口保持右上角不动。 */
+  "floating:resize": [[size: { width: number; height: number }], void];
   "settings:get": [[], Settings];
   "settings:set": [[patch: SettingsPatch], Settings];
   "remote:status": [[], import("./remoteControl.js").RemoteControlStatus];
@@ -220,6 +230,9 @@ export interface EventMap {
   "permission:requested": PermissionRequestEvent;
   "permission:resolved": PermissionResolvedEvent;
   "window:fullscreen": { fullscreen: boolean };
+  "floating:state": FloatingState;
+  /** 悬浮窗点击任务后，主窗口切到对应会话。 */
+  "floating:openView": { viewId: string };
   "quota:updated": AgentQuota;
   "remote:status": import("./remoteControl.js").RemoteControlStatus;
   "weixin:status": import("./remoteControl.js").WeixinNotifyStatus;
@@ -311,6 +324,10 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "app:copyText",
   "app:saveText",
   "app:focusWindow",
+  "floating:setTasks",
+  "floating:getState",
+  "floating:open",
+  "floating:resize",
   "settings:get",
   "settings:set",
   "remote:status",
@@ -341,6 +358,8 @@ export const EVENT_CHANNELS: readonly EventChannel[] = [
   "permission:requested",
   "permission:resolved",
   "window:fullscreen",
+  "floating:state",
+  "floating:openView",
   "quota:updated",
   "remote:status",
   "weixin:status",

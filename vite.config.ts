@@ -21,5 +21,9 @@ export default defineConfig({
     outDir: r("./out/renderer"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 8000,
+    rollupOptions: {
+      // 主窗口 + 悬浮窗两个页面
+      input: { index: r("./src/renderer/index.html"), floating: r("./src/renderer/floating.html") },
+    },
   },
 });
