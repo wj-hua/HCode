@@ -7,7 +7,7 @@ import { usePresentationStore } from "../collaboration/presentationStore";
 import { ExpertConversationResult } from "../collaboration/ExpertConversationResult";
 import { presentationContent } from "@hcode/shared/collaborationPresentation";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
-import { AlertCircleIcon, CopyIcon, GitBranchIcon, LoaderIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
+import { AlertCircleIcon, CopyIcon, GitBranchIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 import { memo, useCallback, useMemo, useState } from "react";
 import type {
   AssistantTextRow,
@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { MessageResponse } from "@/components/ai-elements/message.js";
+import { ChatLoading } from "./ChatLoading";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning.js";
 import { ToolCallBlock } from "@/ToolCallBlocks.js";
 import { ConversationUserInputBody } from "@/v4/ConversationUserInputBody.js";
@@ -166,10 +167,7 @@ function TurnView({
         </div>
       ) : null}
       {showThinking ? (
-        <div className="flex items-center gap-2 text-ui-base text-foreground-subtle">
-          <LoaderIcon className="size-4 animate-spin" />
-          <span className="animate-pulse">正在处理…</span>
-        </div>
+        <ChatLoading startedAt={header?.startedAt} />
       ) : null}
       {header && header.state !== "running" && header.activeMs !== undefined && hasAssistantWork(turn) ? (
         <TurnFooter header={header} />
