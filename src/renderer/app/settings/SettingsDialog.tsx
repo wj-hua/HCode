@@ -662,8 +662,8 @@ function AgentsTab() {
     <div className="flex flex-col gap-6">
       {/* 默认 CLI 选择卡片 */}
       <CardGroup
-        title="新建会话默认 CLI"
-        subtitle="快速创建新会话或运行后台任务时优先选用的智能体引擎"
+        title="新建项目默认 CLI"
+        subtitle="项目还没有会话时选用的智能体引擎；已有会话的项目沿用上次使用的 CLI"
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-4">
           {AGENT_KINDS.map((kind) => {

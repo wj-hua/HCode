@@ -68,7 +68,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
   for (const key of ["claudePath", "defaultPermissionMode", "defaultModel"]) {
     delete (settings as unknown as Record<string, unknown>)[key];
   }
-  // 已移除的 CLI（step / pi）不能作为新建会话默认 CLI，回退到 claude。
+  // 已移除的 CLI（step / pi）不能作为新建项目默认 CLI，回退到 claude。
   if (!AGENT_KINDS.includes(settings.defaultAgent)) settings.defaultAgent = DEFAULT_SETTINGS.defaultAgent;
   return settings;
 }

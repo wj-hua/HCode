@@ -257,6 +257,11 @@ function withLiveSessions(
   return live.length ? [...live, ...list].sort((a, b) => b.updatedAt - a.updatedAt) : list;
 }
 
+/** 项目里最近更新的会话所用的 CLI；没有会话记录时返回 undefined。 */
+function lastProjectAgent(list: SessionSummary[] | undefined): AgentKind | undefined {
+  return list?.reduce<SessionSummary | undefined>((latest, item) => !latest || item.updatedAt > latest.updatedAt ? item : latest, undefined)?.agent;
+}
+
 let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
@@ -269,6 +274,20 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!current) return state;
       return { conversations: { ...state.conversations, [viewId]: { ...current, ...patch } } };
     });
+  const switchDraftAgent = (viewId: string, agent: AgentKind) => {
+    const conv = get().conversations[viewId];
+    if (!conv || conv.sessionKey || conv.sessionId || conv.agent === agent) return;
+    const { settings } = get();
+    patchConversation(viewId, {
+      agent,
+      permissionMode: settings.defaultPermissionModes[agent],
+      model: getDefaultModel(settings, agent),
+      effort: settings.defaultEfforts[agent],
+      codexSpeed: settings.codexSpeed,
+      activeModel: undefined,
+    });
+    void get().loadModels(agent);
+  };
 
   const patchHistory = (viewId: string, patch: Partial<Conversation>) => {
     const key = get().conversations[viewId]?.sessionKey;
@@ -660,8 +679,8 @@ export const useAppStore = create<AppState>((set, get) => {
     },
 
     newChat(projectPath, agentOverride) {
-      const { settings, conversations } = get();
-      const agent = agentOverride ?? settings.defaultAgent;
+      const { settings, conversations, sessions } = get();
+      const agent = agentOverride ?? lastProjectAgent(sessions[projectPath]) ?? settings.defaultAgent;
       // 同一项目已有空白草稿时直接复用
       const draft = Object.values(conversations).find(
         (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId && !conv.compareId,
@@ -676,21 +695,18 @@ export const useAppStore = create<AppState>((set, get) => {
         conversations: { ...state.conversations, [viewId]: draftConversation(viewId, projectPath, agent) },
         activeViewId: viewId,
       }));
+      // 项目未展开时会话列表尚未加载，读取后再沿用上次的 CLI（用户已手动切换则不覆盖）。
+      if (agentOverride || !projectPath || sessions[projectPath]) return;
+      void get().loadSessions(projectPath).then(() => {
+        const last = lastProjectAgent(get().sessions[projectPath]);
+        const draft = get().conversations[viewId];
+        if (last && draft && !draft.sessionKey && !draft.sessionId && draft.agent === agent) switchDraftAgent(viewId, last);
+      });
     },
 
     setDraftAgent(agent) {
       const conv = activeConversation();
-      if (!conv || conv.sessionKey || conv.sessionId || conv.agent === agent) return;
-      const { settings } = get();
-      patchConversation(conv.viewId, {
-        agent,
-        permissionMode: settings.defaultPermissionModes[agent],
-        model: getDefaultModel(settings, agent),
-        effort: settings.defaultEfforts[agent],
-        codexSpeed: settings.codexSpeed,
-        activeModel: undefined,
-      });
-      void get().loadModels(agent);
+      if (conv) switchDraftAgent(conv.viewId, agent);
     },
 
     setDraftProject(projectPath) {
