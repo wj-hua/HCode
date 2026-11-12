@@ -194,6 +194,7 @@ export async function commitChanges(cwd: string, env: Record<string, string>, me
   await git(root, nonInteractive, ["commit", "-m", message.trim()]);
 }
 
-export async function pushChanges(cwd: string, env: Record<string, string>): Promise<void> {
-  await git(cwd, { ...env, GIT_TERMINAL_PROMPT: "0" }, ["push"]);
+export async function pushChanges(cwd: string, env: Record<string, string>): Promise<boolean> {
+  const output = await git(cwd, { ...env, GIT_TERMINAL_PROMPT: "0" }, ["push", "--porcelain"]);
+  return output.split("\n").some((line) => /^[ *+\-]/.test(line) && line.includes("\t"));
 }

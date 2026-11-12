@@ -156,7 +156,7 @@ export interface InvokeMap {
   "git:worktree": [[cwd: string], import("./types.js").GitWorktree | null];
   "git:diff": [[cwd: string, path: string], string];
   "git:commit": [[cwd: string, message: string, stageAll: boolean], void];
-  "git:push": [[cwd: string], void];
+  "git:push": [[cwd: string], boolean];
   "git:switchBranch": [[cwd: string, branch: string], GitBranchSwitchResult];
   "git:branchSwitchPreview": [[cwd: string], GitBranchSwitchPreview];
   "git:commitAndSwitch": [[cwd: string, branch: string, message: string, preview: GitBranchSwitchPreview], GitCommitAndSwitchResult];
