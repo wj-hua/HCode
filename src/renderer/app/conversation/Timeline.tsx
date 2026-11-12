@@ -7,8 +7,8 @@ import { usePresentationStore } from "../collaboration/presentationStore";
 import { ExpertConversationResult } from "../collaboration/ExpertConversationResult";
 import { presentationContent } from "@hcode/shared/collaborationPresentation";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
-import { AlertCircleIcon, CopyIcon, GitBranchIcon, PencilIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
-import { memo, useCallback, useMemo, useState } from "react";
+import { AlertCircleIcon, BrainIcon, ChevronRightIcon, CopyIcon, FilePenIcon, GitBranchIcon, PencilIcon, RotateCcwIcon, SearchIcon, TerminalIcon, Undo2Icon } from "lucide-react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   AssistantTextRow,
   ConversationRow,
@@ -21,6 +21,20 @@ import type { ForkMode, PermissionRequestEvent } from "@hcode/shared/types";
 import { isTurnStartInput } from "@hcode/shared/conversationTurns";
 import { lostContextAfterCompaction } from "@hcode/shared/conversationChanges";
 import { Button } from "@/components/ui/button.js";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible.js";
+import { cn } from "@/components/lib/utils.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import {
+  buildConversationTurnRenderUnits,
+  type AssistantWorkRow,
+  type ConversationTurnRenderUnit,
+} from "@/v4/conversationTurnRenderUnits.js";
+import type { ConversationTurnWorkSegment, ConversationTurnWorkStatus } from "@/v4/conversationTurnWorkSegments.js";
+import {
+  formatAssistantSummaryStatistics,
+  getAssistantSummaryIconCategory,
+  groupConsecutiveAssistantSummaries,
+} from "@/v4/conversationAssistantWorkItems.js";
 import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { MessageResponse } from "@/components/ai-elements/message.js";
@@ -94,12 +108,13 @@ export function Timeline({
 }) {
   const entries = usePresentationStore(state => state.entries);
   const turns = useMemo(() => groupTurns(rows), [rows]);
+  const units = useMemo(() => new Map(buildConversationTurnRenderUnits(rows).map((unit) => [unit.turnId, unit])), [rows]);
   const lastUserRowId = useMemo(() => rows.findLast(isTurnStartInput)?.rowId ?? null, [rows]);
   return (
     <div className="flex flex-col gap-6">
       {turns.map((turn, index) => {
         const owned = presentation ? presentationTaskForTurn(entries, presentation, turn.turnId) : undefined;
-        const content = <TurnView key={turn.turnId} turn={turn} workspacePath={workspacePath} permissions={permissions} isLast={index === turns.length - 1} running={running} canFork={owned ? false : canFork} canResend={owned ? false : canResend} lastUserRowId={lastUserRowId} highlightedRowId={highlightedRowId} warnCompactionContextLoss={warnCompactionContextLoss} />;
+        const content = <TurnView key={turn.turnId} turn={turn} unit={units.get(turn.turnId)} workspacePath={workspacePath} permissions={permissions} isLast={index === turns.length - 1} running={running} canFork={owned ? false : canFork} canResend={owned ? false : canResend} lastUserRowId={lastUserRowId} highlightedRowId={highlightedRowId} warnCompactionContextLoss={warnCompactionContextLoss} />;
         if (!owned || Object.keys(permissions).length) return content;
         const highlighted = turn.rows.some(row => row.rowId === highlightedRowId);
         const isSource = presentation && presentationBelongsToSource(owned.entry, presentation);
@@ -119,6 +134,7 @@ export function Timeline({
 
 function TurnView({
   turn,
+  unit,
   workspacePath,
   permissions,
   isLast,
@@ -130,6 +146,7 @@ function TurnView({
   warnCompactionContextLoss,
 }: {
   turn: Turn;
+  unit?: ConversationTurnRenderUnit;
   workspacePath: string;
   permissions: Readonly<Record<string, PermissionRequestEvent>>;
   isLast: boolean;
@@ -151,14 +168,26 @@ function TurnView({
         (last.kind === "reasoning" && last.state === "streaming") ||
         (last.kind === "toolCall" && last.status === "pendingApproval"))
     );
+  const renderRow = (row: ConversationRow) => (
+    <div key={row.rowId} data-search-row-id={row.rowId} className={row.rowId === highlightedRowId ? "rounded-lg ring-2 ring-primary/50" : undefined}>
+      <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} />
+    </div>
+  );
+  const work: WorkContext = {
+    turnRunning,
+    tailRowId: unit?.assistantWorkRows.at(-1)?.rowId,
+    failed: header?.state === "failed",
+    workspacePath,
+    highlightedRowId,
+    renderRow,
+  };
 
   return (
     <div className="flex flex-col gap-3">
-      {turn.rows.map((row) => (
-        <div key={row.rowId} data-search-row-id={row.rowId} className={row.rowId === highlightedRowId ? "rounded-lg ring-2 ring-primary/50" : undefined}>
-          <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} />
-        </div>
-      ))}
+      {unit?.leadingBoundaryRows.map(renderRow)}
+      {unit ? turnWorkSegments(unit).map((segment) => <WorkSegment key={segment.key} segment={segment} work={work} />) : null}
+      {unit?.assistantTailRows.map(renderRow)}
+      {unit?.browserTurnEndRows.map(renderRow)}
       {header && header.state !== "running" ? <TurnChangeSummary rows={turn.rows} /> : null}
       {warnCompactionContextLoss && header?.state === "completedSuccess" && lostContextAfterCompaction(turn.rows) ? (
         <div role="status" className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-ui-sm text-foreground-subtle">
@@ -169,33 +198,157 @@ function TurnView({
       {showThinking ? (
         <ChatLoading startedAt={header?.startedAt} />
       ) : null}
-      {header && header.state !== "running" && header.activeMs !== undefined && hasAssistantWork(turn) ? (
-        <TurnFooter header={header} />
-      ) : null}
     </div>
   );
 }
 
-function hasAssistantWork(turn: Turn): boolean {
-  return turn.rows.some((row) => row.kind !== "userInput");
+interface WorkContext {
+  turnRunning: boolean;
+  /** 整轮最后一条工作行：只有包含它的摘要组在运行中仍可继续追加。 */
+  tailRowId: number | undefined;
+  failed: boolean;
+  workspacePath: string;
+  highlightedRowId: number | null;
+  renderRow: (row: ConversationRow) => ReactNode;
 }
 
-function TurnFooter({ header }: { header: TurnHeaderRow }) {
-  const label =
-    header.state === "completedInterrupted"
-      ? "已停止"
-      : header.state === "failed"
-        ? "出错"
-        : "已处理";
+function turnWorkSegments(unit: ConversationTurnRenderUnit): ConversationTurnWorkSegment[] {
+  if (unit.workSegments?.length) return unit.workSegments;
+  return [{
+    key: unit.key,
+    flowItems: unit.flowItems,
+    assistantWorkRows: unit.assistantWorkRows,
+    assistantHistoryRows: unit.assistantHistoryRows,
+    assistantFollowingRows: unit.assistantFollowingRows,
+    assistantHistoryDefaultOpen: unit.assistantHistoryDefaultOpen,
+    ...(unit.workStatus ? { workStatus: unit.workStatus } : {}),
+  }];
+}
+
+// 照 ZCode ConversationWorkSegmentFlow：完成后把思考、工具和中间正文收进“已工作 N”，最终答复留在外面。
+function WorkSegment({ segment, work }: { segment: ConversationTurnWorkSegment; work: WorkContext }) {
+  const [historyOpen, setHistoryOpen] = useState(segment.assistantHistoryDefaultOpen);
+  useEffect(() => {
+    setHistoryOpen(segment.assistantHistoryDefaultOpen);
+  }, [segment.assistantHistoryDefaultOpen, segment.key]);
+  const pinned = work.turnRunning || segment.assistantHistoryDefaultOpen;
+  const highlighted = work.highlightedRowId !== null && segment.assistantHistoryRows.some((row) => row.rowId === work.highlightedRowId);
+  const open = pinned || historyOpen || highlighted;
+  const status = !work.turnRunning && segment.workStatus && segment.workStatus.state !== "running" ? segment.workStatus : undefined;
+  const firstAssistantIndex = segment.flowItems.findIndex((item) => item.kind !== "userInput");
+  const statusHeader = status ? <WorkStatusHeader status={status} failed={work.failed} open={open} collapsible={!pinned} /> : null;
+
   return (
-    <div className="flex items-center gap-2 text-ui-sm text-foreground-subtlest">
-      <span className="h-px flex-1 bg-border/60" />
-      <span>
-        {label}
-        {header.activeMs ? ` · ${formatDuration(header.activeMs)}` : ""}
-      </span>
-      <span className="h-px flex-1 bg-border/60" />
+    <Collapsible
+      open={open}
+      onOpenChange={pinned ? undefined : setHistoryOpen}
+      // flex gap 不计入 Radix 测量的内容高度，收起动画末帧会跳；兄弟节点改用外边距，history 的间距放进动画层。
+      className="flex flex-col [&>*+*:not([data-slot='collapsible-content'])]:mt-3"
+    >
+      {segment.flowItems.map((item, index) => {
+        let content: ReactNode;
+        if (item.kind === "userInput" || item.kind === "assistantText") content = work.renderRow(item.row);
+        else if (item.kind === "assistantHistory") {
+          content = (
+            <CollapsibleContent className="-mx-1 -mb-1 px-1 pb-1">
+              <div className="pt-3"><WorkRows rows={item.rows} work={work} /></div>
+            </CollapsibleContent>
+          );
+        } else content = <WorkRows rows={item.rows} work={work} />;
+        const key = item.kind === "userInput" || item.kind === "assistantText" ? `${item.kind}:${item.row.rowId}` : item.kind === "cuaGroup" ? item.key : `${item.kind}:${item.rows[0]?.rowId}`;
+        return (
+          <Fragment key={key}>
+            {index === firstAssistantIndex ? statusHeader : null}
+            {content}
+          </Fragment>
+        );
+      })}
+      {firstAssistantIndex < 0 ? statusHeader : null}
+    </Collapsible>
+  );
+}
+
+function WorkStatusHeader({ status, failed, open, collapsible }: {
+  status: ConversationTurnWorkStatus;
+  failed: boolean;
+  open: boolean;
+  collapsible: boolean;
+}) {
+  const duration = status.durationMs ? formatDuration(status.durationMs) : undefined;
+  const label =
+    status.state === "interrupted"
+      ? "已停止"
+      : failed
+        ? "出错"
+        : duration
+          ? `已工作 ${duration}`
+          : "已处理";
+  const text = status.state === "completed" && !failed ? label : `${label}${duration ? ` · ${duration}` : ""}`;
+  const Status = collapsible ? CollapsibleTrigger : "span";
+  return (
+    <div className="flex w-full items-center border-b border-border/50 pb-2">
+      <Status className="inline-flex max-w-full items-center gap-2 text-left text-ui-base text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused">
+        <span className="truncate">{text}</span>
+        {collapsible ? (
+          <ChevronRightIcon aria-hidden className={cn("size-4 shrink-0 text-foreground-subtlest opacity-70 transition-transform", open && "rotate-90")} />
+        ) : null}
+      </Status>
     </div>
+  );
+}
+
+function WorkRows({ rows, work }: { rows: readonly AssistantWorkRow[]; work: WorkContext }) {
+  const groups = useMemo(() => groupConsecutiveAssistantSummaries(rows), [rows]);
+  return (
+    <div className="flex flex-col gap-3">
+      {groups.map((group) =>
+        group.length < 2
+          ? work.renderRow(group[0]!)
+          : <SummaryGroup key={`group:${group[0]!.rowId}`} rows={group} work={work} />,
+      )}
+    </div>
+  );
+}
+
+const SUMMARY_ICONS = { explore: SearchIcon, run: TerminalIcon, change: FilePenIcon } as const;
+
+// 照 ZCode ConsecutiveSummaryGroup：相邻思考/查阅/执行/修改收成一行统计，点开看明细。
+function SummaryGroup({ rows, work }: { rows: readonly AssistantWorkRow[]; work: WorkContext }) {
+  const { intl } = useZCodeIntl();
+  const [open, setOpen] = useState(false);
+  const running = work.turnRunning && work.tailRowId === rows.at(-1)?.rowId;
+  const highlighted = work.highlightedRowId !== null && rows.some((row) => row.rowId === work.highlightedRowId);
+  const statistics = formatAssistantSummaryStatistics(rows, intl, work.workspacePath, !running);
+  const category = getAssistantSummaryIconCategory(rows);
+  const Icon = category ? SUMMARY_ICONS[category] : BrainIcon;
+  const expanded = open || highlighted;
+  return (
+    <Collapsible open={expanded} onOpenChange={setOpen} className="min-w-0">
+      <CollapsibleTrigger
+        aria-label={statistics}
+        className="group/tool-summary flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-2 text-ui-base text-foreground-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused"
+      >
+        <Icon className="size-4 shrink-0" />
+        <span title={statistics} className={cn("min-w-0 truncate", running && "animated-gradient-text")}>
+          {statistics}
+        </span>
+        <ChevronRightIcon
+          aria-hidden
+          className={cn(
+            "size-4 shrink-0 text-foreground-subtlest opacity-0 transition-[transform,opacity] group-hover/tool-summary:opacity-100 group-focus-visible/tool-summary:opacity-100",
+            expanded && "rotate-90",
+          )}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-2 max-h-[calc(16lh+30*var(--spacing))] overflow-y-auto">
+          {/* 导线不占布局，ml-2 + pl-4 让明细与组头文字对齐。 */}
+          <div className="relative ml-2 flex flex-col gap-2 pl-4 before:absolute before:inset-y-0 before:left-0 before:border-l before:border-border">
+            {rows.map(work.renderRow)}
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
