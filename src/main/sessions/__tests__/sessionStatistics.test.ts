@@ -59,11 +59,12 @@ describe("会话累计统计持久化", () => {
       responseTokens: 200, responseSpeedMs: 2000 });
   });
 
-  it("只持久化统计字段，不保存上下文或会话内容，拒绝畸形磁盘数据", () => {
+  it("恢复最近一轮的上下文占用，不保存会话内容，拒绝畸形磁盘数据", () => {
     const store = new SessionStatisticsStore(directory);
-    store.record(ref, { ...sample("one"), contextUsedTokens: 999 });
+    store.record(ref, { ...sample("one"), contextUsedTokens: 999, contextWindowTokens: 10000, text: "secret" } as ChatUsage);
+    expect(new SessionStatisticsStore(directory).usage(ref)).toMatchObject({ contextUsedTokens: 999, contextWindowTokens: 10000 });
     const path = join(directory, readdirSync(directory)[0]!);
-    expect(readFileSync(path, "utf8")).not.toContain("contextUsedTokens");
+    expect(readFileSync(path, "utf8")).not.toContain("secret");
     writeFileSync(path, JSON.stringify({ version: 1, samples: [{ turnStatistics: { id: "bad", toolMs: -1 } }] }));
     expect(() => new SessionStatisticsStore(directory).usage(ref)).toThrow();
   });

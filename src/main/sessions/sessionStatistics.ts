@@ -12,6 +12,8 @@ const sampleSchema = z.object({
   inputTokens: number.optional(), outputTokens: number.optional(), ttftMs: number.optional(),
   outputTokensPerSecond: number.optional(), outputSpeedDurationMs: number.optional(),
   outputSpeedBasis: z.enum(["activeTurn", "response"]).optional(),
+  // 只记最近一轮结束时的上下文占用数字，重启后恢复容量显示。
+  contextUsedTokens: number.optional(), contextWindowTokens: number.optional(), contextUsedPercent: number.optional(),
 });
 type Sample = z.infer<typeof sampleSchema>;
 const fileSchema = z.object({ version: z.literal(1), samples: z.array(sampleSchema) });
