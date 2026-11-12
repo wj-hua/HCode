@@ -35,13 +35,14 @@ beforeEach(async () => {
   invoke.mockReset();
   invoke.mockImplementation(async channel => {
     if (channel === "settings:get") return { ...DEFAULT_SETTINGS, notifyOnFinish: false };
-    if (channel === "projects:list" || channel === "agent:status" || channel === "sessions:list") return [];
+    if (channel === "projects:list" || channel === "projects:takeExternalPaths" || channel === "agent:status" || channel === "sessions:list") return [];
     if (channel === "sessions:load") return { summary, rows: [response("旧历史")] };
     if (channel === "chat:close") return;
     throw new Error(`未配置的 IPC: ${channel}`);
   });
   useAppStore.setState({ conversations: {}, activeViewId: null, projects: [], sessions: {}, expanded: {}, permissions: {} });
   await useAppStore.getState().init();
+  useAppStore.setState({ conversations: {}, activeViewId: null });
 });
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -221,4 +222,18 @@ it("切走再返回后仍显示最新错误终态，不重跑或截断子任务"
   expect(useAppStore.getState().conversations[summary.id]).toMatchObject({ sessionKey, runState: "error", error: "输出超过限制", rows: [response("已完成部分输出")] });
   expect(invoke.mock.calls.filter(([channel]) => channel === "sessions:load")).toHaveLength(1);
   expect(invoke.mock.calls.some(([channel]) => channel === "chat:send" || channel === "chat:interrupt")).toBe(false);
+});
+
+it("重新打开历史时恢复持久化用量，实时快照仍优先于旧历史统计", async () => {
+  const usage = { outputTokens: 100, ttftMs: 200, outputSpeedDurationMs: 1000,
+    outputTokensPerSecond: 100, outputSpeedBasis: "activeTurn" as const };
+  invoke.mockImplementation(async channel => {
+    if (channel === "sessions:load") return { summary, rows: [response("历史")], usage };
+    throw new Error(`未配置的 IPC: ${channel}`);
+  });
+  await useAppStore.getState().openSession(summary);
+  expect(useAppStore.getState().conversations[summary.id]?.usage).toEqual(usage);
+  emitState("idle", { usage: { ...usage, outputTokens: 200 } });
+  await useAppStore.getState().openSession(summary);
+  expect(useAppStore.getState().conversations[summary.id]?.usage?.outputTokens).toBe(200);
 });

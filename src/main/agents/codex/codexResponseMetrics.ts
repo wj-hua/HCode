@@ -65,6 +65,7 @@ export class CodexResponseMetrics extends ResponseMetrics {
       if (started) this.modelItems.add(id);
       else this.modelItems.delete(id);
     } else if (TOOL_ITEMS.has(type)) {
+      this.tool(id, started);
       const key = `tool:${id}`;
       if (started) {
         if (!this.completedTools.has(id)) this.waits.add(key);
@@ -111,6 +112,14 @@ export class CodexResponseMetrics extends ResponseMetrics {
       metrics.outputSpeedDurationMs = this.measuredDurationMs;
     }
     return metrics;
+  }
+
+  override turnStatistics() {
+    const sample = super.turnStatistics();
+    if (sample && this.complete && !this.invalid && this.measuredDurationMs !== undefined && this.measuredDurationMs >= 0) {
+      sample.responseMs = this.measuredDurationMs;
+    }
+    return sample;
   }
 
   private syncPause() {

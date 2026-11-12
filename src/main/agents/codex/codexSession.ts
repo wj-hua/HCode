@@ -792,7 +792,7 @@ export class CodexSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...((this.model ?? this.reportedModel) ? { model: this.model ?? this.reportedModel } : {}),
-      usage: { ...this.usage, outputSpeedBasis: "activeTurn", ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
+      usage: { ...this.usage, outputSpeedBasis: "activeTurn", ...this.responseMetrics.snapshot(this.usage?.outputTokens), turnStatistics: this.responseMetrics.turnStatistics() },
     });
   }
 

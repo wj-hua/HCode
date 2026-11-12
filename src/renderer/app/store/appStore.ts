@@ -636,7 +636,7 @@ export const useAppStore = create<AppState>((set, get) => {
           projectPath: summary.projectPath,
         }, ...(complete ? [{ complete: true } as const] : []));
         const latest = sessionViews.viewPatch(summary);
-        if (currentLoad()) patchHistory(viewId, { ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
+        if (currentLoad()) patchHistory(viewId, { usage: result.usage, ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
       } catch (error) {
         if (!currentLoad()) return;
         const latest = sessionViews.viewPatch(summary);

@@ -93,3 +93,13 @@ describe("Antigravity 响应指标", () => {
     expect(f.metrics.snapshot(200)).toMatchObject({ ttftMs: 500, outputTokensPerSecond: 50 });
   });
 });
+
+it("工具使用原生耗时，DONE 单次通知也可计时，重复通知不累计", () => {
+  const f = fixture();
+  const update = { step_type: "tool", step_index: 1, state: "DONE", duration_seconds: 3 };
+  f.metrics.consumeStep(update);
+  f.metrics.consumeStep(update);
+  f.metrics.consumeStep(response(2, 100, 2));
+  f.metrics.finishResult("SUCCESS"); f.metrics.finish();
+  expect(f.metrics.turnStatistics()).toMatchObject({ toolCalls: 1, toolMs: 3000, responseMs: 2000 });
+});

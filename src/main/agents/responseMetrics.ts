@@ -1,8 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import type { ChatUsage } from "../../shared/types.js";
+import type { ChatUsage, TurnStatistics } from "../../shared/types.js";
 
 /** CLI 按块推送输出，只能测到客户端观察值，不能当作服务端逐 Token 的精确解码速度。 */
 export class ResponseMetrics {
+  private sampleId: string | undefined;
+  private readonly toolStarts = new Map<string, number>();
+  private readonly toolEnds = new Set<string>();
+  private toolMs = 0;
+  private toolCalls = 0;
+  private unmatchedTools = 0;
   private startedAt: number | undefined;
   private firstAt: number | undefined;
   private segmentFirstAt: number | undefined;
@@ -15,6 +22,12 @@ export class ResponseMetrics {
   constructor(private readonly now: () => number = () => performance.now()) {}
 
   start() {
+    this.sampleId = randomUUID();
+    this.toolStarts.clear();
+    this.toolEnds.clear();
+    this.toolMs = 0;
+    this.toolCalls = 0;
+    this.unmatchedTools = 0;
     this.startedAt = this.now();
     this.firstAt = undefined;
     this.segmentFirstAt = undefined;
@@ -23,6 +36,33 @@ export class ResponseMetrics {
     this.segments = 0;
     this.hasUnmeasurableSegment = false;
     this.finished = false;
+  }
+
+  /** 累计工具工作量：并行调用分别相加，重复通知不重复计时。 */
+  tool(id: string, started: boolean, durationMs?: number) {
+    if (!this.sampleId || this.finished || !id || this.toolEnds.has(id)) return;
+    if (started) {
+      if (!this.toolStarts.has(id)) this.toolStarts.set(id, this.now());
+      return;
+    }
+    const at = this.toolStarts.get(id);
+    this.toolStarts.delete(id);
+    this.toolEnds.add(id);
+    if (durationMs !== undefined && Number.isFinite(durationMs) && durationMs >= 0) {
+      this.toolMs += durationMs;
+    } else if (at !== undefined) {
+      this.toolMs += Math.max(0, this.now() - at);
+    } else {
+      this.unmatchedTools++;
+      return;
+    }
+    this.toolCalls++;
+  }
+
+  turnStatistics(): TurnStatistics | undefined {
+    if (!this.finished || !this.sampleId) return undefined;
+    return { id: this.sampleId, toolCalls: this.toolCalls, toolMs: this.toolMs,
+      incompleteTools: this.unmatchedTools + this.toolStarts.size };
   }
 
   /** 返回 true 时首次输出刚到达，需要向界面推送 TTFT。空块、工具结果不调用此方法。 */

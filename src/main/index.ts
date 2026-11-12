@@ -1,3 +1,4 @@
+import { SessionStatisticsStore } from "./sessions/sessionStatistics.js";
 import { presentationForRun, presentationForDraft } from "../shared/collaborationPresentation.js";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -170,6 +171,7 @@ async function bootstrap() {
     }
   };
 
+  const sessionStatistics = new SessionStatisticsStore(join(app.getPath("userData"), "session-statistics"));
   const recentTurnStates = new Map<string, ChatStateEvent>();
   const events: AgentEvents = {
     turnOutcome: (event) => execution?.acceptOutcome(event),
@@ -184,6 +186,15 @@ async function bootstrap() {
       syncSleepBlocker();
       const previous = recentTurnStates.get(event.sessionKey);
       const enriched = { ...event, sessionId: event.sessionId ?? previous?.sessionId };
+      if (enriched.sessionId) {
+        try {
+          const usage = sessionStatistics.record({ agent: event.agent, projectPath: event.projectPath, id: enriched.sessionId }, event.usage ?? {});
+          if (usage?.sessionStatistics) enriched.usage = { ...event.usage, sessionStatistics: usage.sessionStatistics };
+        } catch (error) {
+          console.error("会话统计保存失败", error);
+          enriched.usage = { ...event.usage, statisticsSaveError: "会话统计保存失败" };
+        }
+      }
       recentTurnStates.set(event.sessionKey, enriched);
       send("chat:state", enriched);
     },
@@ -277,7 +288,14 @@ async function bootstrap() {
   handle("sessions:list", async (projectPath) =>
     (await agents.allSessions()).filter((session) => session.projectPath === projectPath),
   );
-  handle("sessions:load", (ref) => agents.get(ref.agent).loadSession(ref.id, ref.projectPath));
+  handle("sessions:load", async (ref) => {
+    const result = await agents.get(ref.agent).loadSession(ref.id, ref.projectPath);
+    try { return { ...result, usage: sessionStatistics.usage(ref) }; }
+    catch (error) {
+      console.error("会话统计读取失败", error);
+      return { ...result, usage: { statisticsSaveError: "会话统计读取失败" } };
+    }
+  });
   handle("claude:subagents", (sessionId, projectPath) => {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new Error("无效的 Claude 会话 ID");
     return listSubagents(sessionId, { dir: projectPath });
@@ -301,6 +319,7 @@ async function bootstrap() {
   handle("sessions:rename", (ref, title) => agents.get(ref.agent).renameSession(ref.id, ref.projectPath, title));
   handle("sessions:delete", async (ref) => {
     await agents.get(ref.agent).deleteSession(ref.id, ref.projectPath);
+    sessionStatistics.delete(ref);
     agents.forgetSession(ref);
     return store.removeSessionPin(ref);
   });

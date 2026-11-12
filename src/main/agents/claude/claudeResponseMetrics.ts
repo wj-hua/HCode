@@ -1,52 +1,59 @@
-import { performance } from "node:perf_hooks";
-import type { SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ChatUsage } from "../../../shared/types.js";
-import { ResponseMetrics } from "../responseMetrics.js";
+import type { SDKMessage, SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
+import { CodexResponseMetrics } from "../codex/codexResponseMetrics.js";
 
-interface ResponseSample {
-  startedAt: number;
-  initialTokens: number;
-  finalTokens?: number;
-  durationMs?: number;
-}
-
-/** 将同一个主代理响应的 Token 变化量与完整响应时间配对，包含未展示的思考。 */
-export class ClaudeResponseMetrics extends ResponseMetrics {
-  private readonly responses = new Map<string, ResponseSample>();
+/** 将 Claude 生命周期映射到与 Codex 相同的整轮吞吐计时，主代理用量不含子代理。 */
+export class ClaudeResponseMetrics extends CodexResponseMetrics {
+  private sequence = 0;
   private responseId: string | undefined;
-  private complete = false;
+  private readonly toolBlocks = new Map<number, string>();
 
-  constructor(private readonly clock: () => number = () => performance.now()) {
-    super(clock);
+  override start(ready = true) {
+    super.start();
+    this.sequence++;
+    this.responseId = undefined;
+    this.toolBlocks.clear();
+    // 冷启动等 init 后开始吞吐计时；已运行的 CLI 从发送起计时，TTFT 始终包含启动。
+    if (ready) this.beginTurn(String(this.sequence));
   }
 
-  override start() {
-    super.start();
-    this.responses.clear();
-    this.responseId = undefined;
-    this.complete = false;
+  consume(message: SDKMessage): boolean {
+    if (message.type === "system" && message.subtype === "init") this.beginTurn(String(this.sequence));
+    if (message.type === "stream_event") return this.consumeStream(message);
+    if (message.type === "assistant" && !message.parent_tool_use_id) {
+      // 完整 assistant 消息也覆盖未提供流式工具块的情况；重复工具事件由计时器去重。
+      for (const block of message.message.content) {
+        if (block.type === "tool_use") this.item("mcpToolCall", block.id, true);
+      }
+    }
+    if (message.type === "user" && !message.parent_tool_use_id && Array.isArray(message.message.content)) {
+      for (const block of message.message.content) {
+        if (block.type === "tool_result") this.item("mcpToolCall", block.tool_use_id, false);
+      }
+    }
+    if (message.type === "result") {
+      this.finishTurn(message.subtype === "success" && !message.is_error ? "completed" : "failed", message.duration_ms);
+    }
+    return false;
   }
 
   consumeStream(message: SDKPartialAssistantMessage): boolean {
-    // result.usage 不含子代理，因此计时与 TTFT 也只观察主代理。
-    if (this.complete || message.parent_tool_use_id) return false;
+    if (message.parent_tool_use_id) return false;
     const event = message.event;
     if (event.type === "message_start") {
-      const { id, usage } = event.message;
-      this.responseId = id;
-      if (!this.responses.has(id) && validTokens(usage.output_tokens)) {
-        this.responses.set(id, { startedAt: this.clock(), initialTokens: usage.output_tokens });
-      }
-    } else if (event.type === "message_delta") {
-      const response = this.responseId ? this.responses.get(this.responseId) : undefined;
-      const tokens = event.usage.output_tokens;
-      if (response && validTokens(tokens) && tokens >= response.initialTokens &&
-        (response.finalTokens === undefined || tokens > response.finalTokens)) {
-        response.finalTokens = tokens;
-        response.durationMs = this.clock() - response.startedAt;
-      }
+      this.responseId = event.message.id;
+      this.item("agentMessage", this.responseId, true);
     } else if (event.type === "message_stop") {
+      if (this.responseId) this.item("agentMessage", this.responseId, false);
       this.responseId = undefined;
+    } else if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
+      this.toolBlocks.set(event.index, event.content_block.id);
+    } else if (event.type === "content_block_stop") {
+      const id = this.toolBlocks.get(event.index);
+      if (id) {
+        // 参数生成仍属于模型响应，工具块完整后才开始等待执行结果。
+        this.item("mcpToolCall", id, true);
+        this.toolBlocks.delete(event.index);
+      }
     } else if (event.type === "content_block_delta") {
       const delta = event.delta;
       const text = delta.type === "text_delta" ? delta.text
@@ -56,35 +63,4 @@ export class ClaudeResponseMetrics extends ResponseMetrics {
     }
     return false;
   }
-
-  override finish() {
-    super.finish();
-    this.complete = true;
-  }
-
-  override snapshot(outputTokens?: number): Pick<ChatUsage, "ttftMs" | "outputTokensPerSecond" | "outputSpeedBasis"> {
-    const { ttftMs } = super.snapshot();
-    const metrics: Pick<ChatUsage, "ttftMs" | "outputTokensPerSecond" | "outputSpeedBasis"> =
-      ttftMs === undefined ? {} : { ttftMs };
-    if (!this.complete || !validTokens(outputTokens) || !this.responses.size) return metrics;
-    let totalTokens = 0;
-    let generatedTokens = 0;
-    let durationMs = 0;
-    for (const response of this.responses.values()) {
-      if (response.finalTokens === undefined || response.durationMs === undefined || response.durationMs <= 0) return metrics;
-      totalTokens += response.finalTokens;
-      generatedTokens += response.finalTokens - response.initialTokens;
-      durationMs += response.durationMs;
-    }
-    // 未收到完整流、重试或非流式回退等导致计数不对应时，不能用整轮用量补入短暂的流式窗口。
-    if (totalTokens === outputTokens && generatedTokens > 0 && durationMs > 0) {
-      metrics.outputTokensPerSecond = generatedTokens * 1000 / durationMs;
-      metrics.outputSpeedBasis = "response";
-    }
-    return metrics;
-  }
-}
-
-function validTokens(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

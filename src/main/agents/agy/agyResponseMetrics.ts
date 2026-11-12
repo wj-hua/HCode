@@ -29,6 +29,11 @@ export class AgyResponseMetrics extends ResponseMetrics {
     if (!this.active) return false;
     if (update.step_type === "tool") {
       const info = isRecord(update.tool_info) ? update.tool_info : {};
+      const index = update.step_index;
+      if (typeof index === "number" && Number.isInteger(index) && index >= 0) {
+        const duration = validNumber(update.duration_seconds) ? update.duration_seconds * 1000 : undefined;
+        this.tool(String(index), update.state !== "DONE", duration);
+      }
       const parameters = info.parameters;
       // 工具名称、执行结果和空参数都不是模型首输出。
       return isRecord(parameters) && Object.keys(parameters).length > 0
@@ -61,6 +66,15 @@ export class AgyResponseMetrics extends ResponseMetrics {
   override finish() {
     super.finish();
     this.active = false;
+  }
+
+  override turnStatistics() {
+    const sample = super.turnStatistics();
+    if (sample && !this.invalid && this.responses.size && [...this.responses.values()].every(response =>
+      response.done && response.durationSeconds !== undefined)) {
+      sample.responseMs = [...this.responses.values()].reduce((total, response) => total + response.durationSeconds! * 1000, 0);
+    }
+    return sample;
   }
 
   override snapshot(outputTokens?: number): Metrics {

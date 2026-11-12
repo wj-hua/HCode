@@ -244,7 +244,7 @@ export class ClaudeSession {
     this.promptSuggestions.begin(executionTurnId, this.sessionId, !this.research && this.permissionMode !== 'plan', !this.activeQuery);
     this.clearIdleTimer();
     this.error = undefined;
-    this.responseMetrics.start();
+    this.responseMetrics.start(!!this.activeQuery);
     this.usageVersion++;
     this.usage = this.usage ? {
       contextUsedTokens: this.usage.contextUsedTokens,
@@ -394,7 +394,7 @@ export class ClaudeSession {
 
   private handleMessage(message: SDKMessage) {
     if (message.type === "user" && "isReplay" in message && message.isReplay && message.uuid && this.deliverSteer(message.uuid)) return;
-    if (message.type === "stream_event" && this.responseMetrics.consumeStream(message)) this.emitState();
+    if (this.responseMetrics.consume(message)) this.emitState();
     if (message.type === "system" && message.subtype === "commands_changed") {
       this.host.onCommandsChanged(this.key, message.commands.map(({ name, description, argumentHint, aliases }) => ({
         name, description, argumentHint, ...(aliases?.length ? { aliases } : {}),
@@ -445,7 +445,7 @@ export class ClaudeSession {
       if (message.subtype !== "success" || message.is_error) this.error = message.subtype === "success" ? message.result : message.errors.join("\n");
       // 未投递的插话会被 CLI 立即作为下一轮执行；保持运行态，避免渲染进程误判空闲后重复发送
       this.queuedTurnPending = this.steers.size > 0;
-      if (this.queuedTurnPending) this.responseMetrics.finish();
+      if (this.queuedTurnPending) { this.responseMetrics.finish(); this.emitState(); }
       else if (this.pending.size === 0) this.setState(this.error ? "error" : "idle");
       else this.emitState();
       this.scheduleIdleClose();
@@ -468,6 +468,11 @@ export class ClaudeSession {
     this.error = undefined;
     this.responseMetrics.start();
     this.usageVersion++;
+    this.usage = this.usage ? {
+      contextUsedTokens: this.usage.contextUsedTokens,
+      contextWindowTokens: this.usage.contextWindowTokens,
+      contextUsedPercent: this.usage.contextUsedPercent,
+    } : undefined;
     this.setState("running");
   }
 
@@ -482,6 +487,7 @@ export class ClaudeSession {
       Date.now(),
     );
     this.flushNow();
+    this.responseMetrics.approval(interactionId, true);
     this.setState("awaitingApproval");
     const suggestions = options.suggestions ?? [];
     this.host.emitPermission({
@@ -552,6 +558,7 @@ export class ClaudeSession {
     const pending = this.pending.get(interactionId);
     if (!pending) return;
     this.pending.delete(interactionId);
+    this.responseMetrics.approval(interactionId, false);
     this.projector.resolveToolApproval(pending.toolUseId, allowed);
     this.flushNow();
     pending.resolve(result);
@@ -685,7 +692,7 @@ export class ClaudeSession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(this.model ? { model: this.model } : {}),
-      usage: { ...this.usage, outputSpeedBasis: "response", ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
+      usage: { ...this.usage, outputSpeedBasis: "activeTurn", ...this.responseMetrics.snapshot(this.usage?.outputTokens), turnStatistics: this.responseMetrics.turnStatistics() },
     });
   }
 

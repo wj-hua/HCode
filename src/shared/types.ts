@@ -170,6 +170,7 @@ export interface ForkParams {
 }
 
 export interface SessionLoadResult {
+  usage?: ChatUsage;
   /** 仅远程历史使用；桌面继续一次读取完整历史。 */
   earlierRows?: { ref: SessionRef; beforeRowId: number };
   summary: SessionSummary | null;
@@ -227,11 +228,42 @@ export interface ChatPromptSuggestionEvent {
   suggestion: string | null;
 }
 
+/** 单轮结束后的计时样本；ID 用于持久化去重，不依赖界面状态转换。 */
+export interface TurnStatistics {
+  id: string;
+  toolCalls: number;
+  toolMs: number;
+  incompleteTools: number;
+  responseMs?: number;
+}
+
+/** HCode 实际记录到的会话累计量，不回填缺失的历史计时。 */
+export interface SessionStatistics {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  usageTurns: number;
+  responseMs: number;
+  responseTurns: number;
+  toolCalls: number;
+  toolMs: number;
+  incompleteTools: number;
+  ttftMs: number;
+  ttftTurns: number;
+  activeTurnTokens: number;
+  activeTurnMs: number;
+  responseTokens: number;
+  responseSpeedMs: number;
+}
+
 /** 当前会话最近一轮的用量。 */
 export interface ChatUsage {
+  turnStatistics?: TurnStatistics;
+  sessionStatistics?: SessionStatistics;
+  statisticsSaveError?: string;
   /** 从本轮发送到首个非空模型流式输出的时间，包含 CLI 启动；毫秒。 */
   ttftMs?: number;
-  /** 本轮完成后，按 CLI 输出 Token 和分段流式输出耗时估算的速度。 */
+  /** 本轮完成后，按 CLI 输出 Token 和对应统计口径的耗时估算的速度。 */
   outputTokensPerSecond?: number;
   /** response：完整响应用量与对应耗时配对；activeTurn：整轮耗时扣除工具/审批；未指定为流式片段估算。 */
   outputSpeedBasis?: "response" | "activeTurn";

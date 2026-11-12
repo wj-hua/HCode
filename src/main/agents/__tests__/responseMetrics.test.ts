@@ -79,3 +79,21 @@ describe("CLI 输出速度", () => {
     }
   });
 });
+
+it("工具累计耗时按调用配对，并行相加、重复去重、未配对单独记录", () => {
+  let at = 0;
+  const metrics = new ResponseMetrics(() => at);
+  metrics.start();
+  metrics.tool("first", true);
+  at = 1000; metrics.tool("second", true); metrics.tool("first", true);
+  at = 3000; metrics.tool("first", false); metrics.tool("first", false);
+  at = 4000; metrics.tool("second", false);
+  metrics.tool("missing-start", false); metrics.tool("missing-end", true);
+  expect(metrics.turnStatistics()).toBeUndefined();
+  metrics.finish();
+  expect(metrics.turnStatistics()).toMatchObject({ toolCalls: 2, toolMs: 6000, incompleteTools: 2 });
+  const id = metrics.turnStatistics()!.id;
+  metrics.start(); metrics.finish();
+  expect(metrics.turnStatistics()).toMatchObject({ toolCalls: 0, toolMs: 0, incompleteTools: 0 });
+  expect(metrics.turnStatistics()!.id).not.toBe(id);
+});

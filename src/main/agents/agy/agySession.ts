@@ -351,7 +351,7 @@ export class AgySession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
-      usage: { ...this.usage, ...this.responseMetrics.snapshot(this.usage?.outputTokens) },
+      usage: { ...this.usage, ...this.responseMetrics.snapshot(this.usage?.outputTokens), turnStatistics: this.responseMetrics.turnStatistics() },
     });
   }
 

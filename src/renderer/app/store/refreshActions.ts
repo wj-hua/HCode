@@ -38,7 +38,8 @@ export async function refreshConversation(viewId: string, get: () => AppState, p
       const before = new Map(initial.rows.map(row => [row.rowId, row]));
       const rows = new Map(result.rows.map(row => [row.rowId, row]));
       for (const row of get().conversations[viewId]!.rows) if (before.get(row.rowId) !== row) rows.set(row.rowId, row);
-      patch(viewId, { rows: [...rows.values()].sort((left, right) => left.rowId - right.rowId), earlierRows: result.earlierRows });
+      const currentUsage = get().conversations[viewId]?.usage;
+      patch(viewId, { usage: currentUsage !== initial.usage ? currentUsage : result.usage ?? initial.usage, rows: [...rows.values()].sort((left, right) => left.rowId - right.rowId), earlierRows: result.earlierRows });
     }
     if (current()) patch(viewId, { refreshing: false, refreshRequest: undefined });
   } catch (error) {
