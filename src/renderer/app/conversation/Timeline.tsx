@@ -160,14 +160,7 @@ function TurnView({
   const header = turn.header;
   const turnRunning = header?.state === "running" && isLast && running;
   const last = turn.rows.at(-1);
-  const showThinking =
-    turnRunning &&
-    !(
-      last &&
-      ((last.kind === "assistantText" && last.state === "streaming") ||
-        (last.kind === "reasoning" && last.state === "streaming") ||
-        (last.kind === "toolCall" && last.status === "pendingApproval"))
-    );
+  const showThinking = turnRunning && !(last?.kind === "toolCall" && last.status === "pendingApproval");
   const renderRow = (row: ConversationRow) => (
     <div key={row.rowId} data-search-row-id={row.rowId} className={row.rowId === highlightedRowId ? "rounded-lg ring-2 ring-primary/50" : undefined}>
       <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} />
