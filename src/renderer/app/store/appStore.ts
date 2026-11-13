@@ -680,7 +680,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     newChat(projectPath, agentOverride) {
       const { settings, conversations, sessions } = get();
-      const agent = agentOverride ?? lastProjectAgent(sessions[projectPath]) ?? settings.defaultAgent;
+      const agent = agentOverride ?? settings.projectDefaultAgents[projectPath] ?? lastProjectAgent(sessions[projectPath]) ?? settings.defaultAgent;
       // 同一项目已有空白草稿时直接复用
       const draft = Object.values(conversations).find(
         (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId && !conv.compareId,
@@ -696,7 +696,7 @@ export const useAppStore = create<AppState>((set, get) => {
         activeViewId: viewId,
       }));
       // 项目未展开时会话列表尚未加载，读取后再沿用上次的 CLI（用户已手动切换则不覆盖）。
-      if (agentOverride || !projectPath || sessions[projectPath]) return;
+      if (agentOverride || settings.projectDefaultAgents[projectPath] || !projectPath || sessions[projectPath]) return;
       void get().loadSessions(projectPath).then(() => {
         const last = lastProjectAgent(get().sessions[projectPath]);
         const draft = get().conversations[viewId];
@@ -713,6 +713,8 @@ export const useAppStore = create<AppState>((set, get) => {
       const conv = activeConversation();
       if (!conv || conv.sessionKey || conv.sessionId || conv.projectPath === projectPath) return;
       patchConversation(conv.viewId, { projectPath });
+      const defaultAgent = get().settings.projectDefaultAgents[projectPath];
+      if (defaultAgent) switchDraftAgent(conv.viewId, defaultAgent);
       get().toggleProject(projectPath, true);
     },
 

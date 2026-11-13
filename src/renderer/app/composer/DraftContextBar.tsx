@@ -1,6 +1,7 @@
 // 新会话输入框下方的「文件夹 / 分支」选择：参照 ZCode ChatEmptyWorkspacePreviewMenu 与 GitBranchSwitcher。
-import { ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, GitGraphIcon, LoaderIcon, MessageCircleIcon, PlusIcon, SearchIcon } from "lucide-react";
+import { HistoryIcon, TerminalIcon, ChevronDownIcon, FolderIcon, FolderPlusIcon, GitBranchIcon, GitGraphIcon, LoaderIcon, MessageCircleIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import type { GitBranches, GitBranchSwitchPreview } from "@hcode/shared/types";
 import { cn } from "@/components/lib/utils.js";
 import { isCoarseTouchDevice } from "@/lib/pickerFocus.js";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { toast } from "@/components/ui/toast.js";
+import { AgentBadge } from "../AgentBadge";
 import { hcode, isRemote } from "../bridge";
 import { shortenHome } from "../format";
 import { errorMessage, useAppStore, type Conversation } from "../store/appStore";
@@ -272,10 +274,23 @@ export function BranchPicker({ projectPath, onChanged }: { projectPath: string; 
 
 export function DraftContextBar({ conversation, className = "mt-1.5" }: { conversation: Conversation; className?: string }) {
   const outsideProject = useAppStore((state) => state.projects.some((project) => project.path === conversation.projectPath && project.purpose === "conversation"));
+  const defaults = useAppStore((state) => state.settings.projectDefaultAgents);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const setDraftAgent = useAppStore((state) => state.setDraftAgent);
+  const selected = defaults[conversation.projectPath];
   return (
     <div className={cn("flex min-w-0 items-center gap-1", className)}>
       <FolderPicker conversation={conversation} />
-      {!outsideProject && conversation.projectPath ? <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} /> : null}
+      {!outsideProject && conversation.projectPath ? <>
+        <BranchPicker key={conversation.projectPath} projectPath={conversation.projectPath} />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="sm" aria-label="设置项目默认 CLI" className="gap-1.5 rounded-full text-foreground-subtle"><TerminalIcon className="size-4" /><span>{selected ? AGENTS[selected].name : "默认 CLI"}</span><ChevronDownIcon className="size-3" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top">
+            <DropdownMenuCheckboxItem checked={!selected} onSelect={() => { const next = { ...defaults }; delete next[conversation.projectPath]; void updateSettings({ projectDefaultAgents: next }); }}><HistoryIcon className="size-4 shrink-0 text-foreground-subtle" />沿用最近使用的 CLI</DropdownMenuCheckboxItem>
+            {AGENT_KINDS.map((kind) => <DropdownMenuCheckboxItem key={kind} checked={selected === kind} onSelect={() => { void updateSettings({ projectDefaultAgents: { ...defaults, [conversation.projectPath]: kind } }); setDraftAgent(kind); }}><AgentBadge agent={kind} className="size-4" />{AGENTS[kind].name}</DropdownMenuCheckboxItem>)}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </> : null}
     </div>
   );
 }

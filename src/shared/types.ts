@@ -416,6 +416,8 @@ export interface Settings {
   interfaceMode: InterfaceMode;
   /** 新建会话默认使用的 CLI。 */
   defaultAgent: AgentKind;
+  /** 各项目新会话优先使用的 CLI。 */
+  projectDefaultAgents: Record<string, AgentKind>;
   /** 各 CLI 可执行文件路径；空串 = 自动查找。 */
   agentPaths: Record<AgentKind, string>;
   defaultPermissionModes: Record<AgentKind, PermissionMode>;
@@ -476,6 +478,7 @@ export const DEFAULT_SETTINGS: Settings = {
   locale: "zh-CN",
   interfaceMode: "coding",
   defaultAgent: "claude",
+  projectDefaultAgents: {},
   agentPaths: { claude: "", codex: "", agy: "" },
   defaultPermissionModes: { claude: "default", codex: "on-request", agy: "default" },
   defaultModels: { claude: "", codex: "", agy: "" },
