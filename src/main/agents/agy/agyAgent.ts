@@ -33,17 +33,14 @@ import { projectAgyHistory, projectAgySubagentHistory, userRequestText, type Agy
 import { agyHistorySubagents, filterAgySubagentSessions, isAgyConversationId } from "./agySubagents.js";
 import type { NativeSubagent } from "../../../shared/types.js";
 import { GEMINI_MODEL_PREFIX } from "./agyResearchSession.js";
-import { AGY_DATA_DIR, AgySession, type AgyLaunch } from "./agySession.js";
+import { AGY_DATA_DIR, transcriptPath } from "./agyThinkingTranscript.js";
+import { AgySession, type AgyLaunch } from "./agySession.js";
 
 const execFileAsync = promisify(execFile);
 
 const BRAIN_DIR = join(AGY_DATA_DIR, "brain");
 const ANNOTATIONS_DIR = join(AGY_DATA_DIR, "annotations");
 const SUMMARIES_DB = join(AGY_DATA_DIR, "conversation_summaries.db");
-
-function transcriptPath(id: string): string {
-  return join(BRAIN_DIR, id, ".system_generated/logs/transcript_full.jsonl");
-}
 
 async function readSteps(id: string): Promise<AgyStep[]> {
   const text = await readFile(transcriptPath(id), "utf8");

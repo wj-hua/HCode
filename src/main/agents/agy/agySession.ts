@@ -11,7 +11,7 @@ import type { ResearchRuntime } from "../../sessions/researchRuntime.js";
 import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
 import type { TurnOutcome } from "../../../shared/collaboration.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { AGY_DATA_DIR, AgyThinkingTranscript, transcriptPath } from "./agyThinkingTranscript.js";
 import { join } from "node:path";
 import type {
   ChatRunState,
@@ -27,11 +27,8 @@ import { withFileReferences } from "../fileAttachments.js";
 import { withProjectFilePaths } from "../../projectFiles.js";
 import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
 import { AgyResponseMetrics } from "./agyResponseMetrics.js";
-import { agyLiveSubagents } from "./agySubagents.js";
+import { agyLiveSubagents, isAgyConversationId } from "./agySubagents.js";
 import type { NativeSubagent } from "../../../shared/types.js";
-
-/** agy CLI 的数据目录（会话、transcript、上传的图片都在这里）。 */
-export const AGY_DATA_DIR = join(homedir(), ".gemini/antigravity-cli");
 
 const FLUSH_INTERVAL_MS = 16;
 const INIT_TIMEOUT_MS = 60_000;
@@ -76,6 +73,7 @@ export class AgySession {
   /** 上一次 result 里的累计用量（整个 conversation 累计，跨进程重启也连续），用来相减得到本轮用量。 */
   private lastTotals: { input: number; output: number } | undefined;
   private readonly projector = new AgyRowProjector();
+  private thinkingTranscript?: AgyThinkingTranscript;
   private process: AgyProcess | null = null;
   private starting: Promise<AgyProcess> | null = null;
   /** 当前进程启动时的参数，与现在的设置不同就要重启。 */
@@ -249,6 +247,7 @@ export class AgySession {
       }
       if (this.responseMetrics.consumeStep(update)) this.emitState();
       this.projector.streamStep(update, now);
+      if (update.step_type === "agent_response" && update.state === "DONE") this.restoreStepThinking(update);
       this.scheduleFlush();
     } else if (event.event === "result") {
       if (!this.isBusy || this.interruptRequested) return;
@@ -263,6 +262,20 @@ export class AgySession {
         if (!this.interruptRequested) this.settle(now, native);
       } catch (error) { this.protocolError = `agy stream-json 结果无效：${error instanceof Error ? error.message : String(error)}`; this.bounded?.stop(); this.process?.dispose(); }
     }
+  }
+
+  /** 旧版流事件自带思考。仅在缺失时读取已确认原生会话内的对应步骤。 */
+  private restoreStepThinking(update: JsonRecord) {
+    const id = this.sessionId;
+    if (!id || !isAgyConversationId(id) || typeof update.step_index !== "number") return;
+    if (update.conversation_id !== undefined && update.conversation_id !== id) return;
+    const restore = this.projector.missingThinking(update.step_index);
+    if (!restore) return;
+    this.thinkingTranscript ??= new AgyThinkingTranscript(transcriptPath(id));
+    this.thinkingTranscript.request(update.step_index, text => {
+      restore(text);
+      this.scheduleFlush();
+    });
   }
 
   /**
@@ -317,6 +330,7 @@ export class AgySession {
 
   close() {
     this.closed = true;
+    this.thinkingTranscript?.close();
     if (this.isBusy) { this.lifecycle.requestCancellation(); this.interruptRequested = true; }
     this.bounded?.close();
     this.process?.dispose();
@@ -334,7 +348,10 @@ export class AgySession {
 
   private setState(state: ChatRunState) {
     if (this.state === state) return;
-    if (state === "idle" || state === "error") this.responseMetrics.finish();
+    if (state === "idle" || state === "error") {
+      this.responseMetrics.finish();
+      this.thinkingTranscript?.endTurn();
+    }
     if (state === "awaitingApproval") this.responseMetrics.endSegment();
     this.state = state;
     this.emitState();

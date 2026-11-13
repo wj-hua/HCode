@@ -111,7 +111,13 @@ export class RowProjectorBase {
   }
 
   protected put(row: ConversationRow) {
-    if (!this.rows.has(row.rowId)) this.order.push(row.rowId);
+    if (!this.rows.has(row.rowId)) {
+      // 与渲染端 upsert 顺序一致；实时思考可能在后续工具已显示后才从原生记录补入。
+      let position = this.order.length;
+      while (position > 0 && this.order[position - 1]! > row.rowId) position--;
+      if (position === this.order.length) this.order.push(row.rowId);
+      else this.order.splice(position, 0, row.rowId);
+    }
     this.rows.set(row.rowId, row);
     this.ops.push({ op: "upsert", row });
   }

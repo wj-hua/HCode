@@ -162,6 +162,17 @@ export class AgyRowProjector extends RowProjectorBase {
   private readonly streamText = new Map<number, number>();
   private readonly streamThinking = new Map<number, number>();
 
+  private readonly thinkingSlots = new Map<number, Pick<ReasoningRow, "rowId" | "turnId" | "createdAt" | "createdAtSeq">>();
+
+  /** 仅完成且没有流式思考的步骤需要读盘。闭包绑定原回合的位置，续聊后仍可安全补入。 */
+  missingThinking(index: number) {
+    const slot = this.thinkingSlots.get(index);
+    if (!slot || this.rows.has(slot.rowId)) return;
+    return (text: string) => {
+      if (!this.rows.has(slot.rowId)) this.put({ ...slot, kind: "reasoning", text, state: "complete" });
+    };
+  }
+
   beginLocalTurn(text: string, at: number, images?: readonly ImageInput[], files?: readonly FileInput[], turnId?: string) {
     this.beginUserTurn(text, at, turnId, inputAttachments(images, files));
   }
@@ -170,6 +181,7 @@ export class AgyRowProjector extends RowProjectorBase {
     this.pendingTools = [];
     this.streamText.clear();
     this.streamThinking.clear();
+    this.thinkingSlots.clear();
   }
 
   // ───────────────────────── 历史 ─────────────────────────
@@ -266,6 +278,11 @@ export class AgyRowProjector extends RowProjectorBase {
     const done = update.state === "DONE";
     switch (update.step_type) {
       case "agent_response":
+        // 此步骤的正文可能先于 transcript 到达，预留思考行 ID，空步骤不产生可见行。
+        if (Number.isSafeInteger(index) && index >= 0 && !this.thinkingSlots.has(index)) {
+          this.ensureTurn(at);
+          this.thinkingSlots.set(index, this.base(at));
+        }
         this.streamDelta(this.streamThinking, index, "reasoning", str(update.thinking_delta), done, at);
         this.streamDelta(this.streamText, index, "assistantText", str(update.text_delta), done, at);
         break;
@@ -295,7 +312,7 @@ export class AgyRowProjector extends RowProjectorBase {
       const row: AssistantTextRow | ReasoningRow =
         kind === "assistantText"
           ? { ...this.base(at), kind, text: "", state: "streaming" }
-          : { ...this.base(at), kind, text: "", state: "streaming" };
+          : { ...(this.thinkingSlots.get(index) ?? this.base(at)), kind, text: "", state: "streaming" };
       this.put(row);
       rowId = row.rowId;
       rows.set(index, rowId);
