@@ -37,7 +37,8 @@ export function Header({ conversation, onToggleTerminal, terminalVisible, onTogg
   return (
     <header
       className={cn(
-        "app-drag flex h-11 shrink-0 items-center gap-2 border-b border-border/60 pr-2",
+        "app-drag flex shrink-0 items-center gap-2 border-b border-border/60 pr-2",
+        isRemote ? "h-11" : "h-12 pt-1",
         collapsed && !fullscreen && !isRemote ? "pl-[84px]" : "pl-3",
       )}
     >

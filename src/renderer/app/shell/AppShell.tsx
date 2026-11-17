@@ -1,4 +1,4 @@
-// 应用外壳：结构与样式参照 ZCode WorkspaceShellLayout（侧栏 + 带 4px 留白的圆角主面板）。
+// 应用外壳：结构与样式参照 ZCode WorkspaceShellLayout（侧栏 + 铺满右侧的主面板）。
 import { usePanelWidthPreference } from "../conversation/PanelResizeHandle";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -124,13 +124,12 @@ export function AppShell() {
           )}
           style={{ width: collapsed ? 0 : SIDEBAR_WIDTH }}
         >
-          <aside className="app-reading-surface h-full overflow-hidden select-none" style={{ width: SIDEBAR_WIDTH }}>
+          <aside className="app-reading-surface h-full overflow-hidden border-r border-border/60 select-none" style={{ width: SIDEBAR_WIDTH }}>
             <Sidebar onOpenSearch={openSearch} />
           </aside>
         </div>
-        <div className={cn("flex min-h-0 flex-1 flex-col", narrow ? "min-w-0" : "min-w-[320px] p-1 pt-0", !collapsed && !narrow && "pl-0")}>
-          {!narrow ? <div className="app-drag h-1 w-full" /> : null}
-          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("app-reading-surface collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden", !narrow && "rounded-xl border border-border", !hasBackground && "bg-background")}>
+        <div className={cn("flex min-h-0 flex-1 flex-col", narrow ? "min-w-0" : "min-w-[320px]")}>
+          <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("app-reading-surface collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden", !hasBackground && "bg-background")}>
             <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
             {conversation ? (
               <>
