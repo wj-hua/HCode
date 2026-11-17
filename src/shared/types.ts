@@ -175,6 +175,10 @@ export interface SessionLoadResult {
   earlierRows?: { ref: SessionRef; beforeRowId: number };
   summary: SessionSummary | null;
   rows: ConversationRow[];
+  /** 会话最近一次实际使用的模型（来自历史记录）。 */
+  model?: string;
+  /** 会话最近一次使用的思考强度（来自历史记录）。 */
+  effort?: string;
 }
 
 export interface NativeSubagent {

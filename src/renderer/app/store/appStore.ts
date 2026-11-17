@@ -283,6 +283,7 @@ let draftSeq = 0;
 
 export const useAppStore = create<AppState>((set, get) => {
   const sessionViews = new SessionViewSync();
+  const manualModelViews = new Set<string>();
   // 连续置顶不同会话时逐次读取最新设置，避免后一次补丁覆盖前一次。
   let pinUpdate = Promise.resolve();
   const patchConversation = (viewId: string, patch: Partial<Conversation>) =>
@@ -639,9 +640,14 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       const { settings, models } = get();
       const viewId = summary.id;
+      manualModelViews.delete(viewId);
       // 重启前排队没发出去的消息：恢复后暂停，等用户点「继续」
       const queue = loadQueue(summary.id);
-      const selection = resolveModelSelection(summary.agent, models[summary.agent], getDefaultModel(settings, summary.agent), settings.defaultEfforts[summary.agent]);
+      const live = sessionViews.viewPatch(summary);
+      const liveModel = live?.activeModel;
+      const selection = liveModel
+        ? resolveModelSelection(summary.agent, models[summary.agent], liveModel, "")
+        : resolveModelSelection(summary.agent, models[summary.agent], getDefaultModel(settings, summary.agent), settings.defaultEfforts[summary.agent]);
       const conv: Conversation = {
         viewId,
         agent: summary.agent,
@@ -657,13 +663,12 @@ export const useAppStore = create<AppState>((set, get) => {
         codexSpeed: settings.codexSpeed,
         queue,
         ...(queue.length ? { queuePaused: "stopped" as const } : {}),
+        ...live,
       };
       set((state) => ({
         conversations: { ...state.conversations, [viewId]: conv },
         activeViewId: viewId,
       }));
-      const live = sessionViews.viewPatch(summary);
-      if (live) patchConversation(viewId, live);
       if (live?.rows) {
         if (complete && isRemote && live.earlierRows) await loadRemoteHistory(viewId, get, patchHistory, true);
         return;
@@ -676,8 +681,19 @@ export const useAppStore = create<AppState>((set, get) => {
           projectPath: summary.projectPath,
         }, ...(complete ? [{ complete: true } as const] : []));
         const latest = sessionViews.viewPatch(summary);
-        const currentModel = get().conversations[viewId]?.model ?? selection.model;
-        if (currentLoad()) patchHistory(viewId, { usage: withAgyModelUsage(summary.agent, result.usage, currentModel), ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
+        const current = get().conversations[viewId];
+        const sessionModel = latest?.activeModel ?? result.model;
+        let modelPatch: Partial<Conversation> = {};
+        if (!manualModelViews.has(viewId) && sessionModel) {
+          if (!liveModel) {
+            const next = resolveModelSelection(summary.agent, get().models[summary.agent], sessionModel, latest?.activeModel ? "" : (result.effort ?? ""));
+            modelPatch = { model: next.model, effort: next.effort, ...(latest?.activeModel ? {} : { activeModel: sessionModel }) };
+          } else if (!current?.effort && result.effort && (!result.model || result.model === liveModel)) {
+            modelPatch = { effort: result.effort };
+          }
+        }
+        const currentModel = modelPatch.model ?? current?.model ?? selection.model;
+        if (currentLoad()) patchHistory(viewId, { usage: withAgyModelUsage(summary.agent, result.usage, currentModel), ...modelPatch, ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
       } catch (error) {
         if (!currentLoad()) return;
         const latest = sessionViews.viewPatch(summary);
@@ -872,6 +888,7 @@ export const useAppStore = create<AppState>((set, get) => {
     async setModel(model) {
       const conv = activeConversation();
       if (!conv) return;
+      manualModelViews.add(conv.viewId);
       const usage = !conv.sessionKey ? withAgyModelUsage(conv.agent, conv.usage, model) : conv.usage;
       patchConversation(conv.viewId, { model, ...(usage !== conv.usage ? { usage } : {}) });
       await get().updateSettings({ lastSelectedModels: { [conv.agent]: model } });
@@ -881,6 +898,7 @@ export const useAppStore = create<AppState>((set, get) => {
     async setEffort(effort) {
       const conv = activeConversation();
       if (!conv) return;
+      manualModelViews.add(conv.viewId);
       patchConversation(conv.viewId, { effort });
       await get().updateSettings({ defaultEfforts: { [conv.agent]: effort } });
     },

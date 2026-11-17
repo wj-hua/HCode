@@ -316,9 +316,23 @@ export class CodexAgent implements AgentProvider {
   }
 
   async loadSession(id: string, _projectPath: string): Promise<SessionLoadResult> {
-    const turns = await this.loadTurns(id);
-    const summary = (await this.listSessions()).find((item) => item.id === id) ?? null;
-    return { summary, rows: projectCodexTurns(turns).snapshot() };
+    const [turns, sessions, threadInfo] = await Promise.all([
+      this.loadTurns(id),
+      this.listSessions(),
+      this.client.call<{ thread?: { model?: string | null; reasoningEffort?: string | null } }>("thread/read", {
+        threadId: id,
+        includeTurns: false,
+      }).catch(() => null),
+    ]);
+    const summary = sessions.find((item) => item.id === id) ?? null;
+    const model = threadInfo?.thread?.model || undefined;
+    const effort = threadInfo?.thread?.reasoningEffort || undefined;
+    return {
+      summary,
+      rows: projectCodexTurns(turns).snapshot(),
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
+    };
   }
 
   listSubagents(id: string, projectPath: string) {

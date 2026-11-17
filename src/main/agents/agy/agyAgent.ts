@@ -373,7 +373,12 @@ export class AgyAgent implements AgentProvider {
     const history = agyHistoryContext(steps);
     const windowTokens = agyContextWindowTokens(history.model ?? settings.model, settings.contextWindow);
     const usage = agyContextUsage(history.usedTokens, windowTokens);
-    return { summary, rows: projectAgyHistory(steps).snapshot(), ...(usage ? { usage } : {}) };
+    return {
+      summary,
+      rows: projectAgyHistory(steps).snapshot(),
+      ...(usage ? { usage } : {}),
+      ...(history.model ? { model: history.model } : {}),
+    };
   }
 
   async listSubagents(id: string, projectPath: string): Promise<NativeSubagent[]> {

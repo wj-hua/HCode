@@ -132,9 +132,12 @@ export class ClaudeHistory {
 
   async load(sessionId: string, projectPath: string): Promise<SessionLoadResult> {
     const records = await this.loadRecords(sessionId, projectPath);
+    const rows = projectHistory(records).snapshot();
+    const model = rows.findLast((row) => row.kind === "assistantText" && row.model);
     return {
       summary: await this.find(sessionId),
-      rows: projectHistory(records).snapshot(),
+      rows,
+      ...(model?.kind === "assistantText" && model.model ? { model: model.model } : {}),
     };
   }
 

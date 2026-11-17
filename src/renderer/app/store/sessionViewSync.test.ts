@@ -237,3 +237,104 @@ it("重新打开历史时恢复持久化用量，实时快照仍优先于旧历�
   await useAppStore.getState().openSession(summary);
   expect(useAppStore.getState().conversations[summary.id]?.usage?.outputTokens).toBe(200);
 });
+
+it("打开历史或实时会话时展示并沿用该会话自身的模型与思考强度，而非全局默认模型", async () => {
+  useAppStore.setState({
+    settings: {
+      ...DEFAULT_SETTINGS,
+      notifyOnFinish: false,
+      defaultModels: { ...DEFAULT_SETTINGS.defaultModels, agy: "gemini-4-argon", codex: "gpt-default" },
+      defaultModelModes: { ...DEFAULT_SETTINGS.defaultModelModes, agy: "lastSelected" },
+      lastSelectedModels: { agy: "gemini-4-argon" },
+      defaultEfforts: { ...DEFAULT_SETTINGS.defaultEfforts, agy: "high", codex: "low" },
+    },
+    models: {
+      agy: [
+        { value: "", label: "默认模型", efforts: ["low", "medium", "high"] },
+        { value: "gemini-4-argon", label: "Gemini 4 Argon", efforts: ["low", "medium", "high"] },
+        { value: "gemini-4-carbon", label: "Gemini 4 Carbon", efforts: ["low", "medium", "high"] },
+      ],
+    },
+  });
+
+  // 1) 历史 agy 会话（模型列表已就绪）：应恢复为 carbon / medium，而非 argon / high
+  invoke.mockImplementationOnce(async (channel) => {
+    if (channel === "sessions:load") return { summary, rows: [response("历史")], model: "gemini-4-carbon-medium" };
+    throw new Error(`未配置的 IPC: ${channel}`);
+  });
+  await useAppStore.getState().openSession(summary);
+  expect(useAppStore.getState().conversations[summary.id]).toMatchObject({
+    model: "gemini-4-carbon",
+    effort: "medium",
+    activeModel: "gemini-4-carbon-medium",
+  });
+
+  // 2) 远程/实时会话仅有 chat:state 尚无行（如 H5 chat:live 后点击任务列表）：立即展示 carbon / medium
+  const liveSummary: SessionSummary = { ...summary, id: `${summary.id}-live` };
+  const liveKey = `${sessionKey}-live`;
+  listeners.get("chat:state")!({
+    sessionKey: liveKey,
+    agent: "agy",
+    projectPath: liveSummary.projectPath,
+    sessionId: liveSummary.id,
+    permissionMode: "default",
+    state: "idle",
+    model: "gemini-4-carbon-medium",
+  });
+  invoke.mockImplementationOnce(async (channel) => {
+    if (channel === "sessions:load") return { summary: liveSummary, rows: [response("实时历史")], model: "gemini-4-carbon-medium" };
+    throw new Error(`未配置的 IPC: ${channel}`);
+  });
+  await useAppStore.getState().openSession(liveSummary);
+  expect(useAppStore.getState().conversations[liveSummary.id]).toMatchObject({
+    model: "gemini-4-carbon",
+    effort: "medium",
+    activeModel: "gemini-4-carbon-medium",
+  });
+
+  // 3) 历史 codex 会话：恢复历史模型和思考强度
+  const codexSummary: SessionSummary = { ...summary, id: `${summary.id}-codex`, agent: "codex" };
+  invoke.mockImplementationOnce(async (channel) => {
+    if (channel === "sessions:load") return { summary: codexSummary, rows: [response("历史")], model: "gpt-6.1-sol", effort: "high" };
+    throw new Error(`未配置的 IPC: ${channel}`);
+  });
+  await useAppStore.getState().openSession(codexSummary);
+  expect(useAppStore.getState().conversations[codexSummary.id]).toMatchObject({
+    model: "gpt-6.1-sol",
+    effort: "high",
+    activeModel: "gpt-6.1-sol",
+  });
+
+  // 4) 历史加载期间用户手动改了模型时，迟到的历史结果不能覆盖用户选择
+  const manualSummary: SessionSummary = { ...summary, id: `${summary.id}-manual` };
+  let finishLoad!: (result: unknown) => void;
+  invoke.mockImplementationOnce(() => new Promise((resolve) => { finishLoad = resolve; }));
+  const opening = useAppStore.getState().openSession(manualSummary);
+  invoke.mockResolvedValueOnce(useAppStore.getState().settings);
+  await useAppStore.getState().setModel("gemini-4-argon");
+  finishLoad({ summary: manualSummary, rows: [response("历史")], model: "gemini-4-carbon-medium" });
+  await opening;
+  expect(useAppStore.getState().conversations[manualSummary.id]?.model).toBe("gemini-4-argon");
+
+  // 5) 模型列表尚未加载时先打开历史 agy 会话，待 loadModels 完成后自动归并出基础模型与思考强度
+  const deferredSummary: SessionSummary = { ...summary, id: `${summary.id}-deferred` };
+  useAppStore.setState((state) => ({ models: { ...state.models, agy: undefined } }));
+  invoke.mockImplementationOnce(async (channel) => {
+    if (channel === "sessions:load") return { summary: deferredSummary, rows: [response("历史")], model: "gemini-4-hydrogen-high" };
+    throw new Error(`未配置的 IPC: ${channel}`);
+  });
+  await useAppStore.getState().openSession(deferredSummary);
+  expect(useAppStore.getState().conversations[deferredSummary.id]).toMatchObject({
+    model: "gemini-4-hydrogen-high",
+    effort: "",
+  });
+  invoke.mockResolvedValueOnce([
+    { value: "", label: "默认模型", efforts: ["low", "medium", "high"] },
+    { value: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", efforts: ["low", "medium", "high"] },
+  ]);
+  await useAppStore.getState().loadModels("agy");
+  expect(useAppStore.getState().conversations[deferredSummary.id]).toMatchObject({
+    model: "gemini-4-hydrogen",
+    effort: "high",
+  });
+});
