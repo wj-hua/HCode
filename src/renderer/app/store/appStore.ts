@@ -26,6 +26,7 @@ import type {
   SettingsPatch,
 } from "@hcode/shared/types";
 import { DEFAULT_SETTINGS, getDefaultModel } from "@hcode/shared/types";
+import { normalizeAgyModelSelection } from "@hcode/shared/agyModels";
 import { sessionPinKey } from "@hcode/shared/sessionPins";
 import { encodeAsyncReply, pendingAsyncQuestions } from "@hcode/shared/codexAsyncQuestions";
 import { AGENTS } from "@hcode/shared/agents";
@@ -195,6 +196,15 @@ export function modelEfforts(models: readonly ModelOption[], model: string): str
   return models.find((item) => item.value === model)?.efforts ?? [];
 }
 
+function resolveModelSelection(
+  agent: AgentKind,
+  models: readonly ModelOption[] | undefined,
+  model: string,
+  effort: string,
+): { model: string; effort: string } {
+  return agent === "agy" && models ? normalizeAgyModelSelection(models, model, effort) : { model, effort };
+}
+
 const NOTIFY_STATUS: Record<NotificationEvent, string> = {
   start: "开始执行",
   done: "任务已完成",
@@ -277,12 +287,13 @@ export const useAppStore = create<AppState>((set, get) => {
   const switchDraftAgent = (viewId: string, agent: AgentKind) => {
     const conv = get().conversations[viewId];
     if (!conv || conv.sessionKey || conv.sessionId || conv.agent === agent) return;
-    const { settings } = get();
+    const { settings, models } = get();
+    const selection = resolveModelSelection(agent, models[agent], getDefaultModel(settings, agent), settings.defaultEfforts[agent]);
     patchConversation(viewId, {
       agent,
       permissionMode: settings.defaultPermissionModes[agent],
-      model: getDefaultModel(settings, agent),
-      effort: settings.defaultEfforts[agent],
+      model: selection.model,
+      effort: selection.effort,
       codexSpeed: settings.codexSpeed,
       activeModel: undefined,
     });
@@ -304,7 +315,8 @@ export const useAppStore = create<AppState>((set, get) => {
   };
 
   const draftConversation = (viewId: string, projectPath: string, agent: AgentKind): Conversation => {
-    const { settings } = get();
+    const { settings, models } = get();
+    const selection = resolveModelSelection(agent, models[agent], getDefaultModel(settings, agent), settings.defaultEfforts[agent]);
     return {
       viewId,
       agent,
@@ -313,8 +325,8 @@ export const useAppStore = create<AppState>((set, get) => {
       loading: false,
       runState: "idle",
       permissionMode: settings.defaultPermissionModes[agent],
-      model: getDefaultModel(settings, agent),
-      effort: settings.defaultEfforts[agent],
+      model: selection.model,
+      effort: selection.effort,
       codexSpeed: settings.codexSpeed,
       queue: [],
     };
@@ -370,7 +382,8 @@ export const useAppStore = create<AppState>((set, get) => {
     const sessionKey = conv.sessionKey ?? crypto.randomUUID();
     const resumeSessionId = conv.sessionKey ? undefined : conv.sessionId;
     const models = get().models[conv.agent] ?? AGENTS[conv.agent].models;
-    const effort = modelEfforts(models, conv.model).includes(conv.effort) ? conv.effort : "";
+    const selection = resolveModelSelection(conv.agent, models, conv.model, conv.effort);
+    const effort = modelEfforts(models, selection.model).includes(selection.effort) ? selection.effort : "";
     patchConversation(conv.viewId, {
       sessionKey,
       runState: "running",
@@ -389,7 +402,7 @@ export const useAppStore = create<AppState>((set, get) => {
         ...(images.length ? { images } : {}),
         ...(files.length ? { files } : {}),
         permissionMode: conv.permissionMode,
-        ...(conv.model ? { model: conv.model } : {}),
+        ...(selection.model ? { model: selection.model } : {}),
         ...(effort ? { effort } : {}),
         ...(conv.agent === "codex" ? { codexSpeed: conv.codexSpeed } : {}),
       });
@@ -617,10 +630,11 @@ export const useAppStore = create<AppState>((set, get) => {
         if (complete && isRemote && existing.earlierRows) await loadRemoteHistory(existing.viewId, get, patchHistory, true);
         return;
       }
-      const { settings } = get();
+      const { settings, models } = get();
       const viewId = summary.id;
       // 重启前排队没发出去的消息：恢复后暂停，等用户点「继续」
       const queue = loadQueue(summary.id);
+      const selection = resolveModelSelection(summary.agent, models[summary.agent], getDefaultModel(settings, summary.agent), settings.defaultEfforts[summary.agent]);
       const conv: Conversation = {
         viewId,
         agent: summary.agent,
@@ -631,8 +645,8 @@ export const useAppStore = create<AppState>((set, get) => {
         loading: true,
         runState: "idle",
         permissionMode: settings.defaultPermissionModes[summary.agent],
-        model: getDefaultModel(settings, summary.agent),
-        effort: settings.defaultEfforts[summary.agent],
+        model: selection.model,
+        effort: selection.effort,
         codexSpeed: settings.codexSpeed,
         queue,
         ...(queue.length ? { queuePaused: "stopped" as const } : {}),
@@ -724,7 +738,18 @@ export const useAppStore = create<AppState>((set, get) => {
       set((state) => ({ modelsLoading: { ...state.modelsLoading, [agent]: true }, modelErrors: { ...state.modelErrors, [agent]: undefined } }));
       try {
         const list = await hcode.invoke("agent:models", agent);
-        if (get().settings.agentPaths[agent] === path) set((state) => ({ models: { ...state.models, [agent]: list } }));
+        if (get().settings.agentPaths[agent] === path) set((state) => {
+          if (agent !== "agy") return { models: { ...state.models, [agent]: list } };
+          let conversations = state.conversations;
+          for (const [id, conv] of Object.entries(state.conversations)) {
+            if (conv.agent !== "agy") continue;
+            const next = normalizeAgyModelSelection(list, conv.model, conv.effort);
+            if (next.model === conv.model && next.effort === conv.effort) continue;
+            if (conversations === state.conversations) conversations = { ...state.conversations };
+            conversations[id] = { ...conv, model: next.model, effort: next.effort };
+          }
+          return { models: { ...state.models, [agent]: list }, conversations };
+        });
       } catch (error) {
         if (get().settings.agentPaths[agent] === path) set((state) => ({ modelErrors: { ...state.modelErrors, [agent]: error instanceof Error ? error.message : String(error) } }));
       } finally {

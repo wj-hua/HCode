@@ -64,6 +64,7 @@ export class AgySession {
   sessionId: string | undefined;
   permissionMode: PermissionMode;
   model: string | undefined;
+  effort: string | undefined;
   /** agy 实际使用的模型（init 事件返回）。 */
   private reportedModel: string | undefined;
 
@@ -91,7 +92,7 @@ export class AgySession {
 
   constructor(
     private readonly host: AgySessionHost,
-    options: { key: string; projectPath: string; sessionId?: string; permissionMode: PermissionMode; model?: string; research?: ResearchRuntime; researchRoot?: string },
+    options: { key: string; projectPath: string; sessionId?: string; permissionMode: PermissionMode; model?: string; effort?: string; research?: ResearchRuntime; researchRoot?: string },
   ) {
     this.key = options.key;
     this.lifecycle = new TurnLifecycle(this.key, "agy", (event) => this.host.emitTurnOutcome?.(event));
@@ -99,6 +100,7 @@ export class AgySession {
     this.sessionId = options.sessionId;
     this.permissionMode = options.permissionMode;
     this.model = options.model || undefined;
+    this.effort = options.effort || undefined;
     this.research = options.research;
     if (options.research) {
       if (!options.researchRoot) throw new Error("agy 缺少 HCode 自有角色目录");
@@ -170,13 +172,14 @@ export class AgySession {
     const args = this.bounded ? this.bounded.args(this.research?.outputSchema) : ["--add-dir", this.projectPath];
     if (this.sessionId) args.push("--conversation", this.sessionId);
     if (this.model) args.push("--model", this.model);
+    if (this.effort) args.push("--effort", this.effort);
     if (!this.bounded && this.permissionMode === "accept-edits") args.push("--mode", "accept-edits");
     else if (!this.bounded && this.permissionMode === "bypass") args.push("--dangerously-skip-permissions");
     return args;
   }
 
   private async ensureProcess(): Promise<AgyProcess> {
-    const signature = JSON.stringify([this.permissionMode, this.model ?? "", this.research?.outputSchema]);
+    const signature = JSON.stringify([this.permissionMode, this.model ?? "", this.effort ?? "", this.research?.outputSchema]);
     if (this.process?.running && this.launchedWith === signature) return this.process;
     if (this.starting) return this.starting;
     this.process?.dispose();
@@ -326,6 +329,10 @@ export class AgySession {
   async setModel(model: string) {
     this.model = model || undefined;
     this.emitState();
+  }
+
+  async setEffort(effort: string) {
+    this.effort = effort || undefined;
   }
 
   close() {

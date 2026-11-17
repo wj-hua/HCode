@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AGENT_KINDS, AGENTS, type PermissionModeOption } from "@hcode/shared/agents";
+import { agyModelDisplayLabel } from "@hcode/shared/agyModels";
 import type { AgentKind, FileInput, ImageInput, SlashCommandOption } from "@hcode/shared/types";
 import { CollaborationPanel } from "../collaboration/CollaborationPanel";
 import { useActiveCollaboration } from "../collaboration/useCollaborationSession";
@@ -475,7 +476,14 @@ export function Composer({
   const steerable = agent.steer === true && !conversation.compareId;
   const modeInfo =
     agent.permissionModes.find((item) => item.mode === conversation.permissionMode) ?? agent.permissionModes[0]!;
-  const modelLabel = models.find((item) => item.value === conversation.model)?.label ?? conversation.model;
+  const modelLabel =
+    models.find((item) => item.value === conversation.model)?.label ??
+    (conversation.agent === "agy" ? agyModelDisplayLabel(models, conversation.model) : undefined) ??
+    conversation.model;
+  const activeModelLabel =
+    conversation.agent === "agy" && conversation.activeModel
+      ? (agyModelDisplayLabel(models, conversation.activeModel) ?? conversation.activeModel)
+      : conversation.activeModel;
   const modelGroups = useMemo<ModelSelectGroup[]>(
     () => (isDraft ? AGENT_KINDS : [conversation.agent]).map((kind) => ({
       key: kind,
@@ -811,7 +819,7 @@ export function Composer({
                 modelGroups={modelGroups}
                 showProviderLevel={false}
                 normalizedValue={conversation.model || DEFAULT_MODEL_VALUE}
-                triggerLabel={conversation.model ? modelLabel : conversation.activeModel ?? modelLabel}
+                triggerLabel={conversation.model ? modelLabel : activeModelLabel ?? modelLabel}
                 showManageModelsAction={false}
                 lockReasonMessage=""
                 isItemLocked={isModelLocked}

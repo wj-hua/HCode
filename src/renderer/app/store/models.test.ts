@@ -88,4 +88,25 @@ describe("模型列表读取与重试", () => {
     await vi.waitFor(() => expect(useAppStore.getState().models.codex?.[0]?.value).toBe("new"));
     expect(invoke).toHaveBeenCalledTimes(2);
   });
+  it("读取 agy 模型列表后自动迁移会话里旧版带强度后缀的模型选择", async () => {
+    useAppStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        defaultModels: { ...DEFAULT_SETTINGS.defaultModels, agy: "gemini-4-hydrogen-high" },
+      },
+    });
+    useAppStore.getState().newChat("/first", "agy");
+    const viewId = useAppStore.getState().activeViewId!;
+    expect(useAppStore.getState().conversations[viewId]?.model).toBe("gemini-4-hydrogen-high");
+
+    invoke.mockResolvedValueOnce([
+      { value: "", label: "默认模型", efforts: ["low", "medium", "high", "xhigh"] },
+      { value: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", efforts: ["low", "medium", "high", "xhigh"] },
+    ]);
+    await useAppStore.getState().loadModels("agy");
+    expect(useAppStore.getState().conversations[viewId]).toMatchObject({
+      model: "gemini-4-hydrogen",
+      effort: "high",
+    });
+  });
 });

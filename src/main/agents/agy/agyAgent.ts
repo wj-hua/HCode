@@ -33,6 +33,7 @@ import { projectAgyHistory, projectAgySubagentHistory, userRequestText, type Agy
 import { agyHistorySubagents, filterAgySubagentSessions, isAgyConversationId } from "./agySubagents.js";
 import type { NativeSubagent } from "../../../shared/types.js";
 import { GEMINI_MODEL_PREFIX } from "./agyResearchSession.js";
+import { groupAgyModels, resolveAgyModelInput } from "../../../shared/agyModels.js";
 import { AGY_DATA_DIR, transcriptPath } from "./agyThinkingTranscript.js";
 import { AgySession, type AgyLaunch } from "./agySession.js";
 
@@ -170,6 +171,8 @@ export class AgyAgent implements AgentProvider {
   private readonly sessions = new Map<string, AgySession>();
   private status: AgentStatus | null = null;
   private models: ModelOption[] | null = null;
+  private rawModelIds = new Set<string>();
+  private modelVariants = new Map<string, Map<string, string>>();
   /** 会话 id → 工作区（不会变，找到后一直缓存；没找到的按 transcript 的 mtime 重试）。 */
   private readonly workspaces = new Map<string, { workspace?: string; mtimeMs: number }>();
   private readonly childIndex = new Map<string, { mtimeMs: number; size: number; children: NativeSubagent[] }>();
@@ -216,18 +219,21 @@ export class AgyAgent implements AgentProvider {
     return [...commands.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** `agy models` 每行是 “id<TAB>名称”。 */
+  /** `agy models` 每行是 “id<TAB>名称”，按基础模型折叠并附上思考强度档位。 */
   async listModels(): Promise<ModelOption[]> {
     if (this.models) return this.models;
     const { path, env } = await this.resolveLaunch(AGY_DATA_DIR, []);
     const { stdout } = await execFileAsync(path, ["models"], { env, timeout: 30_000 });
-    const models = stdout.split("\n").filter((line) => line.trim()).map((line) => {
+    const raw = stdout.split("\n").filter((line) => line.trim()).map((line) => {
       const parts = line.split("\t");
       if (parts.length !== 2 || !parts[0]!.trim() || !parts[1]!.trim()) throw new Error("agy 模型列表格式无效，不能使用静态列表替代");
       return { value: parts[0]!.trim(), label: parts[1]!.trim() };
     });
-    if (!models.length) throw new Error("agy 没有返回当前账号的模型列表");
-    this.models = [AGENTS.agy.models[0]!, ...models];
+    if (!raw.length) throw new Error("agy 没有返回当前账号的模型列表");
+    const grouped = groupAgyModels(raw, AGENTS.agy.models[0]!);
+    this.rawModelIds = grouped.rawIds;
+    this.modelVariants = grouped.variants;
+    this.models = grouped.models;
     return this.models;
   }
 
@@ -458,7 +464,13 @@ export class AgyAgent implements AgentProvider {
   }
 
   async send(params: AgentSendParams): Promise<{ sessionKey: string }> {
-    if (params.research && (!params.model?.startsWith(GEMINI_MODEL_PREFIX) || !(await this.listModels()).some((model) => model.value === params.model))) throw new Error("请选择 agy 返回的可用 Gemini 模型，不自动替换模型");
+    if (params.research) {
+      const models = await this.listModels();
+      const valid = params.model?.startsWith(GEMINI_MODEL_PREFIX) &&
+        (models.some((model) => model.value === params.model) || this.rawModelIds.has(params.model));
+      if (!valid) throw new Error("请选择 agy 返回的可用 Gemini 模型，不自动替换模型");
+    }
+    const resolved = resolveAgyModelInput(this.modelVariants, params.model, params.effort);
     let session = this.sessions.get(params.sessionKey);
     if (!session) {
       session = new AgySession(
@@ -479,7 +491,8 @@ export class AgyAgent implements AgentProvider {
           ...(params.resumeSessionId ? { sessionId: params.resumeSessionId } : {}),
           permissionMode: params.permissionMode,
           ...(params.research ? { research: params.research, researchRoot: this.researchRoot } : {}),
-          ...(params.model ? { model: params.model } : {}),
+          ...(resolved.model ? { model: resolved.model } : {}),
+          ...(resolved.effort ? { effort: resolved.effort } : {}),
         },
       );
       this.sessions.set(session.key, session);
@@ -488,7 +501,8 @@ export class AgyAgent implements AgentProvider {
     } else {
       session.configureResearch(params.research);
       if (session.permissionMode !== params.permissionMode) await session.setPermissionMode(params.permissionMode);
-      if (session.model !== params.model) await session.setModel(params.model ?? "");
+      if (session.model !== resolved.model) await session.setModel(resolved.model ?? "");
+      if (session.effort !== resolved.effort) await session.setEffort(resolved.effort ?? "");
     }
     void session.send(params.text, params.images, params.files, params.executionTurnId);
     return { sessionKey: session.key };

@@ -2,6 +2,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { agyInitModelMatches } from '../../../shared/agyModels.js';
 import type { ResearchRuntime } from '../../sessions/researchRuntime.js';
 import { AgyResearchBridge } from './agyResearchBridge.js';
 export const AGY_COLLABORATION_VERSION = '1.3.3';
@@ -28,7 +29,7 @@ export class AgyResearchSession {
   }
   args(schema?: Record<string, unknown>) { return ['--add-dir', this.workspace, '--agent', this.agent, '--disable-slash-commands', ...(schema ? ['--json-schema', JSON.stringify(schema)] : [])]; }
   validateInit(init: Record<string, unknown>, model: string | undefined) {
-    if (init.agent !== this.agent || init.model !== model) throw new Error('agy 未使用已确认的 HCode 角色或 Gemini 模型，拒绝继续');
+    if (init.agent !== this.agent || !agyInitModelMatches(init.model, model)) throw new Error('agy 未使用已确认的 HCode 角色或 Gemini 模型，拒绝继续');
   }
   stop() { this.bridge.stop(); }
   close() { this.bridge.close(); }

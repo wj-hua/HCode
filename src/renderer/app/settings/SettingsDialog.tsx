@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { version as APP_VERSION } from "../../../../package.json";
 import type { AgentKind, NotificationEvent, SettingsPatch } from "@hcode/shared/types";
 import { getDefaultModel, isBackgroundVideo } from "@hcode/shared/types";
+import { agyModelDisplayLabel, normalizeAgyModelSelection } from "@hcode/shared/agyModels";
 import { APP_SHORTCUTS, formatShortcut, shortcutFromEvent, shortcutId, type ShortcutDefinition } from "@hcode/shared/shortcuts";
 import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { AgentBadge } from "../AgentBadge";
@@ -475,7 +476,14 @@ function AgentSection({ kind }: { kind: AgentKind }) {
   const agent = AGENTS[kind];
   const followLastModel = settings.defaultModelModes[kind] === "lastSelected";
   const defaultModel = getDefaultModel(settings, kind);
-  const defaultModelLabel = models.find((item) => item.value === defaultModel)?.label ?? (defaultModel || "CLI 默认模型");
+  const defaultModelLabel =
+    models.find((item) => item.value === defaultModel)?.label ??
+    (kind === "agy" ? agyModelDisplayLabel(models, defaultModel) : undefined) ??
+    (defaultModel || "CLI 默认模型");
+  const fixedDefaultModel =
+    kind === "agy"
+      ? normalizeAgyModelSelection(models, settings.defaultModels[kind], "").model
+      : settings.defaultModels[kind];
 
   useEffect(() => {
     if (open) {
@@ -548,15 +556,15 @@ function AgentSection({ kind }: { kind: AgentKind }) {
         <div className="flex flex-col gap-1.5">
           <label className="text-ui-sm font-medium text-foreground">默认模型</label>
           <StyledSelect
-            value={followLastModel ? LAST_SELECTED_MODEL_VALUE : settings.defaultModels[kind]}
+            value={followLastModel ? LAST_SELECTED_MODEL_VALUE : fixedDefaultModel}
             onChange={(val) => void updateSettings(val === LAST_SELECTED_MODEL_VALUE
               ? { defaultModelModes: { [kind]: "lastSelected" } }
               : { defaultModelModes: { [kind]: "fixed" }, defaultModels: { [kind]: val } })}
             className="w-full"
           >
             <option value={LAST_SELECTED_MODEL_VALUE}>沿用上次手动选择</option>
-            {!models.some((item) => item.value === settings.defaultModels[kind]) && (
-              <option value={settings.defaultModels[kind]}>{settings.defaultModels[kind] || "CLI 默认模型"}</option>
+            {!models.some((item) => item.value === fixedDefaultModel) && (
+              <option value={fixedDefaultModel}>{fixedDefaultModel || "CLI 默认模型"}</option>
             )}
             {models.map((item) => (
               <option key={item.value} value={item.value}>
