@@ -79,12 +79,12 @@ export function GitTools({ workspacePath, running }: { workspacePath: string; ru
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (containerRef.current?.contains(target)) return;
-      if (target.closest('[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"]')) return;
+      if (document.querySelector('[data-slot="popover-content"], [role="dialog"], [role="alertdialog"]')) return;
       setExpanded(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || commitOpen) return;
-      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"], [role="alertdialog"]')) return;
+      if (document.querySelector('[data-slot="popover-content"], [role="dialog"], [role="alertdialog"]')) return;
       setExpanded(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -209,7 +209,7 @@ export function GitTools({ workspacePath, running }: { workspacePath: string; ru
 
           <div className="flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-surface/60 px-2 py-1">
             <span className="shrink-0 pl-1 text-ui-xs text-foreground-subtle">分支</span>
-            <BranchPicker projectPath={workspacePath} onChanged={() => void load()} />
+            <BranchPicker projectPath={workspacePath} onChanged={() => void load()} side="bottom" align="end" avoidCollisions />
           </div>
 
           <div className="mt-2.5">

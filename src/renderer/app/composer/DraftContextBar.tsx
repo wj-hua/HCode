@@ -27,7 +27,7 @@ import { GitSwitchAssistDialog } from "./GitSwitchAssistDialog";
 function MenuSearch({ value, onChange, placeholder, autoFocus = true, stopMenuKeys = true }: { value: string; onChange: (value: string) => void; placeholder: string; autoFocus?: boolean; stopMenuKeys?: boolean }) {
   return (
     // 阻止按键冒泡，否则菜单的首字母跳转会抢走输入
-    <div className="flex items-center gap-2 border-b border-border px-3 py-2" onKeyDown={(event) => { if (stopMenuKeys && event.key !== "Escape" && event.key !== "Tab") event.stopPropagation(); }}>
+    <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2" onKeyDown={(event) => { if (stopMenuKeys && event.key !== "Escape" && event.key !== "Tab") event.stopPropagation(); }}>
       <SearchIcon className="size-4 shrink-0 text-foreground-subtlest" />
       <input
         autoFocus={autoFocus}
@@ -98,7 +98,19 @@ function FolderPicker({ conversation }: { conversation: Conversation }) {
   );
 }
 
-export function BranchPicker({ projectPath, onChanged }: { projectPath: string; onChanged?: () => void }) {
+export function BranchPicker({
+  projectPath,
+  onChanged,
+  side = "top",
+  align = "start",
+  avoidCollisions = false,
+}: {
+  projectPath: string;
+  onChanged?: () => void;
+  side?: "top" | "bottom";
+  align?: "start" | "center" | "end";
+  avoidCollisions?: boolean;
+}) {
   // undefined = 读取中；null = 不是 git 仓库
   const [git, setGit] = useState<GitBranches | null | undefined>(undefined);
   const [pending, setPending] = useState(false);
@@ -209,7 +221,7 @@ export function BranchPicker({ projectPath, onChanged }: { projectPath: string; 
             {!isRemote ? <><span className="truncate">{git.current ?? "分离的 HEAD"}</span>{pending ? <LoaderIcon className="size-3 shrink-0 animate-spin" /> : <ChevronDownIcon className="size-3 shrink-0" />}</> : null}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" side="top" avoidCollisions={false} className="w-72 max-h-(--radix-popover-content-available-height) max-w-[calc(100vw-2rem)] gap-0 bg-menu p-0" onOpenAutoFocus={(event) => {
+        <PopoverContent align={align} side={side} avoidCollisions={avoidCollisions} collisionPadding={12} className="w-72 max-h-(--radix-popover-content-available-height) max-w-[calc(100vw-2rem)] gap-0 bg-menu p-0" onOpenAutoFocus={(event) => {
           event.preventDefault();
           if (!isCoarseTouchDevice()) (event.currentTarget as HTMLElement).querySelector<HTMLInputElement>('input[aria-label="搜索分支"]')?.focus();
         }} onCloseAutoFocus={(event) => { if (isCoarseTouchDevice() || graphOpen || createOpen) event.preventDefault(); }} onKeyDown={(event) => {
@@ -223,7 +235,7 @@ export function BranchPicker({ projectPath, onChanged }: { projectPath: string; 
           items[next]?.focus();
         }}>
           <MenuSearch value={query} onChange={setQuery} placeholder="搜索分支" autoFocus={false} stopMenuKeys={false} />
-          <div ref={branchListRef} className="min-h-0 max-h-48 overflow-y-auto overscroll-contain p-1">
+          <div ref={branchListRef} className="min-h-0 max-h-48 flex-1 overflow-y-auto overscroll-contain p-1">
             <div className="px-3 py-2 font-medium text-foreground-subtle">分支</div>
             {visible.map((branch) => (
               <button
@@ -242,7 +254,7 @@ export function BranchPicker({ projectPath, onChanged }: { projectPath: string; 
             ))}
             {visible.length === 0 ? <div className="px-2 py-2 text-ui-base text-foreground-subtlest">没有匹配的分支</div> : null}
           </div>
-          <div className="border-t border-border p-1">
+          <div className="shrink-0 border-t border-border p-1">
             <Button type="button" variant="ghost" size="lg" className="h-10 w-full justify-start px-2" disabled={pending || running} onClick={() => { setMenuOpen(false); setQuery(""); setBranchName(""); setCreateError(null); setCreateOpen(true); }}>
               <PlusIcon className="size-4" />创建并检出新分支…
             </Button>
