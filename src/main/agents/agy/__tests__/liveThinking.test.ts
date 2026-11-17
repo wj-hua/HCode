@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { applyRowOps } from "../../../../renderer/app/rows.js";
-import type { ConversationRow } from "../../../../shared/types.js";
+import type { ChatStateEvent, ConversationRow } from "../../../../shared/types.js";
 import { AgySession } from "../agySession.js";
 
 const fixture = vi.hoisted(() => ({ home: "" }));
@@ -42,29 +42,35 @@ it("实时事件缺 thinking 时按原生步骤补入，晚到记录仍归原轮
     });
   `);
   let rows: ConversationRow[] = [];
+  const states: ChatStateEvent[] = [];
   const session = new AgySession({
     resolveLaunch: async () => ({ path: process.execPath, cwd: root, env: {}, args: [program] }),
-    emitRows: (_key, ops) => { rows = applyRowOps(rows, ops); }, emitState: () => {}, onSettled: () => {},
+    emitRows: (_key, ops) => { rows = applyRowOps(rows, ops); }, emitState: (event) => { states.push(event); }, onSettled: () => {},
   }, { key: id, projectPath: root, permissionMode: "default" });
   const transcript = join(logs, "transcript_full.jsonl");
-  const planner = (index: number, thinking: string) => JSON.stringify({ step_index: index, type: "PLANNER_RESPONSE", status: "DONE", thinking });
+  const planner = (index: number, thinking: string, tokens?: { input: number; cache: number; output: number }) => JSON.stringify({
+    step_index: index, type: "PLANNER_RESPONSE", status: "DONE", thinking,
+    ...(tokens ? { model: "gemini-4-carbon-high", input_tokens: tokens.input, cache_read_tokens: tokens.cache, output_tokens: tokens.output } : {}),
+  });
   try {
     await session.send("查文件", [], [], "first");
     await vi.waitFor(() => expect(rows.some(row => row.kind === "toolCall")).toBe(true));
     // 文件可能晚于 stdout 创建，且首个可见版本可能只写了半行。
     const longThinking = "读取前的思考".repeat(5000); // 跨读取块的 UTF-8 原文
-    const line = planner(1, longThinking);
+    const line = planner(1, longThinking, { input: 20_000, cache: 5_000, output: 500 });
     await writeFile(transcript, line.slice(0, -3));
     await appendFile(transcript, line.slice(-3) + "\n");
     await vi.waitFor(() => expect(rows.map(row => row.kind)).toEqual(["turnHeader", "userInput", "reasoning", "toolCall"]));
+    expect(states.at(-1)?.usage).toMatchObject({ contextUsedTokens: 25_500, contextWindowTokens: 1_048_576 });
     expect(session.isBusy).toBe(true);
     await writeFile(join(root, "finish"), "");
     await vi.waitFor(() => expect(session.isBusy).toBe(false));
     await session.send("继续", [], [], "second");
-    await appendFile(transcript, planner(3, "回复前的思考") + "\n" + planner(5, "旧版增量") + "\n");
+    await appendFile(transcript, planner(3, "回复前的思考", { input: 3_000, cache: 25_500, output: 400 }) + "\n" + planner(5, "旧版增量", { input: 2_000, cache: 28_900, output: 100 }) + "\n");
     await vi.waitFor(() => expect(rows.filter(row => row.kind === "reasoning").map(row => [row.turnId, row.text])).toEqual([
       ["first", longThinking], ["first", "回复前的思考"], ["second", "旧版增量"],
     ]));
+    await vi.waitFor(() => expect(states.at(-1)?.usage).toMatchObject({ contextUsedTokens: 31_000, contextWindowTokens: 1_048_576 }));
     expect(rows.filter(row => row.turnId === "first").map(row => row.kind)).toEqual([
       "turnHeader", "userInput", "reasoning", "toolCall", "reasoning", "assistantText",
     ]);

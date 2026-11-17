@@ -1,8 +1,8 @@
-// agy 1.5.8 的 stdout 只给步骤终态；从同一原生会话的 JSONL 尾部补取已完成的思考。
+// agy 1.5.8+ 的 stdout 只给步骤终态；从同一原生会话的 JSONL 尾部补取已完成的思考与单步上下文用量。
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isRecord } from "../rowProjectorBase.js";
+import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
 
 export const AGY_DATA_DIR = join(homedir(), ".gemini/antigravity-cli");
 export const transcriptPath = (id: string) => join(AGY_DATA_DIR, "brain", id, ".system_generated/logs/transcript_full.jsonl");
@@ -10,7 +10,65 @@ export const transcriptPath = (id: string) => join(AGY_DATA_DIR, "brain", id, ".
 const BLOCK_BYTES = 64 * 1024;
 const RETRY_MS = 250;
 const SETTLED_GRACE_MS = 30_000;
-type Deliver = (text: string) => void;
+
+export interface AgyStepSnapshot {
+  thinking: string;
+  usedTokens?: number;
+  model?: string;
+}
+
+export interface AgyHistoryContext {
+  usedTokens?: number;
+  model?: string;
+  lastStepIndex?: number;
+}
+
+type Deliver = (snapshot: AgyStepSnapshot) => void;
+
+function nonnegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/** 单次模型调用结束后的上下文占用 = 非缓存输入 + 缓存读取 + 输出（含思考），与 agy acp usage_update 一致。 */
+export function agyStepContextTokens(record: JsonRecord): number | undefined {
+  if (!nonnegativeNumber(record.input_tokens) || !nonnegativeNumber(record.output_tokens)) return undefined;
+  const cacheRead = record.cache_read_tokens === undefined ? 0 : record.cache_read_tokens;
+  if (!nonnegativeNumber(cacheRead)) return undefined;
+  const total = record.input_tokens + cacheRead + record.output_tokens;
+  return total > 0 ? total : undefined;
+}
+
+/** 从历史步骤逆序提取压缩点之后的最新上下文占用与实际模型。 */
+export function agyHistoryContext(steps: readonly JsonRecord[]): AgyHistoryContext {
+  let usedTokens: number | undefined;
+  let model: string | undefined;
+  let lastStepIndex: number | undefined;
+  let checkpointed = false;
+
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i]!;
+    if (lastStepIndex === undefined && typeof step.step_index === "number" && Number.isSafeInteger(step.step_index)) {
+      lastStepIndex = step.step_index;
+    }
+    if (step.type === "CHECKPOINT" && usedTokens === undefined) {
+      checkpointed = true;
+    } else if (step.type === "PLANNER_RESPONSE" && (step.status === undefined || step.status === "DONE")) {
+      if (!model && typeof step.model === "string" && step.model.trim()) {
+        model = step.model.trim();
+      }
+      if (!checkpointed && usedTokens === undefined) {
+        usedTokens = agyStepContextTokens(step);
+      }
+    }
+    if (model && (usedTokens !== undefined || checkpointed)) break;
+  }
+
+  return {
+    ...(usedTokens !== undefined ? { usedTokens } : {}),
+    ...(model ? { model } : {}),
+    ...(lastStepIndex !== undefined ? { lastStepIndex } : {}),
+  };
+}
 
 /** 仅读到快照的末尾。跨块按字节拼行，避免切坏 UTF-8；忽略仍在写入的末行。 */
 async function* reverseLines(path: string) {
@@ -43,14 +101,20 @@ async function* reverseLines(path: string) {
 
 /** 只按真实的 PLANNER_RESPONSE 终态取值；空 thinking 同样结束该步骤的查询。 */
 async function readCompletedSteps(path: string, wanted: Set<number>) {
-  const found = new Map<number, string>();
+  const found = new Map<number, AgyStepSnapshot>();
   const earliest = Math.min(...wanted);
   for await (const line of reverseLines(path)) {
     const record: unknown = JSON.parse(line);
     if (!isRecord(record) || typeof record.step_index !== "number") continue;
     if (record.step_index < earliest) break;
     if (!wanted.has(record.step_index) || record.type !== "PLANNER_RESPONSE" || record.status !== "DONE") continue;
-    found.set(record.step_index, typeof record.thinking === "string" ? record.thinking.trim() : "");
+    const usedTokens = agyStepContextTokens(record);
+    const model = typeof record.model === "string" && record.model.trim() ? record.model.trim() : undefined;
+    found.set(record.step_index, {
+      thinking: typeof record.thinking === "string" ? record.thinking.trim() : "",
+      ...(usedTokens !== undefined ? { usedTokens } : {}),
+      ...(model ? { model } : {}),
+    });
     if (found.size === wanted.size) break;
   }
   return found;
@@ -86,8 +150,10 @@ export class AgyThinkingTranscript {
     this.timer = undefined;
     try {
       const steps = await readCompletedSteps(this.path, new Set(this.pending.keys()));
-      for (const [index, text] of steps) {
-        if (text) this.pending.get(index)?.(text);
+      for (const [index, snapshot] of steps) {
+        if (snapshot.thinking || snapshot.usedTokens !== undefined || snapshot.model) {
+          this.pending.get(index)?.(snapshot);
+        }
         this.pending.delete(index);
       }
     } catch (error) {

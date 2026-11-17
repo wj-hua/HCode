@@ -1,4 +1,4 @@
-import type { ModelOption } from "./types.js";
+import type { ChatUsage, ModelOption } from "./types.js";
 
 /** agy 思考强度从低到高的展示与滑杆顺序。 */
 export const AGY_EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -165,4 +165,61 @@ export function agyInitModelMatches(actual: unknown, expected: string | undefine
   if (typeof actual !== "string" || !expected) return false;
   if (actual === expected) return true;
   return !parseAgyModelVariant(expected) && parseAgyModelVariant(actual)?.base === expected;
+}
+
+const CONTEXT_OVERRIDE_PRESETS: Record<string, number> = {
+  "1m": 1_048_576,
+  "250k": 250_000,
+  "200k": 200_000,
+  "128k": 131_072,
+};
+
+function parseContextWindowOverride(value: string | undefined): number | undefined {
+  const clean = value?.trim().toLowerCase();
+  if (!clean) return undefined;
+  const preset = CONTEXT_OVERRIDE_PRESETS[clean];
+  if (preset) return preset;
+  if (/^\d+$/.test(clean)) {
+    const tokens = Number(clean);
+    return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : undefined;
+  }
+  return undefined;
+}
+
+/** 按 Antigravity 模型族（及可选的 settings.json contextWindow 覆盖）解析上下文窗口大小。 */
+export function agyContextWindowTokens(
+  modelId: string | undefined,
+  overrides?: Readonly<Record<string, string>>,
+): number | undefined {
+  const clean = modelId?.trim().toLowerCase();
+  if (!clean) return undefined;
+  if (overrides) {
+    const base = parseAgyModelVariant(clean)?.base;
+    const custom = parseContextWindowOverride(overrides[clean] ?? (base ? overrides[base] : undefined));
+    if (custom) return custom;
+  }
+  if (clean.startsWith("gemini-")) return 1_048_576;
+  if (clean.startsWith("claude-")) return 250_000;
+  if (clean.startsWith("gpt-oss-")) return 131_072;
+  return undefined;
+}
+
+export type AgyContextUsage = Pick<ChatUsage, "contextUsedTokens" | "contextWindowTokens" | "contextUsedPercent">;
+
+/** 仅在已用 Token 与模型窗口均有效时生成上下文容量指标。 */
+export function agyContextUsage(
+  usedTokens: number | undefined,
+  windowTokens: number | undefined,
+): AgyContextUsage | undefined {
+  if (
+    typeof usedTokens !== "number" || !Number.isFinite(usedTokens) || usedTokens <= 0 ||
+    typeof windowTokens !== "number" || !Number.isFinite(windowTokens) || windowTokens <= 0
+  ) {
+    return undefined;
+  }
+  return {
+    contextUsedTokens: usedTokens,
+    contextWindowTokens: windowTokens,
+    contextUsedPercent: (usedTokens / windowTokens) * 100,
+  };
 }

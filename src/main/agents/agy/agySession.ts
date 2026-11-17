@@ -11,7 +11,8 @@ import type { ResearchRuntime } from "../../sessions/researchRuntime.js";
 import { TurnLifecycle } from "../../sessions/turnLifecycle.js";
 import type { TurnOutcome } from "../../../shared/collaboration.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { AGY_DATA_DIR, AgyThinkingTranscript, transcriptPath } from "./agyThinkingTranscript.js";
+import { AGY_DATA_DIR, agyHistoryContext, agyStepContextTokens, AgyThinkingTranscript, transcriptPath } from "./agyThinkingTranscript.js";
+import { agyContextUsage, agyContextWindowTokens } from "../../../shared/agyModels.js";
 import { join } from "node:path";
 import type {
   ChatRunState,
@@ -65,8 +66,14 @@ export class AgySession {
   permissionMode: PermissionMode;
   model: string | undefined;
   effort: string | undefined;
-  /** agy 实际使用的模型（init 事件返回）。 */
+  /** agy 实际使用的模型（init 事件或步骤记录返回）。 */
   private reportedModel: string | undefined;
+  private readonly defaultModel: string | undefined;
+  private readonly contextWindowOverrides: Readonly<Record<string, string>> | undefined;
+  private contextUsedTokens: number | undefined;
+  private lastContextStep = -1;
+  private turnResponseSteps = 0;
+  private turnStepContextUpdated = false;
 
   private usage: ChatUsage | undefined;
   private readonly responseMetrics = new AgyResponseMetrics();
@@ -92,7 +99,18 @@ export class AgySession {
 
   constructor(
     private readonly host: AgySessionHost,
-    options: { key: string; projectPath: string; sessionId?: string; permissionMode: PermissionMode; model?: string; effort?: string; research?: ResearchRuntime; researchRoot?: string },
+    options: {
+      key: string;
+      projectPath: string;
+      sessionId?: string;
+      permissionMode: PermissionMode;
+      model?: string;
+      effort?: string;
+      defaultModel?: string;
+      contextWindowOverrides?: Readonly<Record<string, string>>;
+      research?: ResearchRuntime;
+      researchRoot?: string;
+    },
   ) {
     this.key = options.key;
     this.lifecycle = new TurnLifecycle(this.key, "agy", (event) => this.host.emitTurnOutcome?.(event));
@@ -101,6 +119,8 @@ export class AgySession {
     this.permissionMode = options.permissionMode;
     this.model = options.model || undefined;
     this.effort = options.effort || undefined;
+    this.defaultModel = options.defaultModel || undefined;
+    this.contextWindowOverrides = options.contextWindowOverrides;
     this.research = options.research;
     if (options.research) {
       if (!options.researchRoot) throw new Error("agy 缺少 HCode 自有角色目录");
@@ -127,6 +147,11 @@ export class AgySession {
     }
     this.projector.closeTurn(lastAt || Date.now());
     this.projector.drain();
+    const history = agyHistoryContext(steps);
+    if (history.lastStepIndex !== undefined) this.lastContextStep = Math.max(this.lastContextStep, history.lastStepIndex);
+    if (history.model && !this.reportedModel) this.reportedModel = history.model;
+    this.contextUsedTokens = history.usedTokens;
+    this.refreshContextUsage();
     this.host.emitRows(this.key, [{ op: "reset", rows: this.projector.snapshot() }]);
   }
 
@@ -136,7 +161,9 @@ export class AgySession {
     this.error = undefined;
     this.protocolError = undefined;
     this.responseMetrics.start();
-    this.usage = undefined;
+    this.turnResponseSteps = 0;
+    this.turnStepContextUpdated = false;
+    this.usage = this.contextUsage();
     this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
     this.flushNow();
     this.setState("running");
@@ -203,7 +230,10 @@ export class AgySession {
           const init = isRecord(event.init) ? event.init : {};
           try { this.bounded?.validateInit(init, this.model); }
           catch (error) { reject(error); agy.dispose(); return; }
-          if (typeof init.model === "string") this.reportedModel = init.model;
+          if (typeof init.model === "string") {
+            this.reportedModel = init.model;
+            this.refreshContextUsage();
+          }
           this.process = agy;
           this.launchedWith = signature;
           if (this.closed) agy.dispose();
@@ -243,14 +273,33 @@ export class AgySession {
     const now = Date.now();
     if (event.event === "step_update" && isRecord(event.step_update)) {
       const update = event.step_update;
+      const isOwnConversation = update.conversation_id === undefined || update.conversation_id === this.sessionId;
       if (this.sessionId) for (const child of agyLiveSubagents(this.sessionId, update)) {
         const isNew = !this.nativeSubagents.has(child.id);
         this.nativeSubagents.set(child.id, child);
         if (isNew) this.host.onSubagentsChanged?.(this);
       }
-      if (this.responseMetrics.consumeStep(update)) this.emitState();
+      const metricsChanged = this.responseMetrics.consumeStep(update);
+      let contextChanged = false;
       this.projector.streamStep(update, now);
-      if (update.step_type === "agent_response" && update.state === "DONE") this.restoreStepThinking(update);
+      if (isOwnConversation && update.step_type === "checkpoint" && update.state === "DONE") {
+        if (typeof update.step_index === "number") this.lastContextStep = Math.max(this.lastContextStep, update.step_index);
+        this.contextUsedTokens = undefined;
+        this.turnStepContextUpdated = true;
+        this.refreshContextUsage();
+        contextChanged = true;
+      } else if (isOwnConversation && update.step_type === "agent_response" && update.state === "DONE") {
+        this.turnResponseSteps++;
+        const directModel = typeof update.model === "string" && update.model.trim() ? update.model.trim() : undefined;
+        const directTokens = isRecord(update.usage) ? agyStepContextTokens(update.usage) : undefined;
+        if (directTokens !== undefined || directModel) {
+          const stepIndex = typeof update.step_index === "number" ? update.step_index : this.lastContextStep;
+          contextChanged = this.updateStepContext(stepIndex, directTokens, directModel);
+        }
+        const needsTranscriptContext = directTokens === undefined || (!this.model && !this.reportedModel && !directModel);
+        this.syncStepTranscript(update, needsTranscriptContext);
+      }
+      if (metricsChanged || contextChanged) this.emitState();
       this.scheduleFlush();
     } else if (event.event === "result") {
       if (!this.isBusy || this.interruptRequested) return;
@@ -267,24 +316,61 @@ export class AgySession {
     }
   }
 
-  /** 旧版流事件自带思考。仅在缺失时读取已确认原生会话内的对应步骤。 */
-  private restoreStepThinking(update: JsonRecord) {
+  /** 从已确认原生会话的 JSONL 补取缺失的思考记录，并同步单步上下文占用与实际模型。 */
+  private syncStepTranscript(update: JsonRecord, needsContext: boolean) {
     const id = this.sessionId;
-    if (!id || !isAgyConversationId(id) || typeof update.step_index !== "number") return;
+    const stepIndex = update.step_index;
+    if (!id || !isAgyConversationId(id) || typeof stepIndex !== "number") return;
     if (update.conversation_id !== undefined && update.conversation_id !== id) return;
-    const restore = this.projector.missingThinking(update.step_index);
-    if (!restore) return;
+    const restore = this.projector.missingThinking(stepIndex);
+    if (!restore && !needsContext) return;
     this.thinkingTranscript ??= new AgyThinkingTranscript(transcriptPath(id));
-    this.thinkingTranscript.request(update.step_index, text => {
-      restore(text);
-      this.scheduleFlush();
+    this.thinkingTranscript.request(stepIndex, (snapshot) => {
+      if (restore && snapshot.thinking) {
+        restore(snapshot.thinking);
+        this.scheduleFlush();
+      }
+      if (!this.closed && (snapshot.usedTokens !== undefined || snapshot.model)) {
+        if (this.updateStepContext(stepIndex, snapshot.usedTokens, snapshot.model)) this.emitState();
+      }
     });
+  }
+
+  private contextUsage() {
+    const effectiveModel = this.model ?? this.reportedModel ?? this.defaultModel;
+    return agyContextUsage(this.contextUsedTokens, agyContextWindowTokens(effectiveModel, this.contextWindowOverrides));
+  }
+
+  private refreshContextUsage() {
+    const context = this.contextUsage();
+    const { contextUsedTokens: _u, contextWindowTokens: _w, contextUsedPercent: _p, ...rest } = this.usage ?? {};
+    const next: ChatUsage = { ...rest, ...context };
+    this.usage = Object.keys(next).length > 0 ? next : undefined;
+  }
+
+  private updateStepContext(stepIndex: number, usedTokens: number | undefined, model: string | undefined): boolean {
+    if (stepIndex < this.lastContextStep) return false;
+    this.lastContextStep = stepIndex;
+    let changed = false;
+    if (model && model !== this.reportedModel) {
+      this.reportedModel = model;
+      changed = true;
+    }
+    if (usedTokens !== undefined) {
+      this.turnStepContextUpdated = true;
+      if (usedTokens !== this.contextUsedTokens) {
+        this.contextUsedTokens = usedTokens;
+        changed = true;
+      }
+    }
+    if (changed) this.refreshContextUsage();
+    return changed;
   }
 
   /**
    * result.usage 是整个 conversation 的累计值（不是本轮）：本轮 = 与上一次 result 的差。
    * 没有上一次记录时（打开历史会话后的第一轮），只有 num_turns 为 1 才能确定累计值就是本轮。
-   * agy 不报告上下文窗口，所以只显示 Token；输出 Token 已包含思考 Token，输入包含缓存命中。
+   * 输出 Token 已包含思考 Token，输入包含缓存命中；单步回合尚未拿到步骤用量时可用本轮总量兜底上下文占用。
    */
   private recordUsage(result: JsonRecord) {
     const usage = cumulativeUsageSchema.safeParse(result.usage);
@@ -296,7 +382,10 @@ export class AgySession {
     if (!previous && result.num_turns !== 1) return;
     if (previous && (totals.input < previous.input || totals.output < previous.output)) return;
     const turn = previous ? { input: totals.input - previous.input, output: totals.output - previous.output } : totals;
-    this.usage = { inputTokens: turn.input, outputTokens: turn.output };
+    if (!this.turnStepContextUpdated && this.turnResponseSteps <= 1 && turn.input + turn.output > 0) {
+      this.contextUsedTokens = turn.input + turn.output;
+    }
+    this.usage = { ...this.contextUsage(), inputTokens: turn.input, outputTokens: turn.output };
   }
 
   private settle(at: number, result: Pick<TurnOutcome, "outcome" | "text">) {
@@ -328,6 +417,7 @@ export class AgySession {
 
   async setModel(model: string) {
     this.model = model || undefined;
+    this.refreshContextUsage();
     this.emitState();
   }
 

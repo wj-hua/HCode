@@ -33,8 +33,8 @@ import { projectAgyHistory, projectAgySubagentHistory, userRequestText, type Agy
 import { agyHistorySubagents, filterAgySubagentSessions, isAgyConversationId } from "./agySubagents.js";
 import type { NativeSubagent } from "../../../shared/types.js";
 import { GEMINI_MODEL_PREFIX } from "./agyResearchSession.js";
-import { groupAgyModels, resolveAgyModelInput } from "../../../shared/agyModels.js";
-import { AGY_DATA_DIR, transcriptPath } from "./agyThinkingTranscript.js";
+import { agyContextUsage, agyContextWindowTokens, groupAgyModels, resolveAgyModelInput } from "../../../shared/agyModels.js";
+import { AGY_DATA_DIR, agyHistoryContext, transcriptPath } from "./agyThinkingTranscript.js";
 import { AgySession, type AgyLaunch } from "./agySession.js";
 
 const execFileAsync = promisify(execFile);
@@ -42,6 +42,31 @@ const execFileAsync = promisify(execFile);
 const BRAIN_DIR = join(AGY_DATA_DIR, "brain");
 const ANNOTATIONS_DIR = join(AGY_DATA_DIR, "annotations");
 const SUMMARIES_DB = join(AGY_DATA_DIR, "conversation_summaries.db");
+const SETTINGS_PATH = join(AGY_DATA_DIR, "settings.json");
+
+interface AgySettingsSnapshot {
+  model?: string;
+  contextWindow?: Record<string, string>;
+}
+
+async function readAgySettings(): Promise<AgySettingsSnapshot> {
+  try {
+    const raw = (await readFile(SETTINGS_PATH, "utf8")).replace(/^\uFEFF/, "");
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return {};
+    const model = typeof parsed.model === "string" && parsed.model.trim() ? parsed.model.trim() : undefined;
+    let contextWindow: Record<string, string> | undefined;
+    if (isRecord(parsed.contextWindow)) {
+      const entries = Object.entries(parsed.contextWindow).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+      if (entries.length > 0) {
+        contextWindow = Object.fromEntries(entries.map(([key, value]) => [key.trim().toLowerCase(), value]));
+      }
+    }
+    return { ...(model ? { model } : {}), ...(contextWindow ? { contextWindow } : {}) };
+  } catch {
+    return {};
+  }
+}
 
 async function readSteps(id: string): Promise<AgyStep[]> {
   const text = await readFile(transcriptPath(id), "utf8");
@@ -339,9 +364,16 @@ export class AgyAgent implements AgentProvider {
   }
 
   async loadSession(id: string, _projectPath: string): Promise<SessionLoadResult> {
-    const steps = await readSteps(id);
-    const summary = (await this.listSessions()).find((item) => item.id === id) ?? null;
-    return { summary, rows: projectAgyHistory(steps).snapshot() };
+    const [steps, sessions, settings] = await Promise.all([
+      readSteps(id),
+      this.listSessions(),
+      readAgySettings(),
+    ]);
+    const summary = sessions.find((item) => item.id === id) ?? null;
+    const history = agyHistoryContext(steps);
+    const windowTokens = agyContextWindowTokens(history.model ?? settings.model, settings.contextWindow);
+    const usage = agyContextUsage(history.usedTokens, windowTokens);
+    return { summary, rows: projectAgyHistory(steps).snapshot(), ...(usage ? { usage } : {}) };
   }
 
   async listSubagents(id: string, projectPath: string): Promise<NativeSubagent[]> {
@@ -473,6 +505,7 @@ export class AgyAgent implements AgentProvider {
     const resolved = resolveAgyModelInput(this.modelVariants, params.model, params.effort);
     let session = this.sessions.get(params.sessionKey);
     if (!session) {
+      const settings = await readAgySettings();
       session = new AgySession(
         {
           resolveLaunch: (cwd, args) => this.resolveLaunch(cwd, args),
@@ -493,6 +526,8 @@ export class AgyAgent implements AgentProvider {
           ...(params.research ? { research: params.research, researchRoot: this.researchRoot } : {}),
           ...(resolved.model ? { model: resolved.model } : {}),
           ...(resolved.effort ? { effort: resolved.effort } : {}),
+          ...(settings.model ? { defaultModel: settings.model } : {}),
+          ...(settings.contextWindow ? { contextWindowOverrides: settings.contextWindow } : {}),
         },
       );
       this.sessions.set(session.key, session);

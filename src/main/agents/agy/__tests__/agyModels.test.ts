@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  agyContextUsage,
+  agyContextWindowTokens,
   agyInitModelMatches,
   agyModelDisplayLabel,
   groupAgyModels,
@@ -68,5 +70,23 @@ describe("groupAgyModels", () => {
     expect(agyInitModelMatches("gemini-4-argon-medium", "gemini-4-argon")).toBe(true);
     expect(agyInitModelMatches("gemini-4-argon-medium", "gemini-4-argon-high")).toBe(false);
     expect(agyInitModelMatches("claude-opus-5-5-medium", "gemini-4-argon")).toBe(false);
+  });
+
+  it("按模型族与可选 settings 覆盖解析上下文窗口，不伪造未知模型容量", () => {
+    expect(agyContextWindowTokens("gemini-4-hydrogen-high")).toBe(1_048_576);
+    expect(agyContextWindowTokens("gemini-4-hydrogen")).toBe(1_048_576);
+    expect(agyContextWindowTokens("claude-sonnet-4-6")).toBe(250_000);
+    expect(agyContextWindowTokens("claude-sonnet-4-6", { "claude-sonnet-4-6": "1m" })).toBe(1_048_576);
+    expect(agyContextWindowTokens("claude-opus-4-6-high", { "claude-opus-4-6": "1m" })).toBe(1_048_576);
+    expect(agyContextWindowTokens("gpt-oss-120b-medium")).toBe(131_072);
+    expect(agyContextWindowTokens("unknown-model")).toBeUndefined();
+    expect(agyContextWindowTokens("")).toBeUndefined();
+    expect(agyContextUsage(52_428.8, 1_048_576)).toEqual({
+      contextUsedTokens: 52_428.8,
+      contextWindowTokens: 1_048_576,
+      contextUsedPercent: 5,
+    });
+    expect(agyContextUsage(0, 1_048_576)).toBeUndefined();
+    expect(agyContextUsage(1000, undefined)).toBeUndefined();
   });
 });

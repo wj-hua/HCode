@@ -67,4 +67,67 @@ describe("Antigravity 会话指标传递", () => {
       session.close();
     }
   });
+
+  it("按最新步骤而非整轮累计量计算上下文容量，跨轮保留并在切模型或压缩时同步", async () => {
+    const stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn() });
+    const child = Object.assign(new EventEmitter(), {
+      stdout,
+      stderr: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
+      stdin: { write: vi.fn(), end: vi.fn() },
+      kill: vi.fn(),
+    });
+    const emit = (event: Record<string, unknown>) => stdout.emit("data", `${JSON.stringify(event)}\n`);
+    vi.mocked(spawn).mockImplementation(() => {
+      queueMicrotask(() => emit({ event: "init", conversation_id: "ctx-test", init: { model: "gemini-4-hydrogen-high" } }));
+      return child as unknown as ReturnType<typeof spawn>;
+    });
+    const states: ChatStateEvent[] = [];
+    const session = new AgySession({
+      resolveLaunch: async () => ({ path: "agy", env: {}, cwd: "/test", args: [] }),
+      emitRows: () => undefined,
+      emitState: (event) => states.push(event),
+      onSettled: () => undefined,
+    }, { key: "ctx", projectPath: "/test", sessionId: "ctx-test", permissionMode: "default" });
+
+    try {
+      session.seedHistory([
+        { type: "PLANNER_RESPONSE", step_index: 1, status: "DONE", model: "gemini-4-hydrogen-high", input_tokens: 80_000, cache_read_tokens: 20_000, output_tokens: 1_000 },
+        { type: "CHECKPOINT", step_index: 2, status: "DONE" },
+        { type: "PLANNER_RESPONSE", step_index: 3, status: "DONE", model: "gemini-4-hydrogen-high", input_tokens: 5_000, cache_read_tokens: 15_000, output_tokens: 480 },
+      ]);
+      session.emitState();
+      expect(states.at(-1)?.usage).toMatchObject({
+        contextUsedTokens: 20_480,
+        contextWindowTokens: 1_048_576,
+      });
+
+      await session.send("继续");
+      expect(states.at(-1)?.usage).toMatchObject({
+        contextUsedTokens: 20_480,
+        contextWindowTokens: 1_048_576,
+      });
+
+      emit({ event: "step_update", step_update: { step_type: "agent_response", step_index: 5, state: "DONE", duration_seconds: 1, usage: { input_tokens: 4_000, cache_read_tokens: 20_480, output_tokens: 520 } } });
+      emit({ event: "step_update", step_update: { step_type: "agent_response", step_index: 7, state: "DONE", duration_seconds: 2, usage: { input_tokens: 6_000, cache_read_tokens: 25_000, output_tokens: 1_000 } } });
+      emit({ event: "result", result: { conversation_id: "ctx-test", response: "完成", status: "SUCCESS", num_turns: 2, usage: { input_tokens: 95_000, cache_read_tokens: 80_480, output_tokens: 3_000 } } });
+      // 多步回合取最后一步的上下文占用（32,000），而非多步计费累计和
+      expect(states.at(-1)?.usage).toMatchObject({
+        contextUsedTokens: 32_000,
+        contextWindowTokens: 1_048_576,
+      });
+
+      await session.setModel("claude-sonnet-4-6");
+      expect(states.at(-1)?.usage).toMatchObject({
+        contextUsedTokens: 32_000,
+        contextWindowTokens: 250_000,
+        contextUsedPercent: 12.8,
+      });
+
+      await session.send("触发压缩");
+      emit({ event: "step_update", step_update: { step_type: "checkpoint", step_index: 9, state: "DONE" } });
+      expect(states.at(-1)?.usage?.contextUsedTokens).toBeUndefined();
+    } finally {
+      session.close();
+    }
+  });
 });

@@ -26,7 +26,7 @@ import type {
   SettingsPatch,
 } from "@hcode/shared/types";
 import { DEFAULT_SETTINGS, getDefaultModel } from "@hcode/shared/types";
-import { normalizeAgyModelSelection } from "@hcode/shared/agyModels";
+import { agyContextUsage, agyContextWindowTokens, normalizeAgyModelSelection } from "@hcode/shared/agyModels";
 import { sessionPinKey } from "@hcode/shared/sessionPins";
 import { encodeAsyncReply, pendingAsyncQuestions } from "@hcode/shared/codexAsyncQuestions";
 import { AGENTS } from "@hcode/shared/agents";
@@ -265,6 +265,13 @@ function withLiveSessions(
       conv.projectPath === projectPath && Boolean(conv.sessionId) && !ids.has(conv.sessionId!))
     .map(liveSummary);
   return live.length ? [...live, ...list].sort((a, b) => b.updatedAt - a.updatedAt) : list;
+}
+
+/** 未建立实时进程的 agy 历史会话在切换模型时，同步按新模型刷新上下文窗口上限。 */
+function withAgyModelUsage(agent: AgentKind, usage: ChatUsage | undefined, model: string): ChatUsage | undefined {
+  if (agent !== "agy" || !model || !usage?.contextUsedTokens) return usage;
+  const next = agyContextUsage(usage.contextUsedTokens, agyContextWindowTokens(model));
+  return next ? { ...usage, ...next } : usage;
 }
 
 /** 项目里最近更新的会话所用的 CLI；没有会话记录时返回 undefined。 */
@@ -669,7 +676,8 @@ export const useAppStore = create<AppState>((set, get) => {
           projectPath: summary.projectPath,
         }, ...(complete ? [{ complete: true } as const] : []));
         const latest = sessionViews.viewPatch(summary);
-        if (currentLoad()) patchHistory(viewId, { usage: result.usage, ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
+        const currentModel = get().conversations[viewId]?.model ?? selection.model;
+        if (currentLoad()) patchHistory(viewId, { usage: withAgyModelUsage(summary.agent, result.usage, currentModel), ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
       } catch (error) {
         if (!currentLoad()) return;
         const latest = sessionViews.viewPatch(summary);
@@ -864,7 +872,8 @@ export const useAppStore = create<AppState>((set, get) => {
     async setModel(model) {
       const conv = activeConversation();
       if (!conv) return;
-      patchConversation(conv.viewId, { model });
+      const usage = !conv.sessionKey ? withAgyModelUsage(conv.agent, conv.usage, model) : conv.usage;
+      patchConversation(conv.viewId, { model, ...(usage !== conv.usage ? { usage } : {}) });
       await get().updateSettings({ lastSelectedModels: { [conv.agent]: model } });
       if (conv.sessionKey) await hcode.invoke("chat:setModel", conv.sessionKey, model).catch(() => undefined);
     },

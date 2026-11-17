@@ -290,10 +290,15 @@ async function bootstrap() {
   );
   handle("sessions:load", async (ref) => {
     const result = await agents.get(ref.agent).loadSession(ref.id, ref.projectPath);
-    try { return { ...result, usage: sessionStatistics.usage(ref) }; }
-    catch (error) {
+    try {
+      const saved = sessionStatistics.usage(ref);
+      if (ref.agent !== "agy") return { ...result, usage: saved ?? result.usage };
+      const { contextUsedTokens: _u, contextWindowTokens: _w, contextUsedPercent: _p, ...rest } = saved ?? {};
+      const merged = { ...rest, ...result.usage };
+      return { ...result, usage: Object.keys(merged).length > 0 ? merged : undefined };
+    } catch (error) {
       console.error("会话统计读取失败", error);
-      return { ...result, usage: { statisticsSaveError: "会话统计读取失败" } };
+      return { ...result, usage: { ...result.usage, statisticsSaveError: "会话统计读取失败" } };
     }
   });
   handle("claude:subagents", (sessionId, projectPath) => {
