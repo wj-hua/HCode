@@ -8,7 +8,7 @@ import { ExpertConversationResult } from "../collaboration/ExpertConversationRes
 import { presentationContent } from "@hcode/shared/collaborationPresentation";
 import { CollaborationProgress } from "../collaboration/CollaborationProgress";
 import { AlertCircleIcon, BrainIcon, ChevronRightIcon, CopyIcon, FilePenIcon, GitBranchIcon, PencilIcon, RotateCcwIcon, SearchIcon, TerminalIcon, Undo2Icon } from "lucide-react";
-import { Fragment, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   AssistantTextRow,
   ConversationRow,
@@ -161,9 +161,12 @@ function TurnView({
   const turnRunning = header?.state === "running" && isLast && running;
   const last = turn.rows.at(-1);
   const showThinking = turnRunning && !(last?.kind === "toolCall" && last.status === "pendingApproval");
+  const activeReasoningRowId = turnRunning
+    ? unit?.assistantWorkRows.findLast((row): row is ReasoningRow => row.kind === "reasoning" && (row.state === "streaming" || row.text.trim().length > 0))?.rowId
+    : undefined;
   const renderRow = (row: ConversationRow) => (
     <div key={row.rowId} data-search-row-id={row.rowId} className={row.rowId === highlightedRowId ? "rounded-lg ring-2 ring-primary/50" : undefined}>
-      <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} />
+      <RowView row={row} workspacePath={workspacePath} permissions={permissions} canFork={canFork} canResend={canResend} isLastUser={row.rowId === lastUserRowId} isActiveReasoning={row.rowId === activeReasoningRowId} />
     </div>
   );
   const work: WorkContext = {
@@ -308,15 +311,26 @@ const SUMMARY_ICONS = { explore: SearchIcon, run: TerminalIcon, change: FilePenI
 // 照 ZCode ConsecutiveSummaryGroup：相邻思考/查阅/执行/修改收成一行统计，点开看明细。
 function SummaryGroup({ rows, work }: { rows: readonly AssistantWorkRow[]; work: WorkContext }) {
   const { intl } = useZCodeIntl();
-  const [open, setOpen] = useState(false);
   const running = work.turnRunning && work.tailRowId === rows.at(-1)?.rowId;
+  const [open, setOpen] = useState(running);
+  const userToggledRef = useRef(false);
+  useEffect(() => {
+    if (!userToggledRef.current) setOpen(running);
+  }, [running]);
   const highlighted = work.highlightedRowId !== null && rows.some((row) => row.rowId === work.highlightedRowId);
   const statistics = formatAssistantSummaryStatistics(rows, intl, work.workspacePath, !running);
   const category = getAssistantSummaryIconCategory(rows);
   const Icon = category ? SUMMARY_ICONS[category] : BrainIcon;
   const expanded = open || highlighted;
   return (
-    <Collapsible open={expanded} onOpenChange={setOpen} className="min-w-0">
+    <Collapsible
+      open={expanded}
+      onOpenChange={(nextOpen) => {
+        userToggledRef.current = true;
+        setOpen(nextOpen);
+      }}
+      className="min-w-0"
+    >
       <CollapsibleTrigger
         aria-label={statistics}
         className="group/tool-summary flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-2 text-ui-base text-foreground-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused"
@@ -352,6 +366,7 @@ const RowView = memo(function RowView({
   canFork,
   canResend,
   isLastUser,
+  isActiveReasoning,
 }: {
   row: ConversationRow;
   workspacePath: string;
@@ -359,6 +374,7 @@ const RowView = memo(function RowView({
   canFork: boolean;
   canResend: boolean;
   isLastUser: boolean;
+  isActiveReasoning: boolean;
 }) {
   switch (row.kind) {
     case "userInput":
@@ -367,7 +383,7 @@ const RowView = memo(function RowView({
     case "assistantText":
       return <AssistantText row={row} />;
     case "reasoning":
-      return <ReasoningView row={row} />;
+      return <ReasoningView row={row} isActive={isActiveReasoning} />;
     case "toolCall": {
       const request = row.approvalInteractionId ? permissions[row.approvalInteractionId] : undefined;
       if (row.status === "pendingApproval" && request) {
@@ -518,8 +534,9 @@ function AssistantText({ row }: { row: AssistantTextRow }) {
   );
 }
 
-function ReasoningView({ row }: { row: ReasoningRow }) {
+function ReasoningView({ row, isActive }: { row: ReasoningRow; isActive: boolean }) {
   const streaming = row.state === "streaming";
+  const keepOpen = streaming || isActive;
   const durationSeconds =
     row.durationMs === undefined ? undefined : Math.max(1, Math.ceil(row.durationMs / 1000));
   if (!streaming && !row.text.trim()) return null;
@@ -527,7 +544,8 @@ function ReasoningView({ row }: { row: ReasoningRow }) {
     <Reasoning
       className="w-full"
       isStreaming={streaming}
-      autoCollapseKey={row.state}
+      defaultOpen={keepOpen}
+      autoCollapseKey={keepOpen ? null : row.state}
       {...(durationSeconds === undefined ? {} : { duration: durationSeconds })}
     >
       <ReasoningTrigger streamingText={row.text} />

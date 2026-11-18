@@ -265,6 +265,14 @@ export function resolveReasoningStreamingSummary(
   return null;
 }
 
+export function resolveReasoningCollapsedSummary(text: string): string | null {
+  for (const line of text.replace(/\r\n?/gu, "\n").split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
+}
+
 const REASONING_SUMMARY_MASK =
   "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)";
 
@@ -294,6 +302,8 @@ export const ReasoningTrigger = memo(
     const { intl } = useZCodeIntl();
     const streamingSummary =
       isStreaming && !isOpen ? resolveReasoningStreamingSummary(streamingText) : null;
+    const collapsedSummary =
+      !isStreaming && !isOpen ? resolveReasoningCollapsedSummary(streamingText) : null;
     const streamingSummaryRef = useRef<HTMLSpanElement | null>(null);
     const streamingSummaryTextRef = useRef<HTMLSpanElement | null>(null);
     const [isStreamingSummaryOverflowing, setIsStreamingSummaryOverflowing] = useState(false);
@@ -403,6 +413,13 @@ export const ReasoningTrigger = memo(
                   enabled
                 />
               </span>
+            ) : collapsedSummary ? (
+              <>
+                <span className="shrink-0 text-foreground-subtlest">·</span>
+                <span className="min-w-0 flex-1 truncate text-foreground-subtlest">
+                  {collapsedSummary}
+                </span>
+              </>
             ) : null}
             <ChevronRightIcon
               className={cn(

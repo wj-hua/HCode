@@ -516,6 +516,8 @@ export class AgyAgent implements AgentProvider {
           resolveLaunch: (cwd, args) => this.resolveLaunch(cwd, args),
           emitRows: (key, ops) => this.events.rows(key, ops),
           emitState: (event) => this.events.state(event),
+          emitPermission: (event) => this.events.permission(event),
+          emitPermissionResolved: (event) => this.events.permissionResolved(event),
           emitTurnOutcome: (event) => this.events.turnOutcome?.(event),
           onSubagentsChanged: (session) => this.invalidate([session.projectPath]),
           onSettled: (done) => {
@@ -529,6 +531,7 @@ export class AgyAgent implements AgentProvider {
           ...(params.resumeSessionId ? { sessionId: params.resumeSessionId } : {}),
           permissionMode: params.permissionMode,
           ...(params.research ? { research: params.research, researchRoot: this.researchRoot } : {}),
+          transport: params.research ? "stream-json" : "acp",
           ...(resolved.model ? { model: resolved.model } : {}),
           ...(resolved.effort ? { effort: resolved.effort } : {}),
           ...(settings.model ? { defaultModel: settings.model } : {}),
@@ -573,8 +576,13 @@ export class AgyAgent implements AgentProvider {
     this.sessions.delete(sessionKey);
   }
 
-  /** 无头模式没有审批请求。 */
-  respondPermission(_interactionId: string, _decision: PermissionDecision): boolean {
+  /** ACP 会话支持交互式权限审批；无头研究会话不会发出此类请求。 */
+  respondPermission(interactionId: string, decision: PermissionDecision): boolean {
+    for (const session of this.sessions.values()) {
+      if (session.ownsInteraction(interactionId)) {
+        return session.respondPermission(interactionId, decision);
+      }
+    }
     return false;
   }
 

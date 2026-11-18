@@ -85,27 +85,36 @@ function num(value: unknown): number | undefined {
 /** agy 工具调用 → ZCode 工具名 + 输入。不认识的工具去掉 toolAction / toolSummary 后原样保留（走通用卡片）。 */
 export function projectAgyTool(name: string, args: JsonRecord): { toolName: string; input: JsonRecord } {
   switch (name) {
-    case "view_file": {
+    case "view_file":
+    case "read_file": {
       const start = num(args.StartLine);
       const end = num(args.EndLine);
       return {
         toolName: "Read",
         input: {
-          file_path: str(args.AbsolutePath) ?? "",
+          file_path: str(args.AbsolutePath) ?? str(args.Path) ?? "",
           ...(start !== undefined ? { offset: start } : {}),
           ...(start !== undefined && end !== undefined ? { limit: end - start + 1 } : {}),
         },
       };
     }
     case "write_to_file":
-      return { toolName: "Write", input: { file_path: str(args.TargetFile) ?? "", content: str(args.CodeContent) ?? "" } };
+    case "write_file":
+      return {
+        toolName: "Write",
+        input: {
+          file_path: str(args.TargetFile) ?? str(args.Path) ?? "",
+          content: str(args.CodeContent) ?? str(args.Content) ?? "",
+        },
+      };
     case "replace_file_content":
+    case "edit_file":
       return {
         toolName: "Edit",
         input: {
-          file_path: str(args.TargetFile) ?? "",
-          old_string: str(args.TargetContent) ?? "",
-          new_string: str(args.ReplacementContent) ?? "",
+          file_path: str(args.TargetFile) ?? str(args.Path) ?? "",
+          old_string: str(args.TargetContent) ?? str(args.Target) ?? "",
+          new_string: str(args.ReplacementContent) ?? str(args.Replacement) ?? "",
         },
       };
     case "multi_replace_file_content": {
@@ -163,6 +172,10 @@ export class AgyRowProjector extends RowProjectorBase {
   private readonly streamThinking = new Map<number, number>();
 
   private readonly thinkingSlots = new Map<number, Pick<ReasoningRow, "rowId" | "turnId" | "createdAt" | "createdAtSeq">>();
+  /** ACP 实时流：当前活动中的思考行、正文行与累计回复文本。 */
+  private acpThinkingRowId: number | null = null;
+  private acpTextRowId: number | null = null;
+  private acpTextBuffer = "";
 
   /** 仅完成且没有流式思考的步骤需要读盘。闭包绑定原回合的位置，续聊后仍可安全补入。 */
   missingThinking(index: number) {
@@ -182,6 +195,9 @@ export class AgyRowProjector extends RowProjectorBase {
     this.streamText.clear();
     this.streamThinking.clear();
     this.thinkingSlots.clear();
+    this.acpThinkingRowId = null;
+    this.acpTextRowId = null;
+    this.acpTextBuffer = "";
   }
 
   // ───────────────────────── 历史 ─────────────────────────
@@ -354,12 +370,148 @@ export class AgyRowProjector extends RowProjectorBase {
     }));
   }
 
+  // ───────────────────────── ACP 实时流 ─────────────────────────
+
+  acpThoughtChunk(text: string, at: number) {
+    if (!text) return;
+    this.finishAcpText();
+    if (this.acpThinkingRowId === null) {
+      this.ensureTurn(at);
+      const row: ReasoningRow = { ...this.base(at), kind: "reasoning", text: "", state: "streaming" };
+      this.put(row);
+      this.acpThinkingRowId = row.rowId;
+    }
+    this.append(this.acpThinkingRowId, "text", text);
+    if (this.turn) this.turn.lastAt = at;
+  }
+
+  acpMessageChunk(text: string, at: number) {
+    if (!text) return;
+    this.finishAcpThinking(at);
+    if (this.acpTextRowId === null) {
+      this.ensureTurn(at);
+      const row: AssistantTextRow = { ...this.base(at), kind: "assistantText", text: "", state: "streaming" };
+      this.put(row);
+      this.acpTextRowId = row.rowId;
+    }
+    this.append(this.acpTextRowId, "text", text);
+    this.acpTextBuffer += text;
+    if (this.turn) this.turn.lastAt = at;
+  }
+
+  acpToolCall(update: JsonRecord, at: number) {
+    this.finishAcpThinking(at);
+    this.finishAcpText();
+    const id = str(update.toolCallId);
+    if (!id) return;
+    const rawName = str(update.name) ?? str(update.title) ?? "tool";
+    const rawArgs = isRecord(update.args) ? update.args : isRecord(update.rawInput) ? update.rawInput : {};
+    const { toolName, input } = projectAgyTool(rawName, rawArgs);
+    const hasArgs = Object.keys(rawArgs).length > 0;
+    const status = acpToolStatus(update.status);
+    let rowId = this.toolRows.get(id);
+    if (rowId === undefined) {
+      this.ensureTurn(at);
+      rowId = this.createToolRow(id, toolName, input, at, status ?? "running");
+    }
+    const output = acpToolOutput(update);
+    const errorMessage = status === "error" ? acpToolError(update, output) : undefined;
+    this.patch<ToolCallRow>(rowId, (row) => {
+      const nextStatus = status ?? (row.status === "pendingApproval" ? "pendingApproval" : "running");
+      const nextToolName = update.name ? toolName : row.toolName;
+      const nextInput = hasArgs ? input : (row.input ?? input);
+      return {
+        ...row,
+        toolName: nextToolName,
+        input: nextInput,
+        inputText: JSON.stringify(nextInput),
+        status: nextStatus,
+        ...(nextStatus !== "pendingApproval" && row.approvalInteractionId ? { approvalInteractionId: undefined } : {}),
+        ...(output ? { output: { text: truncate(toolOutputText(output)) } } : {}),
+        ...(status ? { endedAt: at } : {}),
+        ...(status === "error" ? { error: { code: "tool_error", message: errorMessage ?? "工具执行失败" } } : {}),
+      };
+    });
+    if (this.turn) this.turn.lastAt = at;
+  }
+
+  acpFinishSegments(at: number) {
+    this.finishAcpThinking(at);
+    this.finishAcpText();
+  }
+
+  acpTurnText(): string {
+    return this.acpTextBuffer.trim();
+  }
+
+  private finishAcpThinking(at: number) {
+    const rowId = this.acpThinkingRowId;
+    if (rowId === null) return;
+    this.acpThinkingRowId = null;
+    this.patch<ReasoningRow>(rowId, (row) => ({
+      ...row,
+      text: row.text.trimEnd(),
+      state: "complete",
+      durationMs: Math.max(0, at - row.createdAt),
+    }));
+  }
+
+  private finishAcpText() {
+    const rowId = this.acpTextRowId;
+    if (rowId === null) return;
+    this.acpTextRowId = null;
+    this.patch<AssistantTextRow>(rowId, (row) => ({
+      ...row,
+      text: row.text.trimEnd(),
+      state: "complete",
+    }));
+  }
+
   /** 一轮结束后的提示（出错、被拒绝的操作）。 */
   notice(text: string, at: number, failed = false) {
     this.ensureTurn(at);
     const row: AssistantTextRow = { ...this.base(at), kind: "assistantText", text, state: failed ? "failed" : "complete" };
     this.put(row);
   }
+}
+
+function acpToolStatus(value: unknown): ToolCallRow["status"] | undefined {
+  switch (value) {
+    case "completed":
+      return "success";
+    case "failed":
+    case "error":
+      return "error";
+    case "cancelled":
+    case "canceled":
+      return "cancelled";
+    default:
+      return undefined;
+  }
+}
+
+function acpToolOutput(update: JsonRecord): string {
+  if (isRecord(update.rawOutput) && typeof update.rawOutput.output === "string" && update.rawOutput.output) {
+    return update.rawOutput.output;
+  }
+  if (typeof update.rawOutput === "string" && update.rawOutput) return update.rawOutput;
+  if (!Array.isArray(update.content)) return "";
+  const parts: string[] = [];
+  for (const item of update.content) {
+    if (!isRecord(item) || item.type !== "content" || !isRecord(item.content)) continue;
+    if (item.content.type === "text" && typeof item.content.text === "string" && item.content.text) {
+      parts.push(item.content.text);
+    }
+  }
+  return parts.join("\n");
+}
+
+function acpToolError(update: JsonRecord, output: string): string {
+  if (isRecord(update.rawOutput) && typeof update.rawOutput.error === "string" && update.rawOutput.error) {
+    return update.rawOutput.error;
+  }
+  if (typeof update.error === "string" && update.error) return update.error;
+  return toolOutputText(output) || "工具执行失败";
 }
 
 export function projectAgyHistory(steps: readonly AgyStep[]): AgyRowProjector {

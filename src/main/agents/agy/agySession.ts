@@ -1,9 +1,9 @@
-// 一个正在进行的 Antigravity 会话：对应一个 `agy -p --input-format stream-json --output-format stream-json` 子进程，
-// stdin 每写一行 {"event":"user"} 跑一轮，进程在轮次之间保持，下一条消息接着同一个 conversation。
-// 无头模式没有审批：需要确认的操作由 agy 自动拒绝（结果里的 denied_actions）；
-// 停止 = 发 SIGINT（进程随之退出），权限模式 / 模型变化后，下一次发送用 --conversation 重启进程续上。
+// 一个正在进行的 Antigravity 会话：
+// - 普通交互会话使用 `agy acp --stdio`（JSON-RPC 2.0），实时接收 thought/message chunk、工具进度、上下文用量与权限审批；
+// - 受限研究/结构化输出会话仍使用 `agy -p --input-format stream-json --output-format stream-json`（支持 --agent / --json-schema）。
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { AgyAcpProcess, type AgyAcpServerRequest } from "./agyAcpProcess.js";
 import { AgyProcess } from "./agyProcess.js";
 import { agyResult } from "./agyResult.js";
 import { AgyResearchSession } from "./agyResearchSession.js";
@@ -20,16 +20,22 @@ import type {
   ChatUsage,
   FileInput,
   ImageInput,
+  PermissionDecision,
   PermissionMode,
+  PermissionRequestEvent,
+  PermissionResolvedEvent,
   RowOp,
 } from "../../../shared/types.js";
 import { isRecord, type JsonRecord } from "../rowProjectorBase.js";
 import { withFileReferences } from "../fileAttachments.js";
 import { withProjectFilePaths } from "../../projectFiles.js";
-import { AgyRowProjector, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
+import { AgyRowProjector, projectAgyTool, uploadedImagesNote, type AgyStep } from "./agyProjector.js";
 import { AgyResponseMetrics } from "./agyResponseMetrics.js";
+import { CodexResponseMetrics } from "../codex/codexResponseMetrics.js";
 import { agyLiveSubagents, isAgyConversationId } from "./agySubagents.js";
 import type { NativeSubagent } from "../../../shared/types.js";
+
+export type AgyTransport = "acp" | "stream-json";
 
 const FLUSH_INTERVAL_MS = 16;
 const INIT_TIMEOUT_MS = 60_000;
@@ -53,15 +59,30 @@ export interface AgySessionHost {
   resolveLaunch(cwd: string, args: string[]): Promise<AgyLaunch>;
   emitRows(sessionKey: string, ops: RowOp[]): void;
   emitState(event: ChatStateEvent): void;
+  emitPermission?(event: PermissionRequestEvent): void;
+  emitPermissionResolved?(event: PermissionResolvedEvent): void;
   /** 一轮跑完：transcript 此时已写入，用于刷新会话列表。 */
   onSettled(session: AgySession): void;
   onSubagentsChanged?(session: AgySession): void;
   emitTurnOutcome?(event: TurnOutcome): void;
 }
 
+interface AcpPermissionOption {
+  optionId: string;
+  kind?: string;
+  name?: string;
+}
+
+interface PendingAcpPermission {
+  requestId: number | string;
+  toolCallId: string;
+  options: AcpPermissionOption[];
+}
+
 export class AgySession {
   readonly key: string;
   readonly projectPath: string;
+  readonly transport: AgyTransport;
   sessionId: string | undefined;
   permissionMode: PermissionMode;
   model: string | undefined;
@@ -71,12 +92,14 @@ export class AgySession {
   private readonly defaultModel: string | undefined;
   private readonly contextWindowOverrides: Readonly<Record<string, string>> | undefined;
   private contextUsedTokens: number | undefined;
+  private acpContextWindowTokens: number | undefined;
   private lastContextStep = -1;
   private turnResponseSteps = 0;
   private turnStepContextUpdated = false;
 
   private usage: ChatUsage | undefined;
   private readonly responseMetrics = new AgyResponseMetrics();
+  private readonly acpMetrics = new CodexResponseMetrics();
   readonly nativeSubagents = new Map<string, NativeSubagent>();
   /** 上一次 result 里的累计用量（整个 conversation 累计，跨进程重启也连续），用来相减得到本轮用量。 */
   private lastTotals: { input: number; output: number } | undefined;
@@ -84,6 +107,18 @@ export class AgySession {
   private thinkingTranscript?: AgyThinkingTranscript;
   private process: AgyProcess | null = null;
   private starting: Promise<AgyProcess> | null = null;
+  private acpProcess: AgyAcpProcess | null = null;
+  private acpStarting: Promise<AgyAcpProcess> | null = null;
+  private acpSupportsImage = false;
+  private acpReplaying = false;
+  private acpAvailableModels = new Set<string>();
+  private acpAppliedModel: string | undefined;
+  private acpAppliedEffort: string | undefined;
+  private acpAppliedMode: string | undefined;
+  private acpTurnToken = 0;
+  private readonly acpSeenTools = new Set<string>();
+  private readonly acpTerminalTools = new Set<string>();
+  private readonly acpPendingPermissions = new Map<string, PendingAcpPermission>();
   /** 当前进程启动时的参数，与现在的设置不同就要重启。 */
   private launchedWith = "";
   private state: ChatRunState = "idle";
@@ -110,6 +145,7 @@ export class AgySession {
       contextWindowOverrides?: Readonly<Record<string, string>>;
       research?: ResearchRuntime;
       researchRoot?: string;
+      transport?: AgyTransport;
     },
   ) {
     this.key = options.key;
@@ -126,6 +162,7 @@ export class AgySession {
       if (!options.researchRoot) throw new Error("agy 缺少 HCode 自有角色目录");
       this.bounded = new AgyResearchSession(options.researchRoot, this.key);
     }
+    this.transport = this.bounded ? "stream-json" : (options.transport ?? "stream-json");
   }
 
   /** 执行者复用同一研究角色；不把普通历史会话升级为另一个原生身份。 */
@@ -136,7 +173,7 @@ export class AgySession {
   }
 
   get isBusy(): boolean {
-    return this.state === "running";
+    return this.state === "running" || this.state === "awaitingApproval";
   }
 
   seedHistory(steps: readonly AgyStep[]) {
@@ -160,13 +197,17 @@ export class AgySession {
     this.lifecycle.begin(executionTurnId);
     this.error = undefined;
     this.protocolError = undefined;
-    this.responseMetrics.start();
+    this.activeMetrics().start();
     this.turnResponseSteps = 0;
     this.turnStepContextUpdated = false;
     this.usage = this.contextUsage();
     this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
     this.flushNow();
     this.setState("running");
+    if (this.transport === "acp") {
+      await this.sendAcp(text, images, files);
+      return;
+    }
     try {
       if (this.research) await this.bounded!.prepare(this.research);
       const agy = await this.ensureProcess();
@@ -177,6 +218,10 @@ export class AgySession {
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private activeMetrics() {
+    return this.transport === "acp" ? this.acpMetrics : this.responseMetrics;
   }
 
   /** 图片存到 agy 自己放上传图片的位置（brain/<会话>/.user_uploaded），模型用 view_file 读取。 */
@@ -338,7 +383,8 @@ export class AgySession {
 
   private contextUsage() {
     const effectiveModel = this.model ?? this.reportedModel ?? this.defaultModel;
-    return agyContextUsage(this.contextUsedTokens, agyContextWindowTokens(effectiveModel, this.contextWindowOverrides));
+    const windowTokens = this.acpContextWindowTokens ?? agyContextWindowTokens(effectiveModel, this.contextWindowOverrides);
+    return agyContextUsage(this.contextUsedTokens, windowTokens);
   }
 
   private refreshContextUsage() {
@@ -390,6 +436,11 @@ export class AgySession {
 
   private settle(at: number, result: Pick<TurnOutcome, "outcome" | "text">) {
     this.bounded?.stop();
+    this.rejectAllAcpPermissions(false);
+    if (this.transport === "acp") {
+      this.projector.acpFinishSegments(at);
+      this.acpMetrics.finishTurn(result.outcome === "succeeded" ? "completed" : "interrupted");
+    }
     this.lifecycle.finish({ ...result, ...(this.error ? { error: this.error } : {}), nativeSessionId: this.sessionId, ...(this.usage ? { usage: this.usage } : {}) });
     if (this.interruptRequested) this.projector.markInterrupted();
     this.interruptRequested = false;
@@ -399,6 +450,383 @@ export class AgySession {
     this.host.onSettled(this);
   }
 
+  // ───────────────────────── ACP 实时协议 ─────────────────────────
+
+  private acpLaunchArgs(): string[] {
+    const args = ["--add-dir", this.projectPath];
+    if (this.permissionMode === "bypass") args.push("--dangerously-skip-permissions");
+    return args;
+  }
+
+  private async sendAcp(text: string, images: readonly ImageInput[], files: readonly FileInput[]) {
+    const turnToken = ++this.acpTurnToken;
+    this.acpSeenTools.clear();
+    this.acpTerminalTools.clear();
+    try {
+      const acp = await this.ensureAcpProcess();
+      if (!this.isBusy || this.interruptRequested || this.acpTurnToken !== turnToken) return;
+      await this.syncAcpSettings(acp);
+      if (!this.isBusy || this.interruptRequested || this.acpTurnToken !== turnToken) return;
+
+      const promptText = withFileReferences(await withProjectFilePaths(text, this.projectPath), files);
+      const blocks: JsonRecord[] = [];
+      if (images.length > 0) {
+        if (this.acpSupportsImage) {
+          for (const image of images) blocks.push({ type: "image", data: image.data, mimeType: image.mimeType });
+        } else {
+          const paths = await this.saveImages(images);
+          if (paths.length > 0) blocks.push({ type: "text", text: `${promptText}${uploadedImagesNote(paths)}` });
+        }
+      }
+      if (promptText && (images.length === 0 || this.acpSupportsImage)) {
+        blocks.push({ type: "text", text: promptText });
+      }
+      if (blocks.length === 0) blocks.push({ type: "text", text: "" });
+
+      if (!this.isBusy || this.interruptRequested || this.acpTurnToken !== turnToken) return;
+      this.acpMetrics.beginTurn(String(turnToken));
+      const result = await acp.request<unknown>("session/prompt", { sessionId: this.sessionId, prompt: blocks }, 0);
+      if (!this.isBusy || this.acpTurnToken !== turnToken) return;
+      const res = isRecord(result) ? result : {};
+      const stopReason = typeof res.stopReason === "string" ? res.stopReason : "";
+      if (this.interruptRequested || stopReason === "cancelled") {
+        this.settle(Date.now(), { outcome: "interrupted", text: this.projector.acpTurnText() });
+        return;
+      }
+      this.recordAcpTurnUsage(res.usage);
+      this.settle(Date.now(), { outcome: "succeeded", text: this.projector.acpTurnText() });
+    } catch (error) {
+      if (this.isBusy && !this.interruptRequested && this.acpTurnToken === turnToken) {
+        this.fail(this.protocolError ?? (error instanceof Error ? error.message : String(error)));
+      }
+    }
+  }
+
+  private async ensureAcpProcess(): Promise<AgyAcpProcess> {
+    const signature = JSON.stringify(["acp", this.permissionMode === "bypass"]);
+    if (this.acpProcess?.running && this.launchedWith === signature) return this.acpProcess;
+    if (this.acpStarting) return this.acpStarting;
+    this.acpProcess?.dispose();
+    this.acpProcess = null;
+    this.acpStarting = this.startAcpProcess(signature).finally(() => {
+      this.acpStarting = null;
+    });
+    return this.acpStarting;
+  }
+
+  private async startAcpProcess(signature: string): Promise<AgyAcpProcess> {
+    const acp = new AgyAcpProcess(await this.host.resolveLaunch(this.projectPath, this.acpLaunchArgs()));
+    this.acpProcess = acp;
+    this.acpAppliedModel = undefined;
+    this.acpAppliedEffort = undefined;
+    this.acpAppliedMode = undefined;
+    this.acpAvailableModels = new Set();
+    let ready = false;
+    acp.on("notification", (method: string, params: JsonRecord) => {
+      if (this.acpProcess === acp) this.handleAcpNotification(method, params);
+    });
+    acp.on("request", (req: AgyAcpServerRequest) => {
+      if (this.acpProcess === acp) this.handleAcpRequest(acp, req);
+    });
+    acp.on("protocolError", (reason: string) => {
+      if (this.acpProcess === acp) this.protocolError = reason;
+    });
+    acp.on("exit", (reason: string) => {
+      this.onAcpExit(acp, reason);
+    });
+    try {
+      const initRes = await acp.request<unknown>("initialize", {
+        protocolVersion: 1,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+        clientInfo: { name: "hcode", version: "0.4.0" },
+      });
+      const initObj = isRecord(initRes) ? initRes : {};
+      const caps = isRecord(initObj.agentCapabilities) ? initObj.agentCapabilities : {};
+      const promptCaps = isRecord(caps.promptCapabilities) ? caps.promptCapabilities : {};
+      this.acpSupportsImage = promptCaps.image === true;
+
+      let sessionRes: unknown;
+      if (this.sessionId) {
+        this.acpReplaying = true;
+        try {
+          sessionRes = await acp.request("session/load", { sessionId: this.sessionId, cwd: this.projectPath, mcpServers: [] });
+        } finally {
+          this.acpReplaying = false;
+        }
+      } else {
+        sessionRes = await acp.request("session/new", { cwd: this.projectPath, mcpServers: [] });
+      }
+      const sessObj = isRecord(sessionRes) ? sessionRes : {};
+      const returnedId = typeof sessObj.sessionId === "string" ? sessObj.sessionId : undefined;
+      if (!this.sessionId) {
+        if (!returnedId) throw new Error("agy acp 初始化会话身份缺失");
+        this.sessionId = returnedId;
+      } else if (returnedId && returnedId !== this.sessionId) {
+        throw new Error("agy acp 初始化会话身份变化");
+      }
+
+      const models = isRecord(sessObj.models) ? sessObj.models : undefined;
+      if (models) {
+        for (const item of Array.isArray(models.availableModels) ? models.availableModels : []) {
+          if (isRecord(item) && typeof item.modelId === "string" && item.modelId) this.acpAvailableModels.add(item.modelId);
+        }
+        if (typeof models.currentModelId === "string" && models.currentModelId && !this.reportedModel) {
+          this.reportedModel = models.currentModelId;
+          this.refreshContextUsage();
+        }
+      }
+      const modes = isRecord(sessObj.modes) ? sessObj.modes : undefined;
+      if (modes && typeof modes.currentModeId === "string") this.acpAppliedMode = modes.currentModeId;
+
+      this.launchedWith = signature;
+      ready = true;
+      if (this.closed || this.interruptRequested) {
+        acp.dispose();
+        return acp;
+      }
+      this.emitState();
+      return acp;
+    } catch (error) {
+      if (!ready && this.acpProcess === acp) acp.dispose();
+      throw error;
+    }
+  }
+
+  private async syncAcpSettings(acp: AgyAcpProcess) {
+    if (!this.sessionId) return;
+    const targetMode = this.permissionMode === "accept-edits" ? "accept-edits" : "default";
+    if (this.acpAppliedMode !== targetMode) {
+      await acp.request("session/set_mode", { sessionId: this.sessionId, modeId: targetMode });
+      this.acpAppliedMode = targetMode;
+    }
+    if (this.model !== this.acpAppliedModel) {
+      if (this.model) {
+        if (this.acpAvailableModels.size === 0 || this.acpAvailableModels.has(this.model)) {
+          await acp.request("session/set_model", { sessionId: this.sessionId, modelId: this.model });
+        } else {
+          await acp.request("session/set_config_option", { sessionId: this.sessionId, configId: "model", value: this.model });
+        }
+      }
+      this.acpAppliedModel = this.model;
+    }
+    if (this.effort !== this.acpAppliedEffort) {
+      if (this.effort) {
+        await acp.request("session/set_config_option", { sessionId: this.sessionId, configId: "thought_level", value: this.effort });
+      }
+      this.acpAppliedEffort = this.effort;
+    }
+  }
+
+  private onAcpExit(acp: AgyAcpProcess, reason: string) {
+    if (this.acpProcess !== acp) return;
+    this.acpProcess = null;
+    this.rejectAllAcpPermissions(false);
+    if (!this.isBusy) return;
+    if (this.interruptRequested) this.settle(Date.now(), { outcome: "interrupted", text: this.projector.acpTurnText() });
+    else this.fail(this.protocolError ?? reason);
+  }
+
+  private handleAcpNotification(method: string, params: JsonRecord) {
+    if (method !== "session/update") return;
+    if (typeof params.sessionId === "string" && this.sessionId && params.sessionId !== this.sessionId) return;
+    const update = isRecord(params.update) ? params.update : null;
+    if (!update) return;
+    const kind = update.sessionUpdate;
+    if (kind === "usage_update") {
+      const used = typeof update.used === "number" && Number.isFinite(update.used) && update.used >= 0 ? update.used : undefined;
+      const size = typeof update.size === "number" && Number.isFinite(update.size) && update.size > 0 ? update.size : undefined;
+      let changed = false;
+      if (used !== undefined && used !== this.contextUsedTokens) {
+        this.contextUsedTokens = used;
+        changed = true;
+      }
+      if (size !== undefined && size !== this.acpContextWindowTokens) {
+        this.acpContextWindowTokens = size;
+        changed = true;
+      }
+      if (changed) {
+        this.refreshContextUsage();
+        this.emitState();
+      }
+      return;
+    }
+    if (this.acpReplaying || !this.isBusy) return;
+    const now = Date.now();
+    let metricsChanged = false;
+    switch (kind) {
+      case "agent_thought_chunk": {
+        const text = isRecord(update.content) && update.content.type === "text" && typeof update.content.text === "string" ? update.content.text : "";
+        if (text) {
+          metricsChanged = this.acpMetrics.output(text);
+          this.projector.acpThoughtChunk(text, now);
+          this.scheduleFlush();
+        }
+        break;
+      }
+      case "agent_message_chunk": {
+        const text = isRecord(update.content) && update.content.type === "text" && typeof update.content.text === "string" ? update.content.text : "";
+        if (text) {
+          metricsChanged = this.acpMetrics.output(text);
+          this.projector.acpMessageChunk(text, now);
+          this.scheduleFlush();
+        }
+        break;
+      }
+      case "tool_call":
+      case "tool_call_update": {
+        const toolCallId = typeof update.toolCallId === "string" ? update.toolCallId : "";
+        const status = typeof update.status === "string" ? update.status : "";
+        const terminal = status === "completed" || status === "failed" || status === "error" || status === "cancelled" || status === "canceled";
+        if (toolCallId) {
+          if (!this.acpSeenTools.has(toolCallId)) {
+            this.acpSeenTools.add(toolCallId);
+            if (!terminal) {
+              metricsChanged = this.acpMetrics.item("mcpToolCall", toolCallId, true);
+            }
+          } else if (terminal && !this.acpTerminalTools.has(toolCallId)) {
+            this.acpTerminalTools.add(toolCallId);
+            this.acpMetrics.item("mcpToolCall", toolCallId, false);
+          }
+        }
+        this.projector.acpToolCall(update, now);
+        this.recordAcpSubagent(update);
+        this.scheduleFlush();
+        break;
+      }
+      case "config_option_update": {
+        const options = Array.isArray(update.configOptions) ? update.configOptions.filter(isRecord) : [];
+        const modelOpt = options.find((opt) => opt.id === "model");
+        if (modelOpt && typeof modelOpt.currentValue === "string" && modelOpt.currentValue && modelOpt.currentValue !== this.reportedModel) {
+          this.reportedModel = modelOpt.currentValue;
+          this.refreshContextUsage();
+          metricsChanged = true;
+        }
+        break;
+      }
+      default:
+        return;
+    }
+    if (metricsChanged) this.emitState();
+  }
+
+  private recordAcpSubagent(update: JsonRecord) {
+    if (!this.sessionId || update.name !== "invoke_subagent") return;
+    const raw = isRecord(update.rawOutput) && typeof update.rawOutput.output === "string"
+      ? update.rawOutput.output
+      : typeof update.rawOutput === "string"
+        ? update.rawOutput
+        : "";
+    if (!raw) return;
+    const args = isRecord(update.args) ? update.args : isRecord(update.rawInput) ? update.rawInput : {};
+    let added = false;
+    for (const match of raw.matchAll(/"conversationId"\s*:\s*"([0-9a-f-]+)"/gi)) {
+      const id = match[1]!;
+      if (!isAgyConversationId(id) || id === this.sessionId || this.nativeSubagents.has(id)) continue;
+      this.nativeSubagents.set(id, {
+        id,
+        parentId: this.sessionId,
+        ...(typeof args.Role === "string" && args.Role ? { role: args.Role } : {}),
+        ...(typeof args.TypeName === "string" && args.TypeName ? { nickname: args.TypeName } : {}),
+      });
+      added = true;
+    }
+    if (added) this.host.onSubagentsChanged?.(this);
+  }
+
+  private handleAcpRequest(acp: AgyAcpProcess, req: AgyAcpServerRequest) {
+    if (req.method !== "session/request_permission") {
+      acp.respondError(req.id, -32601, `不支持的 ACP 客户端方法: ${req.method}`);
+      return;
+    }
+    const options = (Array.isArray(req.params.options) ? req.params.options : [])
+      .filter(isRecord)
+      .filter((opt): opt is AcpPermissionOption & JsonRecord => typeof opt.optionId === "string");
+    if (!this.isBusy || this.interruptRequested) {
+      acp.respond(req.id, { outcome: { outcome: "cancelled" } });
+      return;
+    }
+    if (this.permissionMode === "bypass") {
+      const allow = options.find((opt) => opt.kind === "allow_once") ?? options.find((opt) => opt.kind?.startsWith("allow")) ?? options[0];
+      acp.respond(req.id, allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } });
+      return;
+    }
+    const toolCall = isRecord(req.params.toolCall) ? req.params.toolCall : {};
+    const toolCallId = typeof toolCall.toolCallId === "string" && toolCall.toolCallId ? toolCall.toolCallId : `perm-${req.id}`;
+    const rawName = typeof toolCall.name === "string" && toolCall.name ? toolCall.name : (typeof toolCall.kind === "string" ? toolCall.kind : "tool");
+    const rawArgs = isRecord(toolCall.args) ? toolCall.args : isRecord(toolCall.rawInput) ? toolCall.rawInput : {};
+    const { toolName, input } = projectAgyTool(rawName, rawArgs);
+    const title = typeof toolCall.title === "string" && toolCall.title ? toolCall.title : undefined;
+    const interactionId = randomUUID();
+    const canAllowForSession = options.some((opt) => opt.kind === "allow_always");
+
+    this.acpPendingPermissions.set(interactionId, { requestId: req.id, toolCallId, options });
+    this.acpMetrics.approval(interactionId, true);
+    this.projector.setToolPendingApproval(toolCallId, toolName, input, interactionId, Date.now());
+    this.flushNow();
+    this.setState("awaitingApproval");
+    this.host.emitPermission?.({
+      sessionKey: this.key,
+      interactionId,
+      toolUseId: toolCallId,
+      toolName,
+      input,
+      ...(title ? { title } : {}),
+      canAllowForSession,
+    });
+  }
+
+  ownsInteraction(interactionId: string): boolean {
+    return this.acpPendingPermissions.has(interactionId);
+  }
+
+  respondPermission(interactionId: string, decision: PermissionDecision): boolean {
+    const entry = this.acpPendingPermissions.get(interactionId);
+    if (!entry) return false;
+    this.acpPendingPermissions.delete(interactionId);
+    this.acpMetrics.approval(interactionId, false);
+    const allowed = decision.decision === "allow" || decision.decision === "allowSession";
+    let picked: AcpPermissionOption | undefined;
+    if (decision.decision === "allowSession") {
+      picked = entry.options.find((opt) => opt.kind === "allow_always") ?? entry.options.find((opt) => opt.kind === "allow_once");
+    } else if (decision.decision === "allow") {
+      picked = entry.options.find((opt) => opt.kind === "allow_once") ?? entry.options.find((opt) => opt.kind?.startsWith("allow"));
+    } else {
+      picked = entry.options.find((opt) => opt.kind === "reject_once") ?? entry.options.find((opt) => opt.kind?.startsWith("reject"));
+    }
+    this.acpProcess?.respond(
+      entry.requestId,
+      picked ? { outcome: { outcome: "selected", optionId: picked.optionId } } : { outcome: { outcome: "cancelled" } },
+    );
+    this.projector.resolveToolApproval(entry.toolCallId, allowed);
+    this.flushNow();
+    this.host.emitPermissionResolved?.({ sessionKey: this.key, interactionId });
+    if (decision.decision === "deny" && decision.interrupt) void this.interrupt();
+    if (this.acpPendingPermissions.size === 0 && this.state === "awaitingApproval") this.setState("running");
+    return true;
+  }
+
+  private rejectAllAcpPermissions(cancelOnServer = false) {
+    for (const [interactionId, entry] of this.acpPendingPermissions) {
+      this.acpMetrics.approval(interactionId, false);
+      if (cancelOnServer) {
+        this.acpProcess?.respond(entry.requestId, { outcome: { outcome: "cancelled" } });
+      }
+      this.host.emitPermissionResolved?.({ sessionKey: this.key, interactionId });
+    }
+    this.acpPendingPermissions.clear();
+  }
+
+  private recordAcpTurnUsage(raw: unknown) {
+    if (!isRecord(raw)) return;
+    const inputBase = typeof raw.inputTokens === "number" && Number.isFinite(raw.inputTokens) && raw.inputTokens >= 0 ? raw.inputTokens : undefined;
+    const output = typeof raw.outputTokens === "number" && Number.isFinite(raw.outputTokens) && raw.outputTokens >= 0 ? raw.outputTokens : undefined;
+    if (inputBase === undefined || output === undefined) return;
+    const cachedRead = typeof raw.cachedReadTokens === "number" && Number.isFinite(raw.cachedReadTokens) && raw.cachedReadTokens >= 0 ? raw.cachedReadTokens : 0;
+    const cachedWrite = typeof raw.cachedWriteTokens === "number" && Number.isFinite(raw.cachedWriteTokens) && raw.cachedWriteTokens >= 0 ? raw.cachedWriteTokens : 0;
+    const inputTokens = inputBase + cachedRead + cachedWrite;
+    this.usage = { ...this.contextUsage(), inputTokens, outputTokens: output };
+  }
+
   // ───────────────────────── 控制 ─────────────────────────
 
   async interrupt() {
@@ -406,17 +834,30 @@ export class AgySession {
     this.bounded?.stop();
     this.lifecycle.requestCancellation();
     this.interruptRequested = true;
+    if (this.transport === "acp") {
+      this.rejectAllAcpPermissions(true);
+      if (this.acpProcess) {
+        if (this.acpLaunchedReady()) this.acpProcess.notify("session/cancel", { sessionId: this.sessionId });
+        else this.acpProcess.dispose();
+      }
+      return;
+    }
     if (this.process) this.process.interrupt();
     // 启动中的进程在 init 后收到中断；不提前发出停止确认。
   }
 
+  private acpLaunchedReady(): boolean {
+    return Boolean(this.sessionId && !this.acpStarting);
+  }
+
   async setPermissionMode(mode: PermissionMode) {
-    this.permissionMode = mode; // 下一次发送时重启进程生效
+    this.permissionMode = mode; // 下一次发送时重启或通过 session/set_mode 生效
     this.emitState();
   }
 
   async setModel(model: string) {
     this.model = model || undefined;
+    this.acpContextWindowTokens = undefined;
     this.refreshContextUsage();
     this.emitState();
   }
@@ -429,12 +870,15 @@ export class AgySession {
     this.closed = true;
     this.thinkingTranscript?.close();
     if (this.isBusy) { this.lifecycle.requestCancellation(); this.interruptRequested = true; }
+    this.rejectAllAcpPermissions(true);
     this.bounded?.close();
     this.process?.dispose();
+    this.acpProcess?.dispose();
   }
 
   private fail(message: string) {
     this.bounded?.stop();
+    this.rejectAllAcpPermissions(false);
     this.lifecycle.finish({ outcome: "failed", text: "", error: message, nativeSessionId: this.sessionId });
     this.error = message;
     this.interruptRequested = false;
@@ -446,16 +890,17 @@ export class AgySession {
   private setState(state: ChatRunState) {
     if (this.state === state) return;
     if (state === "idle" || state === "error") {
-      this.responseMetrics.finish();
+      this.activeMetrics().finish();
       this.thinkingTranscript?.endTurn();
     }
-    if (state === "awaitingApproval") this.responseMetrics.endSegment();
+    if (state === "awaitingApproval") this.activeMetrics().endSegment();
     this.state = state;
     this.emitState();
   }
 
   emitState() {
     const model = this.model ?? this.reportedModel;
+    const metrics = this.activeMetrics();
     this.host.emitState({
       sessionKey: this.key,
       agent: "agy",
@@ -465,7 +910,7 @@ export class AgySession {
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
-      usage: { ...this.usage, ...this.responseMetrics.snapshot(this.usage?.outputTokens), turnStatistics: this.responseMetrics.turnStatistics() },
+      usage: { ...this.usage, ...metrics.snapshot(this.usage?.outputTokens), turnStatistics: metrics.turnStatistics() },
     });
   }
 

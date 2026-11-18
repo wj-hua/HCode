@@ -81,12 +81,12 @@ export const AGENTS: Record<AgentKind, AgentDescriptor> = {
     kind: "agy",
     name: "Antigravity",
     command: "agy",
-    // agy 无头模式（-p）不能交互审批：需要确认的操作会被自动拒绝，所以只提供启动参数能表达的几档
+    // 普通会话通过 agy acp 交互运行；受限研究模式仍走无头 -p
     permissionModes: [
       {
         mode: "default",
         label: "按 agy 设置",
-        description: "遵循 agy 的权限规则，需要确认的操作会被自动拒绝",
+        description: "遵循 agy 的权限规则，需要确认时弹窗询问",
         icon: "shield",
       },
       {
