@@ -19,6 +19,8 @@ import type {
   PermissionDecision,
   PermissionMode,
   PermissionRequestEvent,
+  PersistedTabItem,
+  PersistedTabsState,
   Project,
   SessionSummary,
   SessionLoadResult,
@@ -46,6 +48,22 @@ import { restoreMessageAttachments } from "./messageAttachments";
 import { canSteer, steerConversation } from "./turnSteerActions";
 import { isTurnStartInput } from "@hcode/shared/conversationTurns";
 import { isNarrowRemote } from "../remote/useNarrowRemote";
+import { clearConversationScroll } from "../conversation/useConversationScroll";
+import {
+  computeBatchCloseTargets,
+  deriveOrderedTabs,
+  isBlankDefaultDraft,
+  isTabBusy,
+  persistedTabKey,
+  pushTabHistory,
+  reorderTabsWithinGroup,
+  sanitizePersistedTabs,
+  selectNextActiveTab,
+  tabKeyOf,
+  togglePinnedOrder,
+  type BatchCloseMode,
+} from "./tabModel";
+import { installTabPersistence } from "./tabPersistence";
 
 /** 运行中输入、等本轮结束后自动发送的消息。 */
 export interface QueuedMessage {
@@ -66,6 +84,8 @@ export interface Conversation {
   title?: string;
   rows: ConversationRow[];
   loading: boolean;
+  /** 重启恢复的懒加载占位标签：尚未拉取消息行，首次激活时触发加载。 */
+  deferredLoad?: boolean;
   loadError?: string;
   refreshing?: boolean;
   refreshError?: string;
@@ -119,6 +139,12 @@ export interface AppState {
   search: string;
   conversations: Record<string, Conversation>;
   activeViewId: string | null;
+  tabOrder: string[];
+  pinnedTabKeys: string[];
+  tabHistory: string[];
+  lastCompareViewIds: Record<string, string>;
+  pendingRestoreTabs: PersistedTabsState | null;
+  tabsPersistPaused: boolean;
   permissions: Record<string, PermissionRequestEvent>;
   sidebarCollapsed: boolean;
   settingsOpen: boolean;
@@ -139,7 +165,7 @@ export interface AppState {
   setSearch(search: string): void;
   openSession(summary: SessionSummary, complete?: boolean): Promise<void>;
   loadEarlierHistory(viewId: string): Promise<void>;
-  newChat(projectPath: string, agent?: AgentKind): void;
+  newChat(projectPath: string, agent?: AgentKind, options?: { forceNew?: boolean }): void;
   /** 选择非项目目录；newDraft 为 true 时从独立入口新建，而不迁移当前草稿。 */
   workOutsideProject(newDraft?: boolean): Promise<void>;
   /** 草稿会话（还没发送过）切换使用的 CLI。 */
@@ -187,7 +213,18 @@ export interface AppState {
   setSettingsOpen(open: boolean, tab?: "general" | "agents" | "memory" | "notifications" | "extensions" | "shortcuts" | "remote"): void;
   /** 关闭当前视图；会话记录仍保留在项目列表中。 */
   closeActiveView(): Promise<void>;
+  closeView(viewId: string): Promise<boolean>;
+  closeTab(tabKey: string, options?: { allowPinned?: boolean }): Promise<boolean>;
+  closeOtherTabs(tabKey: string): Promise<{ closed: number; skippedRunning: number }>;
+  closeAllTabs(): Promise<{ closed: number; skippedRunning: number }>;
+  closeTabsToLeft(tabKey: string): Promise<{ closed: number; skippedRunning: number }>;
+  closeTabsToRight(tabKey: string): Promise<{ closed: number; skippedRunning: number }>;
+  toggleTabPinned(tabKey: string): void;
+  reorderTabs(activeKey: string, overKey: string): void;
   activateView(viewId: string): void;
+  activateTab(tabKey: string): void;
+  restorePendingTabs(): Promise<void>;
+  dismissPendingRestoreTabs(): void;
   /** 窗口聚焦时，把当前查看的会话（含对比组）标为已读。 */
   markViewed(): void;
 }
@@ -378,7 +415,7 @@ export const useAppStore = create<AppState>((set, get) => {
       silent,
     });
     notification.onclick = () => {
-      if (get().conversations[conv.viewId]) set({ activeViewId: conv.viewId });
+      if (get().conversations[conv.viewId]) get().activateView(conv.viewId);
       void hcode.invoke("app:focusWindow");
     };
   };
@@ -467,7 +504,7 @@ export const useAppStore = create<AppState>((set, get) => {
       const history = sessionViews.captureRows(event);
       const conv = findBySessionKey(sessionKey);
       if (!conv) return;
-      patchConversation(conv.viewId, { ...history, loading: false, loadError: undefined });
+      patchConversation(conv.viewId, { ...history, loading: false, deferredLoad: false, loadError: undefined });
     });
     hcode.on("chat:state", (event) => {
       const liveState = sessionViews.captureState(event);
@@ -488,6 +525,7 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       patchConversation(conv.viewId, {
         ...attached,
+        ...(attached?.rows ? { deferredLoad: false } : {}),
         runState: event.state,
         backgroundTasks: event.backgroundTasks,
         backgroundTaskDetails: event.backgroundTaskDetails,
@@ -553,6 +591,357 @@ export const useAppStore = create<AppState>((set, get) => {
     }
   };
 
+  const orderedTabs = (state = get()) =>
+    deriveOrderedTabs(state.conversations, state.tabOrder, state.pinnedTabKeys, state.lastCompareViewIds);
+
+  const loadConversationHistory = async (
+    viewId: string,
+    identity: { agent: AgentKind; id: string; projectPath: string },
+    complete = false,
+  ): Promise<void> => {
+    const live = sessionViews.viewPatch(identity);
+    if (live?.rows) {
+      patchConversation(viewId, { ...live, deferredLoad: false, loading: false, loadError: undefined });
+      if (complete && isRemote && live.earlierRows) await loadRemoteHistory(viewId, get, patchHistory, true);
+      return;
+    }
+    const liveModel = live?.activeModel;
+    const currentLoad = sessionViews.beginHistoryLoad(viewId);
+    try {
+      const result = await hcode.invoke("sessions:load", {
+        agent: identity.agent,
+        id: identity.id,
+        projectPath: identity.projectPath,
+      }, ...(complete ? [{ complete: true } as const] : []));
+      const latest = sessionViews.viewPatch(identity);
+      const current = get().conversations[viewId];
+      const sessionModel = latest?.activeModel ?? result.model;
+      let modelPatch: Partial<Conversation> = {};
+      if (!manualModelViews.has(viewId) && sessionModel) {
+        if (!liveModel) {
+          const next = resolveModelSelection(identity.agent, get().models[identity.agent], sessionModel, latest?.activeModel ? "" : (result.effort ?? ""));
+          modelPatch = { model: next.model, effort: next.effort, ...(latest?.activeModel ? {} : { activeModel: sessionModel }) };
+        } else if (!current?.effort && result.effort && (!result.model || result.model === liveModel)) {
+          modelPatch = { effort: result.effort };
+        }
+      }
+      const currentModel = modelPatch.model ?? current?.model ?? "";
+      if (currentLoad()) {
+        patchHistory(viewId, {
+          ...(result.summary?.title ? { title: result.summary.title } : {}),
+          usage: withAgyModelUsage(identity.agent, result.usage, currentModel),
+          ...modelPatch,
+          ...latest,
+          rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows,
+          earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows,
+          loading: false,
+          deferredLoad: false,
+          loadError: undefined,
+        });
+      }
+    } catch (error) {
+      if (!currentLoad()) return;
+      const latest = sessionViews.viewPatch(identity);
+      patchConversation(viewId, { ...latest, loading: false, deferredLoad: false, loadError: latest?.rows ? undefined : errorMessage(error) });
+    } finally {
+      if (currentLoad()) sessionViews.cancelHistoryLoad(viewId);
+    }
+  };
+
+  const triggerDeferredLoadIfNeeded = (viewId: string | null) => {
+    if (!viewId) return;
+    const conv = get().conversations[viewId];
+    if (!conv || !conv.deferredLoad || !conv.sessionId) return;
+    patchConversation(viewId, { deferredLoad: false, loading: true, loadError: undefined });
+    void loadConversationHistory(viewId, { agent: conv.agent, id: conv.sessionId, projectPath: conv.projectPath });
+  };
+
+  const maybeClearPendingRestore = () => {
+    const { pendingRestoreTabs, conversations } = get();
+    if (!pendingRestoreTabs) return;
+    const opened = new Set(
+      Object.values(conversations)
+        .filter((conv) => Boolean(conv.sessionId))
+        .map((conv) => persistedTabKey({ agent: conv.agent, projectPath: conv.projectPath, sessionId: conv.sessionId! })),
+    );
+    const allOpened = pendingRestoreTabs.items.every((item) => opened.has(persistedTabKey(item)));
+    if (allOpened) {
+      set({ pendingRestoreTabs: null, tabsPersistPaused: false });
+    }
+  };
+
+  const createDeferredConversation = (
+    item: PersistedTabItem,
+    occupiedViewIds: Set<string>,
+  ): Conversation => {
+    const { settings, models } = get();
+    let viewId = item.sessionId;
+    if (occupiedViewIds.has(viewId)) {
+      viewId = `${item.agent}:${item.sessionId}`;
+      let suffix = 1;
+      while (occupiedViewIds.has(viewId)) {
+        viewId = `${item.agent}:${item.sessionId}:${++suffix}`;
+      }
+    }
+    occupiedViewIds.add(viewId);
+    manualModelViews.delete(viewId);
+    const queue = loadQueue(item.sessionId);
+    const live = sessionViews.viewPatch({ agent: item.agent, id: item.sessionId, projectPath: item.projectPath });
+    const liveModel = live?.activeModel;
+    const selection = liveModel
+      ? resolveModelSelection(item.agent, models[item.agent], liveModel, "")
+      : resolveModelSelection(item.agent, models[item.agent], getDefaultModel(settings, item.agent), settings.defaultEfforts[item.agent]);
+    return {
+      viewId,
+      agent: item.agent,
+      projectPath: item.projectPath,
+      sessionId: item.sessionId,
+      title: item.title,
+      rows: [],
+      loading: false,
+      deferredLoad: !live?.rows,
+      runState: "idle",
+      permissionMode: settings.defaultPermissionModes[item.agent],
+      model: selection.model,
+      effort: selection.effort,
+      codexSpeed: settings.codexSpeed,
+      queue,
+      ...(queue.length ? { queuePaused: "stopped" as const } : {}),
+      ...live,
+    };
+  };
+
+  const hasDraftContent = (viewId: string): boolean =>
+    Boolean(
+      drafts.get(viewId)?.trim()
+      || imageDrafts.get(viewId)?.length
+      || fileDrafts.get(viewId)?.length,
+    );
+
+  const isReplaceableBlankDraft = (state: AppState, conv: Conversation | undefined): conv is Conversation =>
+    Boolean(
+      conv
+      && !state.pinnedTabKeys.includes(tabKeyOf(conv))
+      && !manualModelViews.has(conv.viewId)
+      && isBlankDefaultDraft(conv, hasDraftContent(conv.viewId)),
+    );
+
+  const cleanupViewResources = (viewId: string) => {
+    sessionViews.cancelHistoryLoad(viewId);
+    drafts.delete(viewId);
+    imageDrafts.delete(viewId);
+    fileDrafts.delete(viewId);
+    clearConversationScroll(viewId);
+    manualModelViews.delete(viewId);
+  };
+
+  const cleanupConversations = (members: readonly Conversation[]) => {
+    for (const conv of members) {
+      discardPersisted(conv);
+      cleanupViewResources(conv.viewId);
+    }
+  };
+
+  const insertConversation = (conv: Conversation, options?: { replaceActiveBlank?: boolean }) => {
+    const tKey = tabKeyOf(conv);
+    const currentState = get();
+    const active = currentState.activeViewId ? currentState.conversations[currentState.activeViewId] : undefined;
+    const replaced = options?.replaceActiveBlank && active?.viewId !== conv.viewId && isReplaceableBlankDraft(currentState, active)
+      ? active
+      : undefined;
+    if (replaced) cleanupViewResources(replaced.viewId);
+    set((state) => {
+      const nextConversations = { ...state.conversations };
+      let nextTabOrder = state.tabOrder;
+      let nextHistory = state.tabHistory;
+      if (replaced && nextConversations[replaced.viewId]) {
+        const oldKey = tabKeyOf(replaced);
+        delete nextConversations[replaced.viewId];
+        const oldIndex = nextTabOrder.indexOf(oldKey);
+        if (oldIndex !== -1 && !nextTabOrder.includes(tKey)) {
+          nextTabOrder = nextTabOrder.map((key, idx) => (idx === oldIndex ? tKey : key));
+        } else {
+          nextTabOrder = nextTabOrder.filter((key) => key !== oldKey);
+          if (!nextTabOrder.includes(tKey)) nextTabOrder = [...nextTabOrder, tKey];
+        }
+        nextHistory = nextHistory.filter((key) => key !== oldKey);
+      } else if (!nextTabOrder.includes(tKey)) {
+        nextTabOrder = [...nextTabOrder, tKey];
+      }
+      nextConversations[conv.viewId] = conv;
+      return {
+        conversations: nextConversations,
+        tabOrder: nextTabOrder,
+        tabHistory: pushTabHistory(nextHistory, tKey),
+        activeViewId: conv.viewId,
+      };
+    });
+  };
+
+  const applyPersistedTabs = (
+    snapshot: PersistedTabsState,
+    options: { replaceBlankDraft: boolean },
+  ) => {
+    const state = get();
+    let baseConversations = { ...state.conversations };
+    let baseTabOrder = [...state.tabOrder];
+    let basePinned = [...state.pinnedTabKeys];
+    let baseHistory = [...state.tabHistory];
+
+    if (options.replaceBlankDraft) {
+      const existingList = Object.values(baseConversations);
+      if (existingList.length === 1) {
+        const only = existingList[0]!;
+        if (isReplaceableBlankDraft(state, only)) {
+          cleanupViewResources(only.viewId);
+          baseConversations = {};
+          baseTabOrder = [];
+          basePinned = [];
+          baseHistory = [];
+        }
+      }
+    }
+
+    const occupiedViewIds = new Set(Object.keys(baseConversations));
+    const existingByPersistedKey = new Map<string, Conversation>();
+    for (const conv of Object.values(baseConversations)) {
+      if (conv.sessionId && !conv.compareId) {
+        existingByPersistedKey.set(
+          persistedTabKey({ agent: conv.agent, projectPath: conv.projectPath, sessionId: conv.sessionId }),
+          conv,
+        );
+      }
+    }
+
+    const restoredPinned: string[] = [];
+    const restoredRegular: string[] = [];
+    const keyToViewId = new Map<string, string>();
+
+    for (const item of snapshot.items) {
+      const pKey = persistedTabKey(item);
+      let conv = existingByPersistedKey.get(pKey);
+      if (!conv) {
+        conv = createDeferredConversation(item, occupiedViewIds);
+        baseConversations[conv.viewId] = conv;
+      }
+      const tKey = tabKeyOf(conv);
+      keyToViewId.set(pKey, conv.viewId);
+      if (item.pinned) restoredPinned.push(tKey);
+      else restoredRegular.push(tKey);
+    }
+
+    const nextPinned = [...new Set([...basePinned, ...restoredPinned])];
+    const nextPinnedSet = new Set(nextPinned);
+    const existingRegular = baseTabOrder.filter((key) => !nextPinnedSet.has(key));
+    const nextTabOrder = [
+      ...new Set([...nextPinned, ...restoredRegular, ...existingRegular]),
+    ];
+
+    const preferredViewId = (snapshot.activeKey ? keyToViewId.get(snapshot.activeKey) : undefined)
+      ?? (snapshot.items[0] ? keyToViewId.get(persistedTabKey(snapshot.items[0])) : undefined)
+      ?? state.activeViewId;
+    const activeConv = preferredViewId ? baseConversations[preferredViewId] : undefined;
+    const nextHistory = activeConv ? pushTabHistory(baseHistory, tabKeyOf(activeConv)) : baseHistory;
+
+    set({
+      conversations: baseConversations,
+      tabOrder: nextTabOrder,
+      pinnedTabKeys: nextPinned,
+      tabHistory: nextHistory,
+      activeViewId: preferredViewId ?? null,
+      pendingRestoreTabs: null,
+      tabsPersistPaused: false,
+    });
+
+    triggerDeferredLoadIfNeeded(preferredViewId ?? null);
+  };
+
+  const closeTabsBatch = async (
+    mode: BatchCloseMode,
+    targetKey?: string,
+  ): Promise<{ closed: number; skippedRunning: number }> => {
+    const tabs = orderedTabs();
+    const { closable, skippedRunning } = computeBatchCloseTargets(tabs, mode, targetKey);
+    const closedTabs: typeof closable = [];
+
+    for (const tab of closable) {
+      let failed = false;
+      for (const conv of tab.conversations) {
+        if (!conv.sessionKey) continue;
+        try {
+          await hcode.invoke("chat:close", conv.sessionKey);
+          sessionViews.forget(conv.sessionKey);
+        } catch (error) {
+          toast(`关闭会话失败：${errorMessage(error)}`, { variant: "warning" });
+          failed = true;
+          break;
+        }
+      }
+      if (!failed) {
+        cleanupConversations(tab.conversations);
+        closedTabs.push(tab);
+      }
+    }
+
+    if (closedTabs.length > 0) {
+      const closedTabKeys = new Set(closedTabs.map((tab) => tab.key));
+      const closedViewIds = new Set(closedTabs.flatMap((tab) => tab.viewIds));
+      let nextActiveViewId: string | null = null;
+
+      set((state) => {
+        const previousTabs = orderedTabs(state);
+        const previousOrder = previousTabs.map((tab) => tab.key);
+        const activeConv = state.activeViewId ? state.conversations[state.activeViewId] : undefined;
+        const activeTabKey = activeConv ? tabKeyOf(activeConv) : null;
+
+        const nextConversations: Record<string, Conversation> = {};
+        for (const [id, conv] of Object.entries(state.conversations)) {
+          if (!closedViewIds.has(id)) nextConversations[id] = conv;
+        }
+
+        const nextTabOrder = state.tabOrder.filter((key) => !closedTabKeys.has(key));
+        const nextPinned = state.pinnedTabKeys.filter((key) => !closedTabKeys.has(key));
+        const nextHistory = state.tabHistory.filter((key) => !closedTabKeys.has(key));
+        const nextLastCompare = { ...state.lastCompareViewIds };
+        for (const key of closedTabKeys) delete nextLastCompare[key];
+
+        const remainingTabs = deriveOrderedTabs(nextConversations, nextTabOrder, nextPinned, nextLastCompare);
+        if (state.activeViewId && !closedViewIds.has(state.activeViewId)) {
+          nextActiveViewId = state.activeViewId;
+        } else {
+          const nextKey = activeTabKey
+            ? selectNextActiveTab(remainingTabs.map((t) => t.key), activeTabKey, previousOrder, nextHistory)
+            : (remainingTabs[0]?.key ?? null);
+          nextActiveViewId = nextKey ? (remainingTabs.find((t) => t.key === nextKey)?.primaryViewId ?? null) : null;
+        }
+
+        return {
+          conversations: nextConversations,
+          tabOrder: nextTabOrder,
+          pinnedTabKeys: nextPinned,
+          tabHistory: nextActiveViewId && nextConversations[nextActiveViewId]
+            ? pushTabHistory(nextHistory, tabKeyOf(nextConversations[nextActiveViewId]!))
+            : nextHistory,
+          lastCompareViewIds: nextLastCompare,
+          activeViewId: nextActiveViewId,
+        };
+      });
+
+      triggerDeferredLoadIfNeeded(nextActiveViewId);
+    }
+
+    if (skippedRunning > 0) {
+      toast(
+        closedTabs.length > 0
+          ? `已关闭 ${closedTabs.length} 个标签，跳过 ${skippedRunning} 个运行中的会话`
+          : `没有可关闭的标签，已跳过 ${skippedRunning} 个运行中的会话`,
+        { variant: "warning" },
+      );
+    }
+
+    return { closed: closedTabs.length, skippedRunning };
+  };
+
   return {
     ready: false,
     settings: DEFAULT_SETTINGS,
@@ -569,6 +958,12 @@ export const useAppStore = create<AppState>((set, get) => {
     search: "",
     conversations: {},
     activeViewId: null,
+    tabOrder: [],
+    pinnedTabKeys: [],
+    tabHistory: [],
+    lastCompareViewIds: {},
+    pendingRestoreTabs: null,
+    tabsPersistPaused: true,
     permissions: {},
     sidebarCollapsed: false,
     settingsOpen: false,
@@ -583,6 +978,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = await hcode.invoke("settings:get");
       useUiStore.getState().setTheme(settings.theme);
       set({ settings });
+      const savedTabs = !isRemote
+        ? sanitizePersistedTabs(await hcode.invoke("tabs:get").catch(() => null))
+        : null;
       await get().refreshProjects();
       // 默认展开最近活跃的项目
       const first = get().projects[0];
@@ -593,7 +991,17 @@ export const useAppStore = create<AppState>((set, get) => {
       if (isNarrowRemote()) set({ sidebarCollapsed: true });
       const link = isRemote ? takeSessionLink() : null;
       if (link) await openSessionLink(get, link).catch((error) => toast(`打开通知对应的会话失败：${errorMessage(error)}`, { variant: "warning" }));
-      if (!get().activeViewId) await get().workOutsideProject(true);
+
+      if (!isRemote && savedTabs && settings.tabRestoreMode === "always") {
+        applyPersistedTabs(savedTabs, { replaceBlankDraft: false });
+      } else if (!isRemote && savedTabs && settings.tabRestoreMode === "ask") {
+        set({ pendingRestoreTabs: savedTabs, tabsPersistPaused: true });
+        if (!get().activeViewId) await get().workOutsideProject(true);
+      } else {
+        if (!get().activeViewId) await get().workOutsideProject(true);
+        if (!isRemote) set({ tabsPersistPaused: false });
+      }
+
       set({ ready: true });
       if (!isRemote) await openExternalProjects();
       await get().refreshAgentStatuses();
@@ -651,14 +1059,20 @@ export const useAppStore = create<AppState>((set, get) => {
         (conv) => conv.agent === summary.agent && conv.projectPath === summary.projectPath && conv.sessionId === summary.id,
       );
       if (existing) {
-        set({ activeViewId: existing.viewId });
+        if (existing.deferredLoad) {
+          patchConversation(existing.viewId, { deferredLoad: false, loading: true, loadError: undefined });
+          get().activateView(existing.viewId);
+          await loadConversationHistory(existing.viewId, summary, complete);
+          return;
+        }
+        get().activateView(existing.viewId);
         const live = sessionViews.viewPatch(summary);
         if (live) patchConversation(existing.viewId, live);
         if (complete && isRemote && existing.earlierRows) await loadRemoteHistory(existing.viewId, get, patchHistory, true);
         return;
       }
       const { settings, models } = get();
-      const viewId = summary.id;
+      const viewId = get().conversations[summary.id] ? `${summary.agent}:${summary.id}` : summary.id;
       manualModelViews.delete(viewId);
       // 重启前排队没发出去的消息：恢复后暂停，等用户点「继续」
       const queue = loadQueue(summary.id);
@@ -675,6 +1089,7 @@ export const useAppStore = create<AppState>((set, get) => {
         title: summary.title,
         rows: [],
         loading: true,
+        deferredLoad: false,
         runState: "idle",
         permissionMode: settings.defaultPermissionModes[summary.agent],
         model: selection.model,
@@ -684,42 +1099,9 @@ export const useAppStore = create<AppState>((set, get) => {
         ...(queue.length ? { queuePaused: "stopped" as const } : {}),
         ...live,
       };
-      set((state) => ({
-        conversations: { ...state.conversations, [viewId]: conv },
-        activeViewId: viewId,
-      }));
-      if (live?.rows) {
-        if (complete && isRemote && live.earlierRows) await loadRemoteHistory(viewId, get, patchHistory, true);
-        return;
-      }
-      const currentLoad = sessionViews.beginHistoryLoad(viewId);
-      try {
-        const result = await hcode.invoke("sessions:load", {
-          agent: summary.agent,
-          id: summary.id,
-          projectPath: summary.projectPath,
-        }, ...(complete ? [{ complete: true } as const] : []));
-        const latest = sessionViews.viewPatch(summary);
-        const current = get().conversations[viewId];
-        const sessionModel = latest?.activeModel ?? result.model;
-        let modelPatch: Partial<Conversation> = {};
-        if (!manualModelViews.has(viewId) && sessionModel) {
-          if (!liveModel) {
-            const next = resolveModelSelection(summary.agent, get().models[summary.agent], sessionModel, latest?.activeModel ? "" : (result.effort ?? ""));
-            modelPatch = { model: next.model, effort: next.effort, ...(latest?.activeModel ? {} : { activeModel: sessionModel }) };
-          } else if (!current?.effort && result.effort && (!result.model || result.model === liveModel)) {
-            modelPatch = { effort: result.effort };
-          }
-        }
-        const currentModel = modelPatch.model ?? current?.model ?? selection.model;
-        if (currentLoad()) patchHistory(viewId, { usage: withAgyModelUsage(summary.agent, result.usage, currentModel), ...modelPatch, ...latest, rows: complete ? mergeHistoryRows(result.rows, latest?.rows ?? []) : latest?.rows ?? result.rows, earlierRows: complete ? undefined : latest?.rows ? latest.earlierRows : result.earlierRows, loading: false, loadError: undefined });
-      } catch (error) {
-        if (!currentLoad()) return;
-        const latest = sessionViews.viewPatch(summary);
-        patchConversation(viewId, { ...latest, loading: false, loadError: latest?.rows ? undefined : errorMessage(error) });
-      } finally {
-        if (currentLoad()) sessionViews.cancelHistoryLoad(viewId);
-      }
+      insertConversation(conv, { replaceActiveBlank: true });
+      maybeClearPendingRestore();
+      await loadConversationHistory(viewId, summary, complete);
     },
 
     async workOutsideProject(newDraft = false) {
@@ -735,24 +1117,24 @@ export const useAppStore = create<AppState>((set, get) => {
       }
     },
 
-    newChat(projectPath, agentOverride) {
+    newChat(projectPath, agentOverride, options) {
       const { settings, conversations, sessions } = get();
       const preferred = agentOverride ?? settings.projectDefaultAgents[projectPath] ?? lastProjectAgent(sessions[projectPath]) ?? settings.defaultAgent;
       const agent = availableDraftAgent(preferred);
-      // 同一项目已有空白草稿时直接复用
-      const draft = Object.values(conversations).find(
-        (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId && !conv.compareId,
-      );
-      if (draft) {
-        set({ activeViewId: draft.viewId });
-        if (agentOverride && draft.agent !== agentOverride) get().setDraftAgent(agentOverride);
-        return;
+      // 同一项目已有空白草稿时默认复用；forceNew 为 true 时强制新建空白标签
+      if (!options?.forceNew) {
+        const draft = Object.values(conversations).find(
+          (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId && !conv.compareId,
+        );
+        if (draft) {
+          get().activateView(draft.viewId);
+          if (agentOverride && draft.agent !== agentOverride) get().setDraftAgent(agentOverride);
+          return;
+        }
       }
       const viewId = `draft-${Date.now()}-${++draftSeq}`;
-      set((state) => ({
-        conversations: { ...state.conversations, [viewId]: draftConversation(viewId, projectPath, agent) },
-        activeViewId: viewId,
-      }));
+      const conv = draftConversation(viewId, projectPath, agent);
+      insertConversation(conv, { replaceActiveBlank: !options?.forceNew });
       // 项目未展开时会话列表尚未加载，读取后再沿用上次的 CLI（用户已手动切换则不覆盖）。
       if (agentOverride || settings.projectDefaultAgents[projectPath] || !projectPath || sessions[projectPath]) return;
       void get().loadSessions(projectPath).then(() => {
@@ -1003,14 +1385,42 @@ export const useAppStore = create<AppState>((set, get) => {
       }
       discardPersisted(conv ?? { sessionId: summary.id, projectPath: summary.projectPath });
       if (conv) {
-        sessionViews.cancelHistoryLoad(conv.viewId);
+        cleanupConversations([conv]);
+        let nextActiveViewId: string | null = null;
         set((state) => {
+          const previousTabs = orderedTabs(state);
+          const previousOrder = previousTabs.map((tab) => tab.key);
           const { [conv.viewId]: _removed, ...rest } = state.conversations;
+          const tKey = tabKeyOf(conv);
+          const stillHasGroup = Object.values(rest).some((item) => tabKeyOf(item) === tKey);
+          const nextTabOrder = stillHasGroup ? state.tabOrder : state.tabOrder.filter((key) => key !== tKey);
+          const nextPinned = stillHasGroup ? state.pinnedTabKeys : state.pinnedTabKeys.filter((key) => key !== tKey);
+          const nextHistory = stillHasGroup ? state.tabHistory : state.tabHistory.filter((key) => key !== tKey);
+          const nextLastCompare = { ...state.lastCompareViewIds };
+          if (!stillHasGroup || nextLastCompare[tKey] === conv.viewId) delete nextLastCompare[tKey];
+
+          if (state.activeViewId !== conv.viewId) {
+            nextActiveViewId = state.activeViewId;
+          } else {
+            const remainingTabs = deriveOrderedTabs(rest, nextTabOrder, nextPinned, nextLastCompare);
+            const nextKey = stillHasGroup
+              ? tKey
+              : selectNextActiveTab(remainingTabs.map((t) => t.key), tKey, previousOrder, nextHistory);
+            nextActiveViewId = nextKey ? (remainingTabs.find((t) => t.key === nextKey)?.primaryViewId ?? null) : null;
+          }
+
           return {
             conversations: rest,
-            activeViewId: state.activeViewId === conv.viewId ? null : state.activeViewId,
+            tabOrder: nextTabOrder,
+            pinnedTabKeys: nextPinned,
+            tabHistory: nextActiveViewId && rest[nextActiveViewId]
+              ? pushTabHistory(nextHistory, tabKeyOf(rest[nextActiveViewId]!))
+              : nextHistory,
+            lastCompareViewIds: nextLastCompare,
+            activeViewId: nextActiveViewId,
           };
         });
+        triggerDeferredLoadIfNeeded(nextActiveViewId);
       }
       await get().loadSessions(summary.projectPath);
     },
@@ -1080,6 +1490,9 @@ export const useAppStore = create<AppState>((set, get) => {
       const settings = await hcode.invoke("settings:set", patch);
       set({ settings });
       if (patch.theme) useUiStore.getState().setTheme(patch.theme);
+      if (patch.tabRestoreMode === "never" && (get().pendingRestoreTabs || get().tabsPersistPaused)) {
+        get().dismissPendingRestoreTabs();
+      }
       if (patch.agentPaths !== undefined) {
         set((state) => {
           const models = { ...state.models }, modelErrors = { ...state.modelErrors };
@@ -1103,40 +1516,149 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!activeViewId) return;
       const conv = conversations[activeViewId];
       if (!conv) return;
-      if (conv.runState === "running" || conv.runState === "awaitingApproval") {
-        toast("任务运行中，请先停止任务再关闭会话", { variant: "warning" });
-        return;
+      await get().closeTab(tabKeyOf(conv), { allowPinned: false });
+    },
+
+    async closeView(viewId) {
+      const conv = get().conversations[viewId];
+      if (!conv) return false;
+      return get().closeTab(tabKeyOf(conv), { allowPinned: true });
+    },
+
+    async closeTab(tabKey, options) {
+      const tab = orderedTabs().find((item) => item.key === tabKey);
+      if (!tab) return false;
+      if (tab.pinned && options?.allowPinned === false) {
+        toast("该标签已固定，请先取消固定后再关闭", { variant: "warning" });
+        return false;
       }
-      if (conv.sessionKey) {
+      if (isTabBusy(tab)) {
+        toast("任务运行中，请先停止任务再关闭会话", { variant: "warning" });
+        return false;
+      }
+      for (const conv of tab.conversations) {
+        if (!conv.sessionKey) continue;
         try {
           await hcode.invoke("chat:close", conv.sessionKey);
           sessionViews.forget(conv.sessionKey);
         } catch (error) {
           toast(`关闭会话失败：${errorMessage(error)}`, { variant: "warning" });
-          return;
+          return false;
         }
       }
-      discardPersisted(conv);
-      sessionViews.cancelHistoryLoad(activeViewId);
-      drafts.delete(activeViewId);
-      imageDrafts.delete(activeViewId);
-      fileDrafts.delete(activeViewId);
+      cleanupConversations(tab.conversations);
+      const closedViewIds = new Set(tab.viewIds);
+      let nextActiveViewId: string | null = null;
+
       set((state) => {
-        if (!state.conversations[activeViewId]) return state;
-        const viewIds = Object.keys(state.conversations);
-        const index = viewIds.indexOf(activeViewId);
-        const { [activeViewId]: _removed, ...rest } = state.conversations;
+        const previousTabs = orderedTabs(state);
+        const previousOrder = previousTabs.map((item) => item.key);
+        const nextConversations: Record<string, Conversation> = {};
+        let removedAny = false;
+        for (const [id, conv] of Object.entries(state.conversations)) {
+          if (closedViewIds.has(id)) removedAny = true;
+          else nextConversations[id] = conv;
+        }
+        if (!removedAny) return state;
+
+        const nextTabOrder = state.tabOrder.filter((key) => key !== tabKey);
+        const nextPinned = state.pinnedTabKeys.filter((key) => key !== tabKey);
+        const nextHistory = state.tabHistory.filter((key) => key !== tabKey);
+        const nextLastCompare = { ...state.lastCompareViewIds };
+        delete nextLastCompare[tabKey];
+
+        if (state.activeViewId && !closedViewIds.has(state.activeViewId)) {
+          nextActiveViewId = state.activeViewId;
+        } else {
+          const remainingTabs = deriveOrderedTabs(nextConversations, nextTabOrder, nextPinned, nextLastCompare);
+          const nextKey = selectNextActiveTab(remainingTabs.map((item) => item.key), tabKey, previousOrder, nextHistory);
+          nextActiveViewId = nextKey ? (remainingTabs.find((item) => item.key === nextKey)?.primaryViewId ?? null) : null;
+        }
+
         return {
-          conversations: rest,
-          activeViewId: state.activeViewId === activeViewId
-            ? viewIds[index - 1] ?? viewIds[index + 1] ?? null
-            : state.activeViewId,
+          conversations: nextConversations,
+          tabOrder: nextTabOrder,
+          pinnedTabKeys: nextPinned,
+          tabHistory: nextActiveViewId && nextConversations[nextActiveViewId]
+            ? pushTabHistory(nextHistory, tabKeyOf(nextConversations[nextActiveViewId]!))
+            : nextHistory,
+          lastCompareViewIds: nextLastCompare,
+          activeViewId: nextActiveViewId,
+        };
+      });
+
+      triggerDeferredLoadIfNeeded(nextActiveViewId);
+      return true;
+    },
+
+    closeOtherTabs(tabKey) {
+      return closeTabsBatch("others", tabKey);
+    },
+
+    closeAllTabs() {
+      return closeTabsBatch("all");
+    },
+
+    closeTabsToLeft(tabKey) {
+      return closeTabsBatch("left", tabKey);
+    },
+
+    closeTabsToRight(tabKey) {
+      return closeTabsBatch("right", tabKey);
+    },
+
+    toggleTabPinned(tabKey) {
+      set((state) => {
+        const orderedKeys = orderedTabs(state).map((tab) => tab.key);
+        const next = togglePinnedOrder(orderedKeys, state.pinnedTabKeys, tabKey);
+        return {
+          tabOrder: next.tabOrder,
+          pinnedTabKeys: next.pinnedTabKeys,
         };
       });
     },
 
+    reorderTabs(activeKey, overKey) {
+      set((state) => {
+        const orderedKeys = orderedTabs(state).map((tab) => tab.key);
+        const nextOrder = reorderTabsWithinGroup(
+          orderedKeys,
+          new Set(state.pinnedTabKeys),
+          activeKey,
+          overKey,
+        );
+        return { tabOrder: nextOrder };
+      });
+    },
+
     activateView(viewId) {
-      if (get().conversations[viewId]) set({ activeViewId: viewId });
+      const conv = get().conversations[viewId];
+      if (!conv) return;
+      const tKey = tabKeyOf(conv);
+      set((state) => ({
+        activeViewId: viewId,
+        tabHistory: pushTabHistory(state.tabHistory, tKey),
+        ...(conv.compareId ? { lastCompareViewIds: { ...state.lastCompareViewIds, [tKey]: viewId } } : {}),
+      }));
+      triggerDeferredLoadIfNeeded(viewId);
+    },
+
+    activateTab(tabKey) {
+      const tab = orderedTabs().find((item) => item.key === tabKey);
+      if (tab) get().activateView(tab.primaryViewId);
+    },
+
+    async restorePendingTabs() {
+      const snapshot = get().pendingRestoreTabs;
+      if (!snapshot) {
+        set({ tabsPersistPaused: false });
+        return;
+      }
+      applyPersistedTabs(snapshot, { replaceBlankDraft: true });
+    },
+
+    dismissPendingRestoreTabs() {
+      set({ pendingRestoreTabs: null, tabsPersistPaused: false });
     },
 
     markViewed() {
@@ -1166,6 +1688,8 @@ useAppStore.subscribe((state) => {
     saveQueue(conv.sessionId, conv.queue);
   }
 });
+
+installTabPersistence(useAppStore);
 
 export function useActiveConversation(): Conversation | undefined {
   return useAppStore((state) =>

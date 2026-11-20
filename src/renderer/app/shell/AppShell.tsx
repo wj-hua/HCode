@@ -15,6 +15,9 @@ import { useActiveConversation, useAppStore } from "../store/appStore";
 import { EmptyState } from "./EmptyState";
 import { RemoteProjectDialog } from "./RemoteProjectDialog";
 import { Header } from "./Header";
+import { ConversationTabBar, openNewTabFromCurrentContext } from "./ConversationTabBar";
+import { TabRestorePrompt } from "./TabRestorePrompt";
+import { deriveOrderedTabs, tabKeyOf } from "../store/tabModel";
 import { TerminalResizeHandle } from "../terminal/TerminalResizeHandle";
 import { AppBackground } from "./AppBackground";
 import { Sidebar } from "./Sidebar";
@@ -131,8 +134,10 @@ export function AppShell() {
         <div className={cn("flex min-h-0 flex-1 flex-col", narrow ? "min-w-0" : "min-w-[320px]")}>
           <section style={{ "--collaboration-preferred-width": `${panelWidth}px` } as React.CSSProperties} id="conversation-panels" className={cn("app-reading-surface collaboration-shell relative flex h-full min-h-0 flex-1 flex-col overflow-hidden", !hasBackground && "bg-background")}>
             <Header conversation={conversation} terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal} sideTerminalVisible={sideTerminalVisible} onToggleSideTerminal={toggleSideTerminal} />
-            {conversation ? (
-              <>
+            {!isRemote ? <ConversationTabBar /> : null}
+            <div id="conversation-workspace-body" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              {!isRemote ? <TabRestorePrompt /> : null}
+              {conversation ? (
                 <FilePreviewLayout mobileOverlay={narrow} preview={<>
                   {filePreview ? <FilePreviewProvider viewId={filePreview.viewId} workspacePath={filePreview.source.workspacePath ?? conversation.projectPath}>
                     <FilePreviewPanel key={`${filePreview.viewId}:${filePreview.source.type}:${filePreview.source.path ?? filePreview.source.title}`} source={filePreview.source} onClose={() => setSidePanel(null)} />
@@ -145,10 +150,10 @@ export function AppShell() {
                     <ConversationView key={conversation.viewId} conversation={conversation} searchTarget={searchTarget?.id === conversation.sessionId ? searchTarget : null} />
                   )}
                 </FilePreviewLayout>
-              </>
-            ) : (
-              <EmptyState />
-            )}
+              ) : (
+                <EmptyState />
+              )}
+            </div>
             {terminalVisible && conversation ? <TerminalResizeHandle height={terminalHeight} setHeight={setTerminalHeight} /> : null}
             <Suspense fallback={<span role="status">正在加载终端…</span>}>{terminalProjects.map(path => <TerminalPanel key={path} cwd={path} height={terminalHeight} visible={terminalVisible && conversation?.projectPath === path} onHide={() => setTerminalVisible(false)} onEmpty={terminalEmpty} />)}</Suspense>
           </section>
@@ -185,6 +190,10 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void,
           else void state.workOutsideProject(true);
           return true;
         }
+        case "newTab": {
+          openNewTabFromCurrentContext();
+          return true;
+        }
         case "openProject":
           if (isRemote) return false;
           void state.addProject();
@@ -193,6 +202,19 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void,
           if (!state.activeViewId) return false;
           void state.closeActiveView();
           return true;
+        case "prevTab":
+        case "nextTab": {
+          const tabs = deriveOrderedTabs(state.conversations, state.tabOrder, state.pinnedTabKeys, state.lastCompareViewIds);
+          if (tabs.length <= 1) return false;
+          const active = state.activeViewId ? state.conversations[state.activeViewId] : undefined;
+          const currentIndex = active ? tabs.findIndex((tab) => tab.key === tabKeyOf(active)) : -1;
+          const delta = command === "prevTab" ? -1 : 1;
+          const nextIndex = currentIndex === -1
+            ? 0
+            : (currentIndex + delta + tabs.length) % tabs.length;
+          state.activateTab(tabs[nextIndex]!.key);
+          return true;
+        }
         case "toggleSidebar":
           state.setSidebarCollapsed(!state.sidebarCollapsed);
           return true;
@@ -206,9 +228,10 @@ function useGlobalShortcuts(openSearch: () => void, openQuickSwitch: () => void,
           openSearch();
           return true;
         case "switchView": {
-          const viewId = Object.keys(state.conversations)[index ?? -1];
-          if (!viewId) return false;
-          state.activateView(viewId);
+          const tabs = deriveOrderedTabs(state.conversations, state.tabOrder, state.pinnedTabKeys, state.lastCompareViewIds);
+          const tab = tabs[index ?? -1];
+          if (!tab) return false;
+          state.activateTab(tab.key);
           return true;
         }
         case "focusComposer": {

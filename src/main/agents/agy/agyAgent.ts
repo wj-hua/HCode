@@ -650,7 +650,7 @@ export class AgyAgent implements AgentProvider {
 
   closeSession(sessionKey: string) {
     const session = this.sessions.get(sessionKey);
-    if (!session || session.isBusy) return;
+    if (!session || session.isBusy || session.hasBackgroundTasks) return;
     session.close();
     this.sessions.delete(sessionKey);
   }

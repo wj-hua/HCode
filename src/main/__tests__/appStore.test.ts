@@ -149,4 +149,63 @@ describe("AppStore.updateSettings", () => {
       .toEqual(pinnedSessions.slice(2));
     expect(restarted.settings.theme).toBe("dark");
   });
+
+  it("启动恢复模式默认 ask，非法值回退 ask，切换后持久化", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    writeFileSync(join(dir, "settings.json"), JSON.stringify({ theme: "dark" }));
+    expect(new AppStore(dir).settings.tabRestoreMode).toBe("ask");
+
+    writeFileSync(join(dir, "settings.json"), JSON.stringify({ tabRestoreMode: "invalid-mode" }));
+    expect(new AppStore(dir).settings.tabRestoreMode).toBe("ask");
+
+    const store = new AppStore(dir);
+    store.updateSettings({ tabRestoreMode: "always" });
+    expect(new AppStore(dir).settings.tabRestoreMode).toBe("always");
+    store.updateSettings({ tabRestoreMode: "never" });
+    expect(new AppStore(dir).settings.tabRestoreMode).toBe("never");
+  });
+
+  it("tabs.json 读写正常往返，损坏或非法结构安全返回 null", () => {
+    dir = mkdtempSync(join(tmpdir(), "hcode-store-"));
+    const store = new AppStore(dir);
+    expect(store.readTabsState()).toBeNull();
+
+    const snapshot = {
+      version: 1 as const,
+      items: [
+        { agent: "claude" as const, sessionId: "s1", projectPath: "/repo/a", title: "会话 A", pinned: true },
+        { agent: "codex" as const, sessionId: "s2", projectPath: "/repo/b", title: "会话 B" },
+      ],
+      activeKey: "codex:/repo/b:s2",
+      updatedAt: 1700000000000,
+    };
+    store.writeTabsState(snapshot);
+    expect(new AppStore(dir).readTabsState()).toEqual(snapshot);
+
+    writeFileSync(join(dir, "tabs.json"), "{broken json");
+    expect(store.readTabsState()).toBeNull();
+
+    writeFileSync(join(dir, "tabs.json"), JSON.stringify({ version: 2, items: [] }));
+    expect(store.readTabsState()).toBeNull();
+
+    writeFileSync(
+      join(dir, "tabs.json"),
+      JSON.stringify({
+        version: 1,
+        items: [
+          { agent: "claude", sessionId: "s1", projectPath: "/repo/a", title: "会话 A", pinned: true },
+          { agent: "claude", sessionId: "s1", projectPath: "/repo/a", title: "重复项" },
+          { agent: "unknown", sessionId: "s3", projectPath: "/repo/c", title: "非法 CLI" },
+        ],
+        activeKey: "claude:/repo/missing:none",
+        updatedAt: 123,
+      }),
+    );
+    expect(store.readTabsState()).toEqual({
+      version: 1,
+      items: [{ agent: "claude", sessionId: "s1", projectPath: "/repo/a", title: "会话 A", pinned: true }],
+      activeKey: null,
+      updatedAt: 123,
+    });
+  });
 });

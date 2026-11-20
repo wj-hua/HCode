@@ -208,8 +208,8 @@ export class RowProjectorBase {
     this.put(header);
   }
 
-  /** 结束当前轮：收尾所有仍在流式/运行中的行。 */
-  closeTurn(at: number, outcome?: TurnHeaderRow["state"], activeMs?: number) {
+  /** 结束当前轮：收尾所有仍在流式/运行中的行；已转后台运行的工具可保留运行态。 */
+  closeTurn(at: number, outcome?: TurnHeaderRow["state"], activeMs?: number, keepRunningToolIds?: ReadonlySet<string>) {
     const turn = this.turn;
     if (!turn) return;
     const interrupted = this.interrupted;
@@ -226,6 +226,7 @@ export class RowProjectorBase {
           row.status === "inputStreaming" ||
           row.status === "pendingApproval")
       ) {
+        if (row.status === "running" && keepRunningToolIds?.has(row.toolCallId)) continue;
         this.put({ ...row, status: "cancelled", endedAt: at });
       }
     }

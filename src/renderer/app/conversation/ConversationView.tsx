@@ -90,8 +90,19 @@ export function ConversationView({
                   正在读取会话…
                 </div>
               ) : conversation.loadError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base text-destructive">
-                  读取会话失败：{conversation.loadError}
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-ui-base text-destructive">
+                  <span className="min-w-0 break-words">读取会话失败：{conversation.loadError}</span>
+                  {!isRemote && !column ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => void useAppStore.getState().closeView(conversation.viewId)}
+                    >
+                      关闭此标签
+                    </Button>
+                  ) : null}
                 </div>
               ) : draftEmpty ? <DraftGreeting narrow={narrow} /> : conversation.rows.length === 0 ? (
                 <div className={cn("flex min-w-0 flex-col items-center gap-2 text-center", narrow ? "py-16" : "py-24")}>

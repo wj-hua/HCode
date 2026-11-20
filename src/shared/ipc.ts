@@ -20,6 +20,7 @@ import type {
   PermissionMode,
   PermissionRequestEvent,
   PermissionResolvedEvent,
+  PersistedTabsState,
   Project,
   SessionLoadResult,
   SessionRef,
@@ -193,6 +194,8 @@ export interface InvokeMap {
   "floating:resize": [[size: { width: number; height: number }], void];
   "settings:get": [[], Settings];
   "settings:set": [[patch: SettingsPatch], Settings];
+  "tabs:get": [[], PersistedTabsState | null];
+  "tabs:save": [[state: PersistedTabsState], void];
   "remote:status": [[], import("./remoteControl.js").RemoteControlStatus];
   /** 远程访问口令；首次调用时生成。 */
   "remote:token": [[], string];
@@ -330,6 +333,8 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   "floating:resize",
   "settings:get",
   "settings:set",
+  "tabs:get",
+  "tabs:save",
   "remote:status",
   "remote:token",
   "remote:regenerateToken",

@@ -1,6 +1,7 @@
 // 菜单栏与页面键盘监听共用的应用快捷键。
 export type AppCommand =
-  | "settings" | "newChat" | "openProject" | "closeView"
+  | "settings" | "newChat" | "newTab" | "openProject" | "closeView"
+  | "prevTab" | "nextTab"
   | "toggleSidebar" | "quickSwitch" | "search" | "focusComposer"
   | "copyLastReply" | "switchView" | "toggleTerminal";
 
@@ -16,7 +17,10 @@ export interface ShortcutDefinition {
 export const APP_SHORTCUTS: readonly ShortcutDefinition[] = [
   { command: "settings", label: "设置…", accelerator: "Command+,", key: "," },
   { command: "newChat", label: "新建会话", accelerator: "Command+N", key: "n" },
+  { command: "newTab", label: "新建标签页", accelerator: "Command+T", key: "t" },
   { command: "closeView", label: "关闭当前会话", accelerator: "Command+W", key: "w" },
+  { command: "prevTab", label: "上一个标签页", accelerator: "Command+Shift+[", key: "[", shift: true },
+  { command: "nextTab", label: "下一个标签页", accelerator: "Command+Shift+]", key: "]", shift: true },
   { command: "toggleSidebar", label: "切换侧边栏", accelerator: "Command+B", key: "b" },
   { command: "toggleTerminal", label: "切换终端", accelerator: "Command+J", key: "j" },
   { command: "quickSwitch", label: "快速切换…", accelerator: "Command+K", key: "k" },
@@ -44,7 +48,9 @@ export function shortcutFromEvent(event: { key: string; code: string; metaKey: b
   if (!event.metaKey && !event.ctrlKey && !event.altKey) return null;
   const key = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3)
     : /^Digit[0-9]$/.test(event.code) ? event.code.slice(5)
-    : event.code === "Comma" ? "," : null;
+    : event.code === "Comma" ? ","
+    : event.code === "BracketLeft" ? "["
+    : event.code === "BracketRight" ? "]" : null;
   if (!key) return null;
   return [event.metaKey && "Command", event.ctrlKey && "Control", event.altKey && "Alt", event.shiftKey && "Shift", key].filter(Boolean).join("+");
 }

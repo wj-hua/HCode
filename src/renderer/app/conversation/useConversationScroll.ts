@@ -2,14 +2,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CollaborationPresentation } from '@hcode/shared/collaborationPresentation';
 import type { Conversation } from '../store/appStore';
+
 const STICK_THRESHOLD_PX = 80;
+
+/** 按 viewId 记忆会话滚动位置，切换标签重建视图时精确还原。 */
+const scrollPositions = new Map<string, { scrollTop: number; stick: boolean }>();
+
+export function clearConversationScroll(viewId: string): void {
+  scrollPositions.delete(viewId);
+}
+
 export function useConversationScroll(conversation: Conversation, latest: CollaborationPresentation | undefined, searchTarget: { rowId: number | null; key: number } | null) {
+  const savedPosition = scrollPositions.get(conversation.viewId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const revealedResult = useRef<string | undefined>(undefined);
   const revealedSearchKey = useRef<number | undefined>(undefined);
-  const stickRef = useRef(true);
-  const lastScrollTopRef = useRef(0);
+  const stickRef = useRef(savedPosition ? savedPosition.stick : true);
+  const lastScrollTopRef = useRef(savedPosition ? savedPosition.scrollTop : 0);
   const prependPosition = useRef<{ top: number; height: number } | null>(null);
   const [showJump, setShowJump] = useState(false);
 
@@ -33,8 +43,21 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
   }, [scrollToBottom]);
 
   useLayoutEffect(() => {
-    if (!conversation.loading) scrollToBottom();
-  }, [conversation.loading, scrollToBottom]);
+    if (conversation.loading) return;
+    if (searchTarget?.rowId != null && revealedSearchKey.current !== searchTarget.key) return;
+    const saved = scrollPositions.get(conversation.viewId);
+    const el = scrollRef.current;
+    if (saved && !saved.stick && el) {
+      stickRef.current = false;
+      el.scrollTop = saved.scrollTop;
+      lastScrollTopRef.current = el.scrollTop;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowJump(distance > STICK_THRESHOLD_PX * 4);
+      return;
+    }
+    stickRef.current = true;
+    scrollToBottom();
+  }, [conversation.viewId, conversation.loading, scrollToBottom, searchTarget?.key, searchTarget?.rowId]);
 
   const beforeHistoryLoad = () => {
     const element = scrollRef.current;
@@ -48,8 +71,9 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
     if (!position || !element || conversation.earlierRowsLoading) return;
     element.scrollTop = position.top + element.scrollHeight - position.height;
     lastScrollTopRef.current = element.scrollTop;
+    scrollPositions.set(conversation.viewId, { scrollTop: element.scrollTop, stick: false });
     prependPosition.current = null;
-  }, [conversation.rows, conversation.earlierRowsLoading]);
+  }, [conversation.viewId, conversation.rows, conversation.earlierRowsLoading]);
 
   // 完整结果一次性到达时先展示结论开头；用户正在向上阅读时只更新内容，不抢位置。
   useLayoutEffect(() => {
@@ -83,9 +107,15 @@ export function useConversationScroll(conversation: Conversation, latest: Collab
     if (distance < STICK_THRESHOLD_PX) stickRef.current = true;
     else if (el.scrollTop < lastScrollTopRef.current) stickRef.current = false;
     lastScrollTopRef.current = el.scrollTop;
+    scrollPositions.set(conversation.viewId, { scrollTop: el.scrollTop, stick: stickRef.current });
     setShowJump(distance > STICK_THRESHOLD_PX * 4);
   };
 
-  const followLatest = (behavior: ScrollBehavior = 'auto') => { stickRef.current = true; scrollToBottom(behavior); };
+  const followLatest = (behavior: ScrollBehavior = 'auto') => {
+    stickRef.current = true;
+    scrollToBottom(behavior);
+    const el = scrollRef.current;
+    if (el) scrollPositions.set(conversation.viewId, { scrollTop: el.scrollHeight, stick: true });
+  };
   return { scrollRef, contentRef, onScroll, showJump, followLatest, beforeHistoryLoad };
 }

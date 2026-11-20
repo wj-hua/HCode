@@ -647,6 +647,8 @@ async function bootstrap() {
     if (process.platform === "darwin" && patch.shortcuts) installApplicationMenu(() => mainWindow, settings.shortcuts);
     return settings;
   });
+  handle("tabs:get", () => store.readTabsState());
+  handle("tabs:save", (state) => store.writeTabsState(state));
 
   agents.startWatching();
   void remote.apply();

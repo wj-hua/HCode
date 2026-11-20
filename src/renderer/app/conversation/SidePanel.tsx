@@ -20,7 +20,7 @@ export function SidePanel({ label, title, actions, onClose, children, focus = fa
   const returnPanel = useUiStore(state => state.returnPanel);
   const setSidePanel = useUiStore(state => state.setSidePanel);
   return (
-    <aside onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className={`${docked ? "file-preview-side-panel relative min-h-0 shrink-0" : "absolute inset-y-11 right-0 z-20 w-[min(560px,85%)] shadow-xl"} flex flex-col border-l border-border bg-background ${collaboration ? "collaboration-side-panel" : ""}`} aria-label={label}>
+    <aside onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }} className={`${docked ? "file-preview-side-panel relative min-h-0 shrink-0" : "absolute inset-y-0 right-0 z-20 w-[min(560px,85%)] shadow-xl"} flex flex-col border-l border-border bg-background ${collaboration ? "collaboration-side-panel" : ""}`} aria-label={label}>
       {collaboration || docked ? <PanelResizeHandle docked={docked} label={docked ? "调整文件预览宽度" : "调整协作面板宽度"} /> : null}
       <div ref={header} tabIndex={-1} className="outline-none flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
         <div className="min-w-0 truncate font-medium text-foreground">{title}</div>

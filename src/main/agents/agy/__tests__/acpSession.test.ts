@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { applyRowOps } from "../../../../renderer/app/rows.js";
 import type { TurnOutcome } from "../../../../shared/collaboration.js";
+import type { NotificationFeedEvent } from "../../../../shared/remoteControl.js";
 import type { ChatStateEvent, ConversationRow, PermissionRequestEvent, PermissionResolvedEvent } from "../../../../shared/types.js";
+import { NotificationFeed } from "../../../remoteControl/notificationFeed.js";
 import { AgySession } from "../agySession.js";
 
 function acpMockProgram(sessionId: string) {
@@ -231,6 +233,177 @@ describe("Antigravity ACP 会话", () => {
       expect(rows.filter((r) => r.kind === "userInput").map((r) => r.text)).toEqual(["旧问题", "新问题"]);
       expect(rows.length).toBeGreaterThan(beforeCount);
       expect(states.at(-1)?.usage?.contextUsedTokens).toBe(25000);
+    } finally {
+      session.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("后台任务在 prompt 结束后保持运行态，完成后唤醒回合正常投影并触发完成通知", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hcode-agy-acp-bg-"));
+    const sessionId = randomUUID();
+    const program = join(root, "acp-bg-mock.cjs");
+    await writeFile(program, `#!${process.execPath}
+      const readline = require("node:readline");
+      const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n");
+      const notify = (method, params) => send({ jsonrpc: "2.0", method, params });
+      const update = (u) => notify("session/update", { sessionId: ${JSON.stringify(sessionId)}, update: u });
+      readline.createInterface({ input: process.stdin }).on("line", (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.method === "initialize") {
+          send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+          return;
+        }
+        if (msg.method === "session/new") {
+          send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: ${JSON.stringify(sessionId)}, modes: { currentModeId: "default" } } });
+          return;
+        }
+        if (msg.method === "session/set_model" || msg.method === "session/set_mode" || msg.method === "session/set_config_option") {
+          send({ jsonrpc: "2.0", id: msg.id, result: {} });
+          return;
+        }
+        if (msg.method === "session/prompt") {
+          update({ sessionUpdate: "tool_call", toolCallId: "bg-1", name: "run_command", args: { CommandLine: "pnpm dist" }, title: "pnpm dist", status: "in_progress" });
+          setTimeout(() => {
+            update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "正在执行 pnpm dist，完成后立即通知你。" } });
+            update({ sessionUpdate: "usage_update", used: 30000, size: 1048576 });
+            send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+
+            // 模拟后台任务完成并自动唤醒模型：先执行检查命令，再输出最终完成回复
+            setTimeout(() => {
+              update({ sessionUpdate: "tool_call_update", toolCallId: "bg-1", name: "run_command", title: "pnpm dist", status: "completed", rawOutput: { output: "dist ok" } });
+              setTimeout(() => {
+                update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "检查打包产物" } });
+                update({ sessionUpdate: "usage_update", used: 31000, size: 1048576 });
+                setTimeout(() => {
+                  update({ sessionUpdate: "tool_call", toolCallId: "verify-1", name: "run_command", args: { CommandLine: "ls -lh release" }, title: "ls -lh release", status: "in_progress" });
+                  setTimeout(() => {
+                    update({ sessionUpdate: "tool_call_update", toolCallId: "verify-1", name: "run_command", title: "ls -lh release", status: "completed", rawOutput: { output: "HCode.dmg 118M" } });
+                    update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "打包已完成，产物为 HCode.dmg。" } });
+                    update({ sessionUpdate: "usage_update", used: 32000, size: 1048576 });
+                  }, 50);
+                }, 10);
+              }, 20);
+            }, 60);
+          }, 20);
+        }
+      });
+    `, { mode: 0o755 });
+
+    let rows: ConversationRow[] = [];
+    const states: ChatStateEvent[] = [];
+    const notifications: NotificationFeedEvent[] = [];
+    let settledCount = 0;
+    let session!: AgySession;
+    const feed = new NotificationFeed(Date.now, undefined, () => session.liveRows(), (event) => notifications.push(event));
+
+    session = new AgySession({
+      resolveLaunch: async (_cwd, args) => ({ path: program, cwd: root, env: {}, args }),
+      emitRows: (_key, ops) => { rows = applyRowOps(rows, ops); },
+      emitState: (event) => {
+        states.push(event);
+        feed.observe("chat:state", event);
+      },
+      onSettled: () => { settledCount++; },
+    }, {
+      key: randomUUID(),
+      projectPath: root,
+      permissionMode: "default",
+      transport: "acp",
+      acpNativeSettleMs: 35,
+    });
+
+    try {
+      await session.send("打包吧", [], [], "turn-pack");
+      // prompt 刚结束时，后台任务仍在运行且工具行不被误标为 cancelled
+      expect(session.hasBackgroundTasks).toBe(true);
+      expect(states.at(-1)).toMatchObject({
+        state: "idle",
+        backgroundTasks: 1,
+        backgroundTaskDetails: [{ id: "bg-1", description: "pnpm dist", status: "running", toolUseId: "bg-1" }],
+      });
+      const bgToolRunning = rows.find((r) => r.kind === "toolCall" && r.toolCallId === "bg-1");
+      expect(bgToolRunning).toMatchObject({ status: "running" });
+
+      // 等待后台任务完成、唤醒回合跑完并再次结算
+      await vi.waitFor(() => expect(settledCount).toBe(2), { timeout: 5000 });
+      expect(session.hasBackgroundTasks).toBe(false);
+      expect(states.at(-1)?.state).toBe("idle");
+      expect(states.at(-1)?.backgroundTasks).toBeUndefined();
+      expect(states.at(-1)?.backgroundTaskDetails).toMatchObject([{ id: "bg-1", status: "completed" }]);
+
+      const bgToolDone = rows.find((r) => r.kind === "toolCall" && r.toolCallId === "bg-1");
+      expect(bgToolDone).toMatchObject({ status: "success", output: { text: "dist ok" } });
+      const verifyTool = rows.find((r) => r.kind === "toolCall" && r.toolCallId === "verify-1");
+      expect(verifyTool).toMatchObject({ status: "success", output: { text: "HCode.dmg 118M" } });
+      const texts = rows.filter((r) => r.kind === "assistantText").map((r) => r.text);
+      expect(texts).toContain("打包已完成，产物为 HCode.dmg。");
+
+      // NotificationFeed 应在唤醒回合结束时再次发出完成通知，且摘要为最终回复
+      const doneSummaries = notifications.filter((n) => n.type === "done").map((n) => n.summary);
+      expect(doneSummaries).toContain("打包已完成，产物为 HCode.dmg。");
+    } finally {
+      session.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("后台唤醒回合支持手动中断且不会卡在运行中", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hcode-agy-acp-bg-cancel-"));
+    const sessionId = randomUUID();
+    const program = join(root, "acp-bg-cancel-mock.cjs");
+    await writeFile(program, `#!${process.execPath}
+      const readline = require("node:readline");
+      const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n");
+      const notify = (method, params) => send({ jsonrpc: "2.0", method, params });
+      const update = (u) => notify("session/update", { sessionId: ${JSON.stringify(sessionId)}, update: u });
+      let cancelled = false;
+      readline.createInterface({ input: process.stdin }).on("line", (line) => {
+        if (!line.trim()) return;
+        const msg = JSON.parse(line);
+        if (msg.method === "initialize") {
+          send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1 } });
+          return;
+        }
+        if (msg.method === "session/new") {
+          send({ jsonrpc: "2.0", id: msg.id, result: { sessionId: ${JSON.stringify(sessionId)}, modes: { currentModeId: "default" } } });
+          return;
+        }
+        if (msg.method === "session/cancel") {
+          cancelled = true;
+          return;
+        }
+        if (msg.method === "session/prompt") {
+          send({ jsonrpc: "2.0", id: msg.id, result: { stopReason: "end_turn" } });
+          setTimeout(() => {
+            if (!cancelled) update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "异步唤醒持续思考中" } });
+          }, 25);
+        }
+      });
+    `, { mode: 0o755 });
+
+    let rows: ConversationRow[] = [];
+    const states: ChatStateEvent[] = [];
+    const session = new AgySession({
+      resolveLaunch: async (_cwd, args) => ({ path: program, cwd: root, env: {}, args }),
+      emitRows: (_key, ops) => { rows = applyRowOps(rows, ops); },
+      emitState: (event) => states.push(event),
+      onSettled: () => {},
+    }, {
+      key: randomUUID(),
+      projectPath: root,
+      permissionMode: "default",
+      transport: "acp",
+      acpNativeSettleMs: 5000,
+    });
+
+    try {
+      await session.send("设个提醒", [], [], "turn-1");
+      await vi.waitFor(() => expect(states.at(-1)?.state).toBe("running"), { timeout: 3000 });
+      await session.interrupt();
+      expect(states.at(-1)?.state).toBe("idle");
+      expect(rows.some((r) => r.kind === "reasoning" && r.state === "interrupted")).toBe(true);
     } finally {
       session.close();
       await rm(root, { recursive: true, force: true });

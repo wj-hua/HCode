@@ -82,7 +82,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const TAB_KEYWORDS: Record<SettingsTab, string[]> = {
-  general: ["通用", "常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "系统", "休眠", "睡眠", "theme", "wallpaper", "blur", "sleep"],
+  general: ["通用", "常规", "外观", "主题", "浅色", "深色", "暗色", "模式", "编程", "办公", "语言", "中文", "英文", "壁纸", "背景", "模糊", "蒙层", "系统", "休眠", "睡眠", "标签", "标签页", "恢复", "启动", "theme", "wallpaper", "blur", "sleep", "tab", "restore"],
   agents: ["模型", "cli", "agent", "claude", "codex", "antigravity", "gemini", "权限", "路径", "版本", "思考", "委派", "effort", "model", "path", "delegation"],
   memory: ["记忆", "全局", "项目", "memory"],
   notifications: ["通知", "桌面", "微信", "weixin", "wechat", "声音", "提示音", "潇", "试听", "音频", "静音", "sound", "notify"],
@@ -448,6 +448,23 @@ function GeneralTab() {
             </div>
           </div>
         )}
+      </CardGroup>
+
+      <CardGroup title="会话标签页" subtitle="控制重启 HCode 时的标签页恢复策略">
+        <SettingRow
+          label="启动时恢复会话标签"
+          hint="重新打开 HCode 时，是否恢复上次关闭前打开的会话标签"
+        >
+          <Segmented
+            value={settings.tabRestoreMode}
+            options={[
+              { value: "ask", label: "每次询问" },
+              { value: "never", label: "不恢复" },
+              { value: "always", label: "恢复" },
+            ]}
+            onChange={(tabRestoreMode) => update({ tabRestoreMode })}
+          />
+        </SettingRow>
       </CardGroup>
 
       <CardGroup title="系统策略" subtitle="长时间任务执行时的硬件唤醒">

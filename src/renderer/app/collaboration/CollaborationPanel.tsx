@@ -32,7 +32,7 @@ export function CollaborationPanel({ conversation, currentInput, workMode, attac
   const open = panel?.type === "collaboration" && panel.viewId === conversation.viewId;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
-  useEffect(() => { setPortal(document.getElementById("conversation-panels")); }, []);
+  useEffect(() => { setPortal(document.getElementById("conversation-workspace-body")); }, []);
   const close = () => { setSidePanel(null); requestAnimationFrame(() => trigger.current?.focus()); };
   const [objective, setObjective] = useState("");
   const [mode, setMode] = useState<"research" | "code" | "experts">("research");

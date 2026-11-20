@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AgyAcpProcess, type AgyAcpServerRequest } from "./agyAcpProcess.js";
+import { AgyBackgroundTasks } from "./agyBackgroundTasks.js";
 import { AgyProcess } from "./agyProcess.js";
 import { agyResult } from "./agyResult.js";
 import { AgyResearchSession } from "./agyResearchSession.js";
@@ -39,6 +40,7 @@ export type AgyTransport = "acp" | "stream-json";
 
 const FLUSH_INTERVAL_MS = 16;
 const INIT_TIMEOUT_MS = 60_000;
+const ACP_NATIVE_SETTLE_MS = 1200;
 const cumulativeUsageSchema = z.object({ input_tokens: z.number().finite().nonnegative(), cache_read_tokens: z.number().finite().nonnegative(), output_tokens: z.number().finite().nonnegative() });
 
 const IMAGE_EXT: Record<string, string> = {
@@ -116,6 +118,12 @@ export class AgySession {
   private acpAppliedEffort: string | undefined;
   private acpAppliedMode: string | undefined;
   private acpTurnToken = 0;
+  private acpPromptInFlight = false;
+  private acpNativeTurn = false;
+  private acpNativeHasOutput = false;
+  private acpNativeSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly acpNativeSettleMs: number;
+  private readonly acpBackgroundTasks = new AgyBackgroundTasks();
   private readonly acpSeenTools = new Set<string>();
   private readonly acpTerminalTools = new Set<string>();
   private readonly acpPendingPermissions = new Map<string, PendingAcpPermission>();
@@ -146,6 +154,7 @@ export class AgySession {
       research?: ResearchRuntime;
       researchRoot?: string;
       transport?: AgyTransport;
+      acpNativeSettleMs?: number;
     },
   ) {
     this.key = options.key;
@@ -163,6 +172,7 @@ export class AgySession {
       this.bounded = new AgyResearchSession(options.researchRoot, this.key);
     }
     this.transport = this.bounded ? "stream-json" : (options.transport ?? "stream-json");
+    this.acpNativeSettleMs = options.acpNativeSettleMs ?? ACP_NATIVE_SETTLE_MS;
   }
 
   /** 执行者复用同一研究角色；不把普通历史会话升级为另一个原生身份。 */
@@ -174,6 +184,10 @@ export class AgySession {
 
   get isBusy(): boolean {
     return this.state === "running" || this.state === "awaitingApproval";
+  }
+
+  get hasBackgroundTasks(): boolean {
+    return this.acpBackgroundTasks.count > 0;
   }
 
   seedHistory(steps: readonly AgyStep[]) {
@@ -194,6 +208,9 @@ export class AgySession {
 
   async send(text: string, images: readonly ImageInput[] = [], files: readonly FileInput[] = [], executionTurnId: string = randomUUID()) {
     if (this.closed) throw new Error("会话已关闭");
+    this.clearAcpNativeSettleTimer();
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
     this.lifecycle.begin(executionTurnId);
     this.error = undefined;
     this.protocolError = undefined;
@@ -201,7 +218,11 @@ export class AgySession {
     this.turnResponseSteps = 0;
     this.turnStepContextUpdated = false;
     this.usage = this.contextUsage();
-    this.projector.beginLocalTurn(text, Date.now(), images, files, executionTurnId);
+    const now = Date.now();
+    if (this.transport === "acp") {
+      this.projector.closeTurn(now, undefined, undefined, this.acpBackgroundTasks.runningToolIds());
+    }
+    this.projector.beginLocalTurn(text, now, images, files, executionTurnId);
     this.flushNow();
     this.setState("running");
     if (this.transport === "acp") {
@@ -435,16 +456,22 @@ export class AgySession {
   }
 
   private settle(at: number, result: Pick<TurnOutcome, "outcome" | "text">) {
+    this.clearAcpNativeSettleTimer();
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
     this.bounded?.stop();
     this.rejectAllAcpPermissions(false);
     if (this.transport === "acp") {
-      this.projector.acpFinishSegments(at);
+      if (result.outcome === "succeeded") this.projector.acpFinishSegments(at);
       this.acpMetrics.finishTurn(result.outcome === "succeeded" ? "completed" : "interrupted");
     }
     this.lifecycle.finish({ ...result, ...(this.error ? { error: this.error } : {}), nativeSessionId: this.sessionId, ...(this.usage ? { usage: this.usage } : {}) });
     if (this.interruptRequested) this.projector.markInterrupted();
     this.interruptRequested = false;
-    this.projector.closeTurn(at, this.error ? "failed" : undefined);
+    const keepRunning = this.transport === "acp" && !this.error && result.outcome === "succeeded"
+      ? this.acpBackgroundTasks.runningToolIds()
+      : undefined;
+    this.projector.closeTurn(at, this.error ? "failed" : undefined, undefined, keepRunning);
     this.flushNow();
     this.setState(this.error ? "error" : "idle");
     this.host.onSettled(this);
@@ -460,6 +487,8 @@ export class AgySession {
 
   private async sendAcp(text: string, images: readonly ImageInput[], files: readonly FileInput[]) {
     const turnToken = ++this.acpTurnToken;
+    this.acpPromptInFlight = true;
+    this.acpBackgroundTasks.clearForeground();
     this.acpSeenTools.clear();
     this.acpTerminalTools.clear();
     try {
@@ -490,15 +519,21 @@ export class AgySession {
       const res = isRecord(result) ? result : {};
       const stopReason = typeof res.stopReason === "string" ? res.stopReason : "";
       if (this.interruptRequested || stopReason === "cancelled") {
+        this.acpBackgroundTasks.clearForeground();
         this.settle(Date.now(), { outcome: "interrupted", text: this.projector.acpTurnText() });
         return;
       }
+      // 后台任务尚未终结时 session/prompt 会提前返回 end_turn；将仍运行的工具晋升为后台任务持续跟踪。
+      this.acpBackgroundTasks.promoteActiveToBackground();
       this.recordAcpTurnUsage(res.usage);
       this.settle(Date.now(), { outcome: "succeeded", text: this.projector.acpTurnText() });
     } catch (error) {
       if (this.isBusy && !this.interruptRequested && this.acpTurnToken === turnToken) {
+        this.acpBackgroundTasks.clearForeground();
         this.fail(this.protocolError ?? (error instanceof Error ? error.message : String(error)));
       }
+    } finally {
+      if (this.acpTurnToken === turnToken) this.acpPromptInFlight = false;
     }
   }
 
@@ -517,6 +552,10 @@ export class AgySession {
   private async startAcpProcess(signature: string): Promise<AgyAcpProcess> {
     const acp = new AgyAcpProcess(await this.host.resolveLaunch(this.projectPath, this.acpLaunchArgs()));
     this.acpProcess = acp;
+    this.clearAcpNativeSettleTimer();
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
+    this.acpBackgroundTasks.reset();
     this.acpAppliedModel = undefined;
     this.acpAppliedEffort = undefined;
     this.acpAppliedMode = undefined;
@@ -620,10 +659,23 @@ export class AgySession {
   private onAcpExit(acp: AgyAcpProcess, reason: string) {
     if (this.acpProcess !== acp) return;
     this.acpProcess = null;
+    this.clearAcpNativeSettleTimer();
+    this.acpPromptInFlight = false;
+    const wasNative = this.acpNativeTurn;
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
     this.rejectAllAcpPermissions(false);
-    if (!this.isBusy) return;
-    if (this.interruptRequested) this.settle(Date.now(), { outcome: "interrupted", text: this.projector.acpTurnText() });
-    else this.fail(this.protocolError ?? reason);
+    const bgChanged = this.acpBackgroundTasks.endProcess();
+    if (!this.isBusy) {
+      if (bgChanged && !this.closed) this.emitState();
+      return;
+    }
+    if (this.interruptRequested) {
+      if (wasNative) this.settleAcpNativeTurn("interrupted");
+      else this.settle(Date.now(), { outcome: "interrupted", text: this.projector.acpTurnText() });
+    } else {
+      this.fail(this.protocolError ?? reason);
+    }
   }
 
   private handleAcpNotification(method: string, params: JsonRecord) {
@@ -648,25 +700,58 @@ export class AgySession {
         this.refreshContextUsage();
         this.emitState();
       }
+      if (this.acpNativeTurn && !this.acpPromptInFlight && !this.acpReplaying && this.isBusy && this.acpNativeHasOutput) {
+        this.scheduleAcpNativeSettle();
+      }
       return;
     }
-    if (this.acpReplaying || !this.isBusy) return;
+    if (this.acpReplaying || this.closed) return;
     const now = Date.now();
+    if (!this.isBusy) {
+      if (this.acpPromptInFlight) return;
+      if (kind === "tool_call" || kind === "tool_call_update") {
+        const status = typeof update.status === "string" ? update.status : "";
+        const terminal = isAcpTerminalToolStatus(status);
+        if (terminal) {
+          const tracked = this.acpBackgroundTasks.observeTool(update, now);
+          this.projector.acpToolCall(update, now);
+          this.recordAcpSubagent(update);
+          this.flushNow();
+          if (tracked.changed) this.emitState();
+          return;
+        }
+        this.beginAcpNativeTurn();
+      } else if (
+        (kind === "agent_thought_chunk" || kind === "agent_message_chunk")
+        && acpChunkText(update)
+      ) {
+        this.beginAcpNativeTurn();
+      } else {
+        return;
+      }
+    }
+
     let metricsChanged = false;
     switch (kind) {
       case "agent_thought_chunk": {
-        const text = isRecord(update.content) && update.content.type === "text" && typeof update.content.text === "string" ? update.content.text : "";
+        const text = acpChunkText(update);
         if (text) {
-          metricsChanged = this.acpMetrics.output(text);
+          this.clearAcpNativeSettleTimer();
+          if (this.acpNativeTurn) this.acpNativeHasOutput = true;
+          if (this.acpBackgroundTasks.promoteActiveToBackground()) metricsChanged = true;
+          if (this.acpMetrics.output(text)) metricsChanged = true;
           this.projector.acpThoughtChunk(text, now);
           this.scheduleFlush();
         }
         break;
       }
       case "agent_message_chunk": {
-        const text = isRecord(update.content) && update.content.type === "text" && typeof update.content.text === "string" ? update.content.text : "";
+        const text = acpChunkText(update);
         if (text) {
-          metricsChanged = this.acpMetrics.output(text);
+          this.clearAcpNativeSettleTimer();
+          if (this.acpNativeTurn) this.acpNativeHasOutput = true;
+          if (this.acpBackgroundTasks.promoteActiveToBackground()) metricsChanged = true;
+          if (this.acpMetrics.output(text)) metricsChanged = true;
           this.projector.acpMessageChunk(text, now);
           this.scheduleFlush();
         }
@@ -674,14 +759,18 @@ export class AgySession {
       }
       case "tool_call":
       case "tool_call_update": {
+        this.clearAcpNativeSettleTimer();
+        if (this.acpNativeTurn) this.acpNativeHasOutput = true;
         const toolCallId = typeof update.toolCallId === "string" ? update.toolCallId : "";
         const status = typeof update.status === "string" ? update.status : "";
-        const terminal = status === "completed" || status === "failed" || status === "error" || status === "cancelled" || status === "canceled";
+        const terminal = isAcpTerminalToolStatus(status);
+        const tracked = this.acpBackgroundTasks.observeTool(update, now);
+        if (tracked.changed) metricsChanged = true;
         if (toolCallId) {
           if (!this.acpSeenTools.has(toolCallId)) {
             this.acpSeenTools.add(toolCallId);
             if (!terminal) {
-              metricsChanged = this.acpMetrics.item("mcpToolCall", toolCallId, true);
+              if (this.acpMetrics.item("mcpToolCall", toolCallId, true)) metricsChanged = true;
             }
           } else if (terminal && !this.acpTerminalTools.has(toolCallId)) {
             this.acpTerminalTools.add(toolCallId);
@@ -707,6 +796,65 @@ export class AgySession {
         return;
     }
     if (metricsChanged) this.emitState();
+  }
+
+  /** 后台任务、定时器或子代理完成唤醒模型时，ACP 不经 send() 直接推送 session/update，自动开启原生回合。 */
+  private beginAcpNativeTurn() {
+    this.clearAcpNativeSettleTimer();
+    this.acpTurnToken++;
+    this.acpNativeTurn = true;
+    this.acpNativeHasOutput = false;
+    this.error = undefined;
+    this.interruptRequested = false;
+    this.acpSeenTools.clear();
+    this.acpTerminalTools.clear();
+    this.acpMetrics.start();
+    this.acpMetrics.beginTurn(`native-${this.acpTurnToken}`);
+    this.usage = this.contextUsage();
+    this.setState("running");
+  }
+
+  /** ACP 原生唤醒回合没有二次 prompt response；收到 usage_update 且无阻塞工具/待审批后经短静默窗口结算。 */
+  private scheduleAcpNativeSettle() {
+    if (!this.acpNativeTurn || this.acpPromptInFlight || !this.isBusy || this.closed) return;
+    if (this.acpBackgroundTasks.blockingCount > 0 || this.acpPendingPermissions.size > 0) return;
+    this.clearAcpNativeSettleTimer();
+    const token = this.acpTurnToken;
+    this.acpNativeSettleTimer = setTimeout(() => {
+      this.acpNativeSettleTimer = null;
+      if (!this.acpNativeTurn || this.acpPromptInFlight || !this.isBusy || this.closed || this.acpTurnToken !== token) return;
+      if (this.acpBackgroundTasks.blockingCount > 0 || this.acpPendingPermissions.size > 0) return;
+      this.settleAcpNativeTurn("succeeded");
+    }, this.acpNativeSettleMs);
+  }
+
+  private clearAcpNativeSettleTimer() {
+    if (this.acpNativeSettleTimer) clearTimeout(this.acpNativeSettleTimer);
+    this.acpNativeSettleTimer = null;
+  }
+
+  private settleAcpNativeTurn(outcome: "succeeded" | "interrupted") {
+    this.clearAcpNativeSettleTimer();
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
+    this.rejectAllAcpPermissions(false);
+    const at = Date.now();
+    if (outcome === "succeeded") {
+      this.acpBackgroundTasks.promoteActiveToBackground();
+      this.projector.acpFinishSegments(at);
+    } else {
+      this.acpBackgroundTasks.clearForeground();
+    }
+    this.acpMetrics.finishTurn(outcome === "succeeded" ? "completed" : "interrupted");
+    if (this.interruptRequested || outcome === "interrupted") this.projector.markInterrupted();
+    this.interruptRequested = false;
+    const keepRunning = outcome === "succeeded" && !this.error
+      ? this.acpBackgroundTasks.runningToolIds()
+      : undefined;
+    this.projector.closeTurn(at, this.error ? "failed" : undefined, undefined, keepRunning);
+    this.flushNow();
+    this.setState(this.error ? "error" : "idle");
+    this.host.onSettled(this);
   }
 
   private recordAcpSubagent(update: JsonRecord) {
@@ -741,9 +889,16 @@ export class AgySession {
     const options = (Array.isArray(req.params.options) ? req.params.options : [])
       .filter(isRecord)
       .filter((opt): opt is AcpPermissionOption & JsonRecord => typeof opt.optionId === "string");
+    if (!this.isBusy && !this.acpPromptInFlight && !this.acpReplaying && !this.closed && !this.interruptRequested) {
+      this.beginAcpNativeTurn();
+    }
     if (!this.isBusy || this.interruptRequested) {
       acp.respond(req.id, { outcome: { outcome: "cancelled" } });
       return;
+    }
+    if (this.acpNativeTurn) {
+      this.clearAcpNativeSettleTimer();
+      this.acpNativeHasOutput = true;
     }
     if (this.permissionMode === "bypass") {
       const allow = options.find((opt) => opt.kind === "allow_once") ?? options.find((opt) => opt.kind?.startsWith("allow")) ?? options[0];
@@ -835,10 +990,14 @@ export class AgySession {
     this.lifecycle.requestCancellation();
     this.interruptRequested = true;
     if (this.transport === "acp") {
+      this.clearAcpNativeSettleTimer();
       this.rejectAllAcpPermissions(true);
       if (this.acpProcess) {
         if (this.acpLaunchedReady()) this.acpProcess.notify("session/cancel", { sessionId: this.sessionId });
         else this.acpProcess.dispose();
+      }
+      if (this.acpNativeTurn && !this.acpPromptInFlight) {
+        this.settleAcpNativeTurn("interrupted");
       }
       return;
     }
@@ -868,15 +1027,24 @@ export class AgySession {
 
   close() {
     this.closed = true;
+    this.clearAcpNativeSettleTimer();
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
+    this.acpPromptInFlight = false;
     this.thinkingTranscript?.close();
     if (this.isBusy) { this.lifecycle.requestCancellation(); this.interruptRequested = true; }
     this.rejectAllAcpPermissions(true);
+    if (this.acpBackgroundTasks.endProcess()) this.emitState();
     this.bounded?.close();
     this.process?.dispose();
     this.acpProcess?.dispose();
   }
 
   private fail(message: string) {
+    this.clearAcpNativeSettleTimer();
+    this.acpNativeTurn = false;
+    this.acpNativeHasOutput = false;
+    this.acpBackgroundTasks.clearForeground();
     this.bounded?.stop();
     this.rejectAllAcpPermissions(false);
     this.lifecycle.finish({ outcome: "failed", text: "", error: message, nativeSessionId: this.sessionId });
@@ -901,12 +1069,16 @@ export class AgySession {
   emitState() {
     const model = this.model ?? this.reportedModel;
     const metrics = this.activeMetrics();
+    const bgCount = this.transport === "acp" ? this.acpBackgroundTasks.count : 0;
+    const bgDetails = this.transport === "acp" ? this.acpBackgroundTasks.snapshot() : undefined;
     this.host.emitState({
       sessionKey: this.key,
       agent: "agy",
       ...(this.sessionId ? { sessionId: this.sessionId } : {}),
       projectPath: this.projectPath,
       state: this.state,
+      ...(bgCount ? { backgroundTasks: bgCount } : {}),
+      ...(bgDetails ? { backgroundTaskDetails: bgDetails } : {}),
       ...(this.error ? { error: this.error } : {}),
       permissionMode: this.permissionMode,
       ...(model ? { model } : {}),
@@ -931,4 +1103,14 @@ export class AgySession {
     const ops = this.projector.drain();
     if (ops.length > 0) this.host.emitRows(this.key, ops);
   }
+}
+
+function isAcpTerminalToolStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "error" || status === "cancelled" || status === "canceled";
+}
+
+function acpChunkText(update: JsonRecord): string {
+  return isRecord(update.content) && update.content.type === "text" && typeof update.content.text === "string"
+    ? update.content.text
+    : "";
 }

@@ -1,7 +1,17 @@
 // HCode 自己的少量持久化数据：设置、用户手动添加/置顶的项目。对话内容不在这里。
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_SETTINGS, normalizeInterfaceMode, type SessionSummary, type Settings, type SettingsPatch } from "../shared/types.js";
+import {
+  DEFAULT_SETTINGS,
+  normalizeInterfaceMode,
+  normalizeTabRestoreMode,
+  type AgentKind,
+  type PersistedTabItem,
+  type PersistedTabsState,
+  type SessionSummary,
+  type Settings,
+  type SettingsPatch,
+} from "../shared/types.js";
 import { AGENT_KINDS } from "../shared/agents.js";
 import { sessionPinKey } from "../shared/sessionPins.js";
 
@@ -43,6 +53,7 @@ function migrateSettings(raw: Record<string, unknown>): Settings {
     ...DEFAULT_SETTINGS,
     ...(raw as Partial<Settings>),
     interfaceMode: normalizeInterfaceMode(raw.interfaceMode),
+    tabRestoreMode: normalizeTabRestoreMode(raw.tabRestoreMode),
     memoryEnabled: raw.memoryEnabled === true,
     codexSpeed: raw.codexSpeed === "fast" || raw.codexSpeed === "default" ? raw.codexSpeed : "",
     agentPaths: pick(raw.agentPaths, DEFAULT_SETTINGS.agentPaths),
@@ -88,6 +99,7 @@ export function mergeSettings(current: Settings, patch: SettingsPatch): Settings
   return {
     ...mergeDefined(current, rest),
     interfaceMode: patch.interfaceMode === undefined ? current.interfaceMode : normalizeInterfaceMode(patch.interfaceMode),
+    tabRestoreMode: patch.tabRestoreMode === undefined ? current.tabRestoreMode : normalizeTabRestoreMode(patch.tabRestoreMode),
     agentPaths: mergeDefined(current.agentPaths, agentPaths),
     defaultPermissionModes: mergeDefined(current.defaultPermissionModes, defaultPermissionModes),
     defaultModels: mergeDefined(current.defaultModels, defaultModels),
@@ -98,11 +110,49 @@ export function mergeSettings(current: Settings, patch: SettingsPatch): Settings
   };
 }
 
+function parsePersistedTabsState(raw: unknown): PersistedTabsState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.version !== 1 || !Array.isArray(candidate.items)) return null;
+  const seen = new Set<string>();
+  const items: PersistedTabItem[] = [];
+  for (const entry of candidate.items) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as Record<string, unknown>;
+    if (
+      typeof item.agent !== "string" || !AGENT_KINDS.includes(item.agent as AgentKind)
+      || typeof item.sessionId !== "string" || !item.sessionId
+      || typeof item.projectPath !== "string" || !item.projectPath
+      || typeof item.title !== "string"
+    ) {
+      continue;
+    }
+    const key = `${item.agent}:${item.projectPath}:${item.sessionId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      agent: item.agent as AgentKind,
+      sessionId: item.sessionId,
+      projectPath: item.projectPath,
+      title: item.title,
+      ...(item.pinned === true ? { pinned: true } : {}),
+    });
+  }
+  const activeKey = typeof candidate.activeKey === "string" && seen.has(candidate.activeKey)
+    ? candidate.activeKey
+    : null;
+  const updatedAt = typeof candidate.updatedAt === "number" && Number.isFinite(candidate.updatedAt)
+    ? candidate.updatedAt
+    : 0;
+  return { version: 1, items, activeKey, updatedAt };
+}
+
 export class AppStore {
   private readonly settingsPath: string;
   private readonly projectsPath: string;
   private readonly windowPath: string;
   private readonly floatingPath: string;
+  private readonly tabsPath: string;
   settings: Settings;
   projects: ProjectPrefs;
 
@@ -112,6 +162,7 @@ export class AppStore {
     this.projectsPath = join(dataDir, "projects.json");
     this.windowPath = join(dataDir, "window.json");
     this.floatingPath = join(dataDir, "floating-window.json");
+    this.tabsPath = join(dataDir, "tabs.json");
     this.settings = migrateSettings(readJson<Record<string, unknown>>(this.settingsPath, {}));
     this.projects = readJson<ProjectPrefs>(this.projectsPath, { pinned: [], manual: [] });
   }
@@ -151,5 +202,23 @@ export class AppStore {
 
   writeFloatingAnchor(anchor: { right: number; top: number }) {
     writeJson(this.floatingPath, anchor);
+  }
+
+  readTabsState(): PersistedTabsState | null {
+    try {
+      return parsePersistedTabsState(JSON.parse(readFileSync(this.tabsPath, "utf8")));
+    } catch {
+      return null;
+    }
+  }
+
+  writeTabsState(state: PersistedTabsState) {
+    const normalized = parsePersistedTabsState(state) ?? {
+      version: 1 as const,
+      items: [],
+      activeKey: null,
+      updatedAt: Date.now(),
+    };
+    writeJson(this.tabsPath, normalized);
   }
 }

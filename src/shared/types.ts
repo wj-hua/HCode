@@ -400,6 +400,29 @@ export function normalizeInterfaceMode(value: unknown): InterfaceMode {
   return value === "office" ? "office" : "coding";
 }
 
+export type TabRestoreMode = "ask" | "never" | "always";
+
+export function normalizeTabRestoreMode(value: unknown): TabRestoreMode {
+  return value === "never" || value === "always" ? value : "ask";
+}
+
+export interface PersistedTabItem {
+  agent: AgentKind;
+  sessionId: string;
+  projectPath: string;
+  /** 仅用于恢复时的首帧标题占位，真正加载历史或刷新列表后会更新 */
+  title: string;
+  pinned?: boolean;
+}
+
+export interface PersistedTabsState {
+  version: 1;
+  items: PersistedTabItem[];
+  /** 指向 PersistedTabItem 的复合键 `${agent}:${projectPath}:${sessionId}` */
+  activeKey: string | null;
+  updatedAt: number;
+}
+
 /** 应用背景：path 为本地图片/视频文件（空串 = 不启用）；blur 为模糊半径（px），mask 为蒙层不透明度（0-100）。 */
 export interface BackgroundSettings {
   path: string;
@@ -418,6 +441,8 @@ export interface Settings {
   locale: "zh-CN" | "en-US";
   /** 编程模式展示命令和改动细节；办公模式侧重摘要与结果。 */
   interfaceMode: InterfaceMode;
+  /** 重新打开 HCode 时是否恢复上次关闭前打开的会话标签。 */
+  tabRestoreMode: TabRestoreMode;
   /** 新建会话默认使用的 CLI。 */
   defaultAgent: AgentKind;
   /** 各项目新会话优先使用的 CLI。 */
@@ -481,6 +506,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   locale: "zh-CN",
   interfaceMode: "coding",
+  tabRestoreMode: "ask",
   defaultAgent: "claude",
   projectDefaultAgents: {},
   agentPaths: { claude: "", codex: "", agy: "" },

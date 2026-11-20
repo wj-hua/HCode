@@ -38,6 +38,7 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null, ov
       label: "文件",
       submenu: [
         shortcut("newChat"),
+        shortcut("newTab"),
         { label: "添加项目…", click: () => send("openProject") },
         { type: "separator" },
         shortcut("closeView"),
@@ -67,7 +68,7 @@ export function installApplicationMenu(getWindow: () => BrowserWindow | null, ov
         shortcut("focusComposer"),
         shortcut("copyLastReply"),
         { type: "separator" },
-        { label: "切换会话", submenu: switchViews },
+        { label: "切换会话", submenu: [shortcut("prevTab"), shortcut("nextTab"), { type: "separator" }, ...switchViews] },
         { type: "separator" },
         { role: "togglefullscreen", label: "切换全屏" },
         { role: "zoomIn", label: "放大界面" },
