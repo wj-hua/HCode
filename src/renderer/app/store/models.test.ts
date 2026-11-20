@@ -7,7 +7,35 @@ import { useAppStore } from "./appStore";
 
 beforeEach(() => {
   invoke.mockReset();
-  useAppStore.setState({ settings: DEFAULT_SETTINGS, models: {}, modelsLoading: {}, modelErrors: {}, conversations: {}, activeViewId: null });
+  useAppStore.setState({ settings: DEFAULT_SETTINGS, agentStatuses: null, models: {}, modelsLoading: {}, modelErrors: {}, conversations: {}, activeViewId: null });
+});
+
+it("默认 CLI 不可用时草稿使用已安装的 CLI，已有会话保留原 CLI", async () => {
+  invoke.mockImplementation(async (channel) => {
+    if (channel === "agent:status") return [
+      { kind: "claude", found: false },
+      { kind: "codex", found: true },
+      { kind: "agy", found: false },
+    ];
+    return [];
+  });
+  const store = useAppStore.getState();
+  store.newChat("/history", "claude");
+  const history = useAppStore.getState().activeViewId!;
+  useAppStore.setState((state) => ({
+    conversations: { ...state.conversations, [history]: { ...state.conversations[history]!, sessionId: "existing" } },
+  }));
+  store.newChat("/draft");
+  const draft = useAppStore.getState().activeViewId!;
+
+  await store.refreshAgentStatuses();
+
+  expect(useAppStore.getState().conversations[history]?.agent).toBe("claude");
+  expect(useAppStore.getState().conversations[draft]?.agent).toBe("codex");
+  expect(useAppStore.getState().settings.defaultAgent).toBe("claude");
+  store.newChat("/new");
+  const state = useAppStore.getState();
+  expect(state.conversations[state.activeViewId!]?.agent).toBe("codex");
 });
 
 describe("沿用上次手动选择的模型", () => {

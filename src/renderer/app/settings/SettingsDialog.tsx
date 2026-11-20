@@ -654,13 +654,13 @@ function AgentSection({ kind }: { kind: AgentKind }) {
 function AgentsTab() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
+  const refreshAgentStatuses = useAppStore((state) => state.refreshAgentStatuses);
   const [detectingAll, setDetectingAll] = useState(false);
 
   const handleDetectAll = async () => {
     setDetectingAll(true);
     try {
-      const statuses = await hcode.invoke("agent:status");
-      useAppStore.setState({ agentStatuses: statuses });
+      await refreshAgentStatuses();
     } finally {
       setDetectingAll(false);
     }

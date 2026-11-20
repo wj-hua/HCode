@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/components/lib/utils.js";
 import { AgentBadge } from "../AgentBadge";
 import { formatRelativeTime, formatResetIn } from "../format";
+import { useAppStore } from "../store/appStore";
 import { orderedQuotas, useQuotaStore } from "../store/quotaStore";
 
 /** 定时刷新间隔；主进程缓存 3 分钟，未过期时这次请求直接返回缓存。 */
@@ -171,6 +172,7 @@ function AgentSection({ quota, now }: { quota: AgentQuota; now: number }) {
 }
 
 export function QuotaIndicator() {
+  const agentStatuses = useAppStore((state) => state.agentStatuses);
   const quotas = useQuotaStore((state) => state.quotas);
   const loading = useQuotaStore((state) => state.loading);
   const load = useQuotaStore((state) => state.load);
@@ -178,15 +180,13 @@ export function QuotaIndicator() {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    void load();
     const timer = setInterval(() => void load(), POLL_MS);
-    const onFocus = () => void load();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
-    };
+    return () => clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (agentStatuses) void load();
+  }, [agentStatuses, load]);
 
   // 面板打开时每分钟刷新一次倒计时
   useEffect(() => {
@@ -196,7 +196,9 @@ export function QuotaIndicator() {
     return () => clearInterval(timer);
   }, [open]);
 
-  const list = orderedQuotas(quotas);
+  const list = orderedQuotas(quotas).filter((quota) =>
+    agentStatuses?.some((status) => status.kind === quota.agent && status.found),
+  );
   if (list.length === 0) return null;
   const validTimestamps = list.map((q) => q.updatedAt).filter((t) => t > 0);
   const updatedAt = validTimestamps.length > 0 ? Math.min(...validTimestamps) : 0;

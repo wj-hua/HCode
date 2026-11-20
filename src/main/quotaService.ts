@@ -40,13 +40,15 @@ export class QuotaService {
 
   /** 可用来源的额度；force 时忽略缓存。某个来源失败不影响其他。 */
   async list(force = false): Promise<AgentQuota[]> {
-    const results = await Promise.all(
-      this.providers.map((provider) => {
-        const cached = this.cache.get(provider.kind);
-        if (!force && cached && Date.now() - cached.updatedAt < MAX_AGE_MS) return cached;
-        return this.fetch(provider);
-      }),
-    );
+    const results = await Promise.all(this.providers.map(async (provider) => {
+      const cached = this.cache.get(provider.kind);
+      if (!force && cached && Date.now() - cached.updatedAt < MAX_AGE_MS) {
+        if (await provider.available()) return cached;
+        this.cache.delete(provider.kind);
+        return null;
+      }
+      return this.fetch(provider);
+    }));
     return results.filter((quota): quota is AgentQuota => quota !== null);
   }
 

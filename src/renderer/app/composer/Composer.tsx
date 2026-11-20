@@ -135,6 +135,7 @@ export function Composer({
   const modelError = useAppStore((state) => state.modelErrors[conversation.agent]);
   const modelsLoading = useAppStore((state) => state.modelsLoading[conversation.agent]);
   const agentStatuses = useAppStore((state) => state.agentStatuses);
+  const installed = agentStatuses?.some((status) => status.kind === conversation.agent && status.found);
   const models = useAppStore((state) => state.models[conversation.agent]) ?? AGENTS[conversation.agent].models;
   const agentDelegation = useAppStore((state) => state.settings.agentDelegation);
   const isDraft = !conversation.sessionKey && !conversation.sessionId;
@@ -397,8 +398,8 @@ export function Composer({
   }, [conversation.projectPath]);
 
   useEffect(() => {
-    void loadModels(conversation.agent);
-  }, [conversation.agent, loadModels]);
+    if (installed) void loadModels(conversation.agent);
+  }, [conversation.agent, installed, loadModels]);
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
@@ -485,12 +486,13 @@ export function Composer({
       ? (agyModelDisplayLabel(models, conversation.activeModel) ?? conversation.activeModel)
       : conversation.activeModel;
   const modelGroups = useMemo<ModelSelectGroup[]>(
-    () => (isDraft ? AGENT_KINDS : [conversation.agent]).map((kind) => ({
+    () => (isDraft ? AGENT_KINDS : [conversation.agent]).filter((kind) =>
+      agentStatuses?.some((status) => status.kind === kind && status.found),
+    ).map((kind) => ({
       key: kind,
       label: AGENTS[kind].name,
       labelBadge: "CLI",
       icon: <AgentBadge agent={kind} className="size-4.5" />,
-      disabled: agentStatuses?.some((status) => status.kind === kind && !status.found),
       // CLI 可能返回相同模型值（包括默认值），只展示当前 CLI 的模型目录。
       items: kind === conversation.agent ? models.map((item) => ({
         key: item.value || DEFAULT_MODEL_VALUE,
@@ -794,7 +796,7 @@ export function Composer({
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
             <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 empty:hidden">
               <UsageIndicator usage={conversation.usage} />
-              <ModelConfigSelect
+              {modelGroups.length > 0 ? <ModelConfigSelect
                 composerOptions={{
                   selectedGroupKey: conversation.agent,
                   providerLabel: "使用的 CLI",
@@ -828,7 +830,7 @@ export function Composer({
                 labelVisibilityClassName="inline-flex"
                 triggerLabelClassName={cn("block min-w-0 text-left [&>span]:max-w-full [&>span>span]:block [&>span>span]:truncate", narrow ? "max-w-32" : "max-w-48")}
                 focusSelectorOnClose={COMPOSER_INPUT_SELECTOR}
-              />
+              /> : null}
             </span>
             {running ? (
               <ControlHintTooltip title="停止" shortcut="Esc">

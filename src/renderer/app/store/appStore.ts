@@ -29,7 +29,7 @@ import { DEFAULT_SETTINGS, getDefaultModel } from "@hcode/shared/types";
 import { agyContextUsage, agyContextWindowTokens, normalizeAgyModelSelection } from "@hcode/shared/agyModels";
 import { sessionPinKey } from "@hcode/shared/sessionPins";
 import { encodeAsyncReply, pendingAsyncQuestions } from "@hcode/shared/codexAsyncQuestions";
-import { AGENTS } from "@hcode/shared/agents";
+import { AGENT_KINDS, AGENTS } from "@hcode/shared/agents";
 import { toast } from "@/components/ui/toast.js";
 import { hcode, isRemote } from "../bridge";
 import { playNotificationSound } from "../notificationSound";
@@ -130,6 +130,7 @@ export interface AppState {
   composerPrefill: { viewId: string; text: string; images: ImageInput[]; files: FileInput[] } | null;
 
   init(): Promise<void>;
+  refreshAgentStatuses(): Promise<void>;
   refreshProjects(): Promise<void>;
   refreshSessionList(): Promise<void>;
   refreshConversation(viewId: string): Promise<void>;
@@ -292,9 +293,16 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!current) return state;
       return { conversations: { ...state.conversations, [viewId]: { ...current, ...patch } } };
     });
-  const switchDraftAgent = (viewId: string, agent: AgentKind) => {
+  const availableDraftAgent = (preferred: AgentKind): AgentKind => {
+    const { agentStatuses, settings } = get();
+    if (!agentStatuses?.some((status) => status.kind === preferred && !status.found)) return preferred;
+    const installed = agentStatuses.filter((status) => status.found);
+    return installed.find((status) => status.kind === settings.defaultAgent)?.kind ?? installed[0]?.kind ?? preferred;
+  };
+  const switchDraftAgent = (viewId: string, preferred: AgentKind) => {
     const conv = get().conversations[viewId];
-    if (!conv || conv.sessionKey || conv.sessionId || conv.agent === agent) return;
+    const agent = availableDraftAgent(preferred);
+    if (!conv || conv.sessionKey || conv.sessionId || conv.compareId || conv.agent === agent) return;
     const { settings, models } = get();
     const selection = resolveModelSelection(agent, models[agent], getDefaultModel(settings, agent), settings.defaultEfforts[agent]);
     patchConversation(viewId, {
@@ -588,7 +596,18 @@ export const useAppStore = create<AppState>((set, get) => {
       if (!get().activeViewId) await get().workOutsideProject(true);
       set({ ready: true });
       if (!isRemote) await openExternalProjects();
-      set({ agentStatuses: await hcode.invoke("agent:status") });
+      await get().refreshAgentStatuses();
+    },
+
+    async refreshAgentStatuses() {
+      const paths = get().settings.agentPaths;
+      const agentStatuses = await hcode.invoke("agent:status");
+      const currentPaths = get().settings.agentPaths;
+      if (AGENT_KINDS.some((kind) => paths[kind] !== currentPaths[kind])) return;
+      set({ agentStatuses });
+      for (const conv of Object.values(get().conversations)) {
+        switchDraftAgent(conv.viewId, conv.agent);
+      }
     },
 
     async refreshSessionList() { await refreshSessionList(get, set); },
@@ -718,7 +737,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
     newChat(projectPath, agentOverride) {
       const { settings, conversations, sessions } = get();
-      const agent = agentOverride ?? settings.projectDefaultAgents[projectPath] ?? lastProjectAgent(sessions[projectPath]) ?? settings.defaultAgent;
+      const preferred = agentOverride ?? settings.projectDefaultAgents[projectPath] ?? lastProjectAgent(sessions[projectPath]) ?? settings.defaultAgent;
+      const agent = availableDraftAgent(preferred);
       // 同一项目已有空白草稿时直接复用
       const draft = Object.values(conversations).find(
         (conv) => conv.projectPath === projectPath && !conv.sessionKey && !conv.sessionId && !conv.compareId,
@@ -1066,7 +1086,7 @@ export const useAppStore = create<AppState>((set, get) => {
           for (const agent of Object.keys(patch.agentPaths!) as AgentKind[]) { delete models[agent]; delete modelErrors[agent]; }
           return { models, modelErrors };
         });
-        set({ agentStatuses: await hcode.invoke("agent:status") });
+        await get().refreshAgentStatuses();
       }
     },
 
