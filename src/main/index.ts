@@ -211,7 +211,13 @@ async function bootstrap() {
   const claude = new ClaudeAgent(events, buildAgentEnv, () => store.settings.agentPaths.claude,
     () => [...store.projects.manual, conversationWorkspace.path]);
   const codex = new CodexAgent(events, buildAgentEnv, () => store.settings.agentPaths.codex, app.getVersion());
-  const agy = new AgyAgent(events, buildAgentEnv, () => store.settings.agentPaths.agy, join(app.getPath("userData"), "agy-collaboration"));
+  const agy = new AgyAgent(
+    events,
+    buildAgentEnv,
+    () => store.settings.agentPaths.agy,
+    join(app.getPath("userData"), "agy-collaboration"),
+    join(app.getPath("userData"), "agy-titles.json"),
+  );
   const agents = new AgentRegistry({
     claude,
     codex,

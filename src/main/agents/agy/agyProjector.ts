@@ -23,6 +23,7 @@ import {
   type UserAttachment,
 } from "../rowProjectorBase.js";
 import type { FileInput, ImageInput } from "../../../shared/types.js";
+import { extractFileReferences } from "../fileAttachments.js";
 
 /** transcript_full.jsonl 的一行。 */
 export interface AgyStep extends JsonRecord {
@@ -47,6 +48,12 @@ const UPLOAD_NOTE = /\n*The user has uploaded \d+ image\(s\):\n((?:- [^\n]+(?:\n
 /** USER_INPUT 的 content 里用户实际输入的部分（agy 会包上 USER_REQUEST 与附加元数据）。 */
 export function userRequestText(content: string): string {
   return /<USER_REQUEST>\n?([\s\S]*?)\n?<\/USER_REQUEST>/.exec(content)?.[1] ?? content;
+}
+
+/** 从 USER_INPUT 原文去掉图片上传说明与附件清单，用于提取首条消息标题。 */
+export function userInputTitleText(content: string): string {
+  const withoutUpload = userRequestText(content).replace(UPLOAD_NOTE, "");
+  return extractFileReferences(withoutUpload).text;
 }
 
 /** USER_INPUT → 用户原文 + 图片附件。 */

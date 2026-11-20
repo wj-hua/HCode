@@ -4,9 +4,12 @@ import {
   projectAgyHistory,
   projectAgyTool,
   uploadedImagesNote,
+  userInputTitleText,
   userRequestText,
   type AgyStep,
 } from "../agy/agyProjector.js";
+import { resolveAgySessionTitle } from "../agy/agyAgent.js";
+import { withFileReferences } from "../fileAttachments.js";
 import { kinds, ofKind, RowsMirror } from "./helpers.js";
 
 const T0 = Date.parse("2026-01-01T00:00:00.000Z");
@@ -16,6 +19,54 @@ describe("userRequestText", () => {
   it("取出 USER_REQUEST 包裹的原文", () => {
     expect(userRequestText("<USER_REQUEST>\n修 bug\n</USER_REQUEST>\n<ADDITIONAL_METADATA>…</ADDITIONAL_METADATA>")).toBe("修 bug");
     expect(userRequestText("plain")).toBe("plain");
+  });
+});
+
+describe("agy 会话标题提取", () => {
+  it("从首条用户消息去掉图片说明和附件清单", () => {
+    const withFilesAndImage = `<USER_REQUEST>\n${withFileReferences("分析日志", [{ path: "/tmp/a.log", name: "a.log", mimeType: "text/plain", size: 12 }])}${uploadedImagesNote(["/tmp/a.png"])}\n</USER_REQUEST>`;
+    expect(userInputTitleText(withFilesAndImage)).toBe("分析日志");
+
+    const imageOnly = `<USER_REQUEST>${uploadedImagesNote(["/tmp/a.png"])}\n</USER_REQUEST>`;
+    expect(userInputTitleText(imageOnly).trim()).toBe("");
+  });
+
+  it("优先展示中文首条消息，并保留 HCode / CLI 手动重命名", () => {
+    // agy 自动生成的英文标题同时写在 annotations 和摘要库时，展示首条用户消息
+    expect(resolveAgySessionTitle({
+      annotationTitle: "Buying Five Servers Wasteful",
+      summaryTitle: "Buying Five Servers Wasteful",
+      firstUserText: "我买了5台服务器是不是有点浪费了",
+    })).toBe("我买了5台服务器是不是有点浪费了");
+
+    // HCode 手动重命名最高优先
+    expect(resolveAgySessionTitle({
+      customTitle: "五台服务器讨论",
+      annotationTitle: "五台服务器讨论",
+      summaryTitle: "五台服务器讨论",
+      firstUserText: "我买了5台服务器是不是有点浪费了",
+    })).toBe("五台服务器讨论");
+
+    // agy CLI 改名（annotations 与非空摘要库不一致）保留改名结果
+    expect(resolveAgySessionTitle({
+      annotationTitle: "手动改名",
+      summaryTitle: "Auto English Title",
+      firstUserText: "原始消息",
+    })).toBe("手动改名");
+
+    // 首条无文字（如纯图片/附件）时回退到 agy 标题
+    expect(resolveAgySessionTitle({
+      annotationTitle: "Screenshot Analysis",
+      summaryTitle: "Screenshot Analysis",
+      firstUserText: "",
+    })).toBe("Screenshot Analysis");
+
+    // 摘要库尚未同步自动标题时仍优先展示用户首条消息
+    expect(resolveAgySessionTitle({
+      annotationTitle: "Fixing Warning",
+      summaryTitle: "",
+      firstUserText: "修复权限提示",
+    })).toBe("修复权限提示");
   });
 });
 

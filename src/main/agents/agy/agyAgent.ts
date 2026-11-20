@@ -2,12 +2,12 @@
 // - 历史：~/.gemini/antigravity-cli/brain/<会话>/.system_generated/logs/transcript_full.jsonl（每行一个 step）；
 //   会话的工作区只记在 sqlite 里（conversation_summaries.db 的 workspace_uris，或 conversations/<会话>.db 的
 //   trajectory_metadata_blob），用 Node 自带的 node:sqlite 只读打开；没有工作区的会话无法归到项目，不列出。
-// - 标题：annotations/<会话>.pbtxt 的 title（agy 改名写这里）> 摘要库 title > 第一条用户消息。
+// - 标题：HCode 手动重命名 > agy CLI 改名（annotations/<会话>.pbtxt 与摘要库不同）> 第一条用户消息 > agy 自动标题。
 // - 实时会话：每个 HCode 会话一个 `agy -p --input-format stream-json` 进程，见 agySession.ts。
 import { execFile } from "node:child_process";
-import { watch, type FSWatcher } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { open, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -29,7 +29,7 @@ import { agyQuota, quotaError } from "../quota.js";
 import { isRecord } from "../rowProjectorBase.js";
 import type { AgentEvents, AgentProvider, AgentSendParams } from "../types.js";
 import { skillName } from "../../util/skillFrontmatter.js";
-import { projectAgyHistory, projectAgySubagentHistory, userRequestText, type AgyStep } from "./agyProjector.js";
+import { projectAgyHistory, projectAgySubagentHistory, userInputTitleText, type AgyStep } from "./agyProjector.js";
 import { agyHistorySubagents, filterAgySubagentSessions, isAgyConversationId } from "./agySubagents.js";
 import type { NativeSubagent } from "../../../shared/types.js";
 import { GEMINI_MODEL_PREFIX } from "./agyResearchSession.js";
@@ -138,7 +138,7 @@ async function annotationTitle(id: string): Promise<string> {
   return match ? match[1]!.replace(/\\(.)/g, "$1") : "";
 }
 
-/** 读文件开头找第一条用户输入（只用于没有标题的会话）。 */
+/** 读文件开头找第一条用户输入（去掉图片上传说明与附件清单）。 */
 async function firstUserText(id: string): Promise<string> {
   const handle = await open(transcriptPath(id), "r").catch(() => null);
   if (!handle) return "";
@@ -148,7 +148,7 @@ async function firstUserText(id: string): Promise<string> {
       try {
         const step: unknown = JSON.parse(line);
         if (isRecord(step) && step.type === "USER_INPUT" && typeof step.content === "string") {
-          return userRequestText(step.content);
+          return userInputTitleText(step.content);
         }
       } catch {
         // 被截断的最后一行
@@ -191,6 +191,51 @@ function clip(title: string): string {
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
 
+/**
+ * 解析 agy 会话标题：
+ * 1. HCode 手动重命名；
+ * 2. agy CLI 手动改名（agy 会把自动英文标题同时写进 annotations 和摘要库，两者都有值且不同时才视为 CLI 改名）；
+ * 3. 第一条用户消息原文（保留中文）；
+ * 4. 兜底回退到 agy 自动标题（如首条仅含图片/附件）。
+ */
+export function resolveAgySessionTitle(sources: {
+  customTitle?: string;
+  annotationTitle?: string;
+  summaryTitle?: string;
+  firstUserText?: string;
+}): string {
+  const custom = sources.customTitle?.trim();
+  if (custom) return clip(custom);
+  const ann = sources.annotationTitle?.trim() ?? "";
+  const summary = sources.summaryTitle?.trim() ?? "";
+  const cliRenamed = ann && summary && ann !== summary ? ann : "";
+  const raw = cliRenamed || sources.firstUserText?.trim() || ann || summary;
+  return clip(raw) || "未命名会话";
+}
+
+function readCustomTitles(path: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!path) return map;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!isRecord(parsed)) return map;
+    for (const [id, title] of Object.entries(parsed)) {
+      if (typeof title === "string" && title.trim()) map.set(id, title.trim());
+    }
+  } catch {
+    // 尚未重命名过 agy 会话
+  }
+  return map;
+}
+
+function writeCustomTitles(path: string | undefined, titles: ReadonlyMap<string, string>) {
+  if (!path) return;
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(Object.fromEntries(titles), null, 2));
+  renameSync(tmp, path);
+}
+
 export class AgyAgent implements AgentProvider {
   readonly kind = "agy" as const;
   private readonly sessions = new Map<string, AgySession>();
@@ -200,6 +245,9 @@ export class AgyAgent implements AgentProvider {
   private modelVariants = new Map<string, Map<string, string>>();
   /** 会话 id → 工作区（不会变，找到后一直缓存；没找到的按 transcript 的 mtime 重试）。 */
   private readonly workspaces = new Map<string, { workspace?: string; mtimeMs: number }>();
+  /** 会话 id → 首条用户消息（非空后一直缓存；空值在 transcript 变更时重试）。 */
+  private readonly firstPrompts = new Map<string, { text: string; mtimeMs: number }>();
+  private readonly customTitles: Map<string, string>;
   private readonly childIndex = new Map<string, { mtimeMs: number; size: number; children: NativeSubagent[] }>();
   private cache: SessionSummary[] | null = null;
   private loading: Promise<SessionSummary[]> | null = null;
@@ -212,7 +260,10 @@ export class AgyAgent implements AgentProvider {
     private readonly getEnv: () => Record<string, string>,
     private readonly getPathOverride: () => string,
     private readonly researchRoot: string,
-  ) {}
+    private readonly customTitlesPath?: string,
+  ) {
+    this.customTitles = readCustomTitles(customTitlesPath);
+  }
 
   async getStatus(refresh = false): Promise<AgentStatus> {
     if (!this.status || refresh) this.status = await probeCli("agy", "agy", this.getEnv(), this.getPathOverride());
@@ -311,7 +362,12 @@ export class AgyAgent implements AgentProvider {
   private async scanSessions(): Promise<SessionSummary[]> {
     const ids = await readdir(BRAIN_DIR).catch(() => [] as string[]);
     const summaries = readSummaryDb();
-    const list = await Promise.all(ids.map((id) => this.summaryOf(id, summaries.get(id))));
+    const list: (SessionSummary | null)[] = [];
+    // 分批读取首条消息，避免会话数量较多时并发打开过多文件；命中缓存后不再读盘。
+    for (let offset = 0; offset < ids.length; offset += 20) {
+      const batch = await Promise.all(ids.slice(offset, offset + 20).map((id) => this.summaryOf(id, summaries.get(id))));
+      list.push(...batch);
+    }
     const childIds = new Set<string>();
     // 限制同时读取的 transcript 数量，已扫描且未改变的文件直接复用结果。
     for (let offset = 0; offset < ids.length; offset += 20) {
@@ -323,6 +379,7 @@ export class AgyAgent implements AgentProvider {
     }
     const existing = new Set(ids);
     for (const id of this.childIndex.keys()) if (!existing.has(id)) this.childIndex.delete(id);
+    for (const id of this.firstPrompts.keys()) if (!existing.has(id)) this.firstPrompts.delete(id);
     const valid = list.filter((item): item is SessionSummary => item !== null);
     return filterAgySubagentSessions(valid, childIds).sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -342,6 +399,14 @@ export class AgyAgent implements AgentProvider {
     }
   }
 
+  private async firstPrompt(id: string, mtimeMs: number): Promise<string> {
+    const cached = this.firstPrompts.get(id);
+    if (cached && (cached.text || cached.mtimeMs === mtimeMs)) return cached.text;
+    const text = await firstUserText(id);
+    this.firstPrompts.set(id, { text, mtimeMs });
+    return text;
+  }
+
   private async summaryOf(id: string, row: SummaryRow | undefined): Promise<SessionSummary | null> {
     const info = await stat(transcriptPath(id)).catch(() => null);
     if (!info) return null;
@@ -352,12 +417,21 @@ export class AgyAgent implements AgentProvider {
       this.workspaces.set(id, cached);
     }
     if (!cached.workspace) return null;
-    const title = (await annotationTitle(id)) || row?.title || (await firstUserText(id));
+    const customTitle = this.customTitles.get(id);
+    let title: string;
+    if (customTitle) {
+      title = resolveAgySessionTitle({ customTitle });
+    } else {
+      const ann = await annotationTitle(id);
+      const summaryTitle = row?.title ?? "";
+      const prompt = ann && summaryTitle && ann !== summaryTitle ? "" : await this.firstPrompt(id, info.mtimeMs);
+      title = resolveAgySessionTitle({ annotationTitle: ann, summaryTitle, firstUserText: prompt });
+    }
     return {
       id,
       agent: "agy",
       projectPath: cached.workspace,
-      title: clip(title) || "未命名会话",
+      title,
       createdAt: info.birthtimeMs || info.mtimeMs,
       updatedAt: info.mtimeMs,
     };
@@ -417,7 +491,7 @@ export class AgyAgent implements AgentProvider {
     }
   }
 
-  /** agy 的标题存在 annotations/<id>.pbtxt（/resume 里改名写这里）；摘要库里的标题一并更新。 */
+  /** agy 的标题存在 annotations/<id>.pbtxt（/resume 里改名写这里）；摘要库与 HCode 重命名记录一并更新。 */
   async renameSession(id: string, projectPath: string, title: string): Promise<void> {
     const clean = title.replace(/[\r\n]+/g, " ").trim();
     const line = `title:"${clean.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -425,6 +499,9 @@ export class AgyAgent implements AgentProvider {
     const current = await readFile(path, "utf8").catch(() => "");
     const next = /^title:.*$/m.test(current) ? current.replace(/^title:.*$/m, line) : `${line}\n${current}`;
     await writeFile(path, next);
+    if (clean) this.customTitles.set(id, clean);
+    else this.customTitles.delete(id);
+    writeCustomTitles(this.customTitlesPath, this.customTitles);
     try {
       const db = new DatabaseSync(SUMMARIES_DB);
       try {
@@ -460,6 +537,8 @@ export class AgyAgent implements AgentProvider {
       // 摘要库不存在或结构变了
     }
     this.workspaces.delete(id);
+    this.firstPrompts.delete(id);
+    if (this.customTitles.delete(id)) writeCustomTitles(this.customTitlesPath, this.customTitles);
     this.invalidate([projectPath]);
   }
 
